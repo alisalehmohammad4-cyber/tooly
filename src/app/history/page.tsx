@@ -5,8 +5,8 @@ import HistoryView from '@/components/modules/HistoryView';
 export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
-  title: 'Tooly - Audit History & Movement Ledger',
-  description: 'Chronological custody movement ledger, checkout tracking, and warehouse transfer audit log.',
+  title: 'Tooly | יומן תנועות וביקורת',
+  description: 'יומן מעקב תנועות ציוד, היסטוריית ניפוקים, החזרות וחתימות עובדים.',
 };
 
 export default async function HistoryPage() {

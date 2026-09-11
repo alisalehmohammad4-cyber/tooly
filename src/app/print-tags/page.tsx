@@ -2,8 +2,8 @@ import type { Metadata } from 'next';
 import PrintTagsView from '@/components/modules/PrintTagsView';
 
 export const metadata: Metadata = {
-  title: 'Tooly - Print Asset Tags',
-  description: 'Generate and print high-contrast industrial QR asset tags for Tooly inventory.',
+  title: 'Tooly | הדפסת תגיות ברקוד',
+  description: 'הפקה והדפסה של גיליונות מדבקות ברקוד QR לכלים וציוד.',
 };
 
 export default function PrintTagsPage() {

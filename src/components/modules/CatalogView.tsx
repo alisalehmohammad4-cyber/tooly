@@ -8,8 +8,8 @@ import {
   Scissors,
   Hammer,
   Ruler,
-  ChevronRight,
-  ArrowLeft,
+  ChevronLeft,
+  ArrowRight,
   Building2,
   Search,
   CheckCircle2,
@@ -116,9 +116,9 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
                   setSearchQuery('');
                 }}
                 className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600 hover:bg-blue-100 active:scale-95 transition-all cursor-pointer"
-                title="Back to Categories"
+                title="חזרה לקטגוריות"
               >
-                <ArrowLeft className="w-5 h-5" />
+                <ArrowRight className="w-5 h-5" />
               </button>
             ) : (
               <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white font-black text-xl shadow-md shadow-blue-500/25">
@@ -127,10 +127,10 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
             )}
             <div>
               <div className="text-xs uppercase tracking-wider text-blue-600 font-bold">
-                {activeCategory ? 'Category Inventory' : 'Asset Hub'}
+                {activeCategory ? 'מלאי קטגוריה' : 'מרכז הציוד והמלאי'}
               </div>
               <h1 className="text-base font-black text-blue-950 leading-tight">
-                {activeCategory ? activeCategory.name.toUpperCase() : 'TOOLS'}
+                {activeCategory ? activeCategory.name : 'קטלוג כלים'}
               </h1>
             </div>
           </div>
@@ -140,26 +140,26 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
             <Link
               href="/"
               className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-50/80 hover:bg-blue-100 text-blue-800 border border-blue-200 text-xs font-bold transition-all active:scale-95 shadow-sm"
-              title="Scanner"
+              title="סורק מהיר"
             >
               <Scan className="w-3.5 h-3.5 text-blue-600" />
-              <span>Scan</span>
+              <span>סורק</span>
             </Link>
             <Link
               href="/history"
               className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-50/80 hover:bg-blue-100 text-blue-800 border border-blue-200 text-xs font-bold transition-all active:scale-95 shadow-sm"
-              title="Audit Ledger"
+              title="יומן תנועות"
             >
               <HistoryIcon className="w-3.5 h-3.5 text-blue-600" />
-              <span>History</span>
+              <span>יומן</span>
             </Link>
             <Link
               href="/print-tags"
               className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-50/80 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-bold transition-all active:scale-95 shadow-sm"
-              title="Print Tags"
+              title="הדפסת תגיות"
             >
               <Printer className="w-3.5 h-3.5 text-blue-600" />
-              <span>Print</span>
+              <span>תגיות</span>
             </Link>
           </div>
         </div>
@@ -167,14 +167,14 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
         {/* Warehouse Filter Bar */}
         <div className="mt-3 max-w-lg mx-auto">
           <div className="relative">
-            <Building2 className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-600 pointer-events-none" />
+            <Building2 className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-600 pointer-events-none" />
             <select
               value={selectedWarehouseId}
               onChange={(e) => setSelectedWarehouseId(e.target.value)}
-              className="w-full min-h-[50px] bg-white text-blue-950 font-bold text-sm pl-10 pr-9 py-2.5 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none appearance-none cursor-pointer transition-colors shadow-sm"
+              className="w-full min-h-[50px] bg-white text-blue-950 font-bold text-sm pr-10 pl-9 py-2.5 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none appearance-none cursor-pointer transition-colors shadow-sm"
             >
               <option value="all" className="bg-white text-blue-950 font-bold">
-                All Facilities ({filteredAssets.length} Total Tools)
+                כל האתרים והמחסנים ({filteredAssets.length} כלים סה&quot;כ)
               </option>
               {initialData.warehouses.map((wh) => (
                 <option key={wh.id} value={wh.id} className="bg-white text-blue-950 font-bold">
@@ -183,7 +183,7 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
                 </option>
               ))}
             </select>
-            <div className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-blue-600 text-xs">
+            <div className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-blue-600 text-xs">
               ▼
             </div>
           </div>
@@ -197,11 +197,11 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
           <div className="space-y-3">
             <div className="flex items-center justify-between px-1">
               <span className="text-xs uppercase font-extrabold tracking-wider text-blue-900">
-                Equipment Categories
+                קטגוריות ציוד וכלי עבודה
               </span>
               <span className="text-xs font-bold text-blue-700 flex items-center gap-1">
                 <Sparkles className="w-3.5 h-3.5 text-blue-600" />
-                {filteredAssets.length} active units
+                {filteredAssets.length} כלים במלאי
               </span>
             </div>
 
@@ -211,7 +211,7 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
                   key={cat.id}
                   type="button"
                   onClick={() => setActiveCategoryId(cat.id)}
-                  className="w-full min-h-[76px] bg-white hover:bg-blue-50/50 text-blue-950 rounded-2xl p-4 flex items-center justify-between border-2 border-blue-100 shadow-sm hover:shadow-md transition-all active:scale-[0.99] group cursor-pointer text-left"
+                  className="w-full min-h-[76px] bg-white hover:bg-blue-50/50 text-blue-950 rounded-2xl p-4 flex items-center justify-between border-2 border-blue-100 shadow-sm hover:shadow-md transition-all active:scale-[0.99] group cursor-pointer text-right"
                 >
                   <div className="flex items-center gap-4">
                     {/* Category Icon Capsule */}
@@ -224,7 +224,7 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
                         {cat.name}
                       </h2>
                       <div className="text-xs font-bold text-blue-600/80 mt-0.5">
-                        {cat.toolCount} {cat.toolCount === 1 ? 'Unit' : 'Units'} Registered
+                        {cat.toolCount} {cat.toolCount === 1 ? 'כלי רשום' : 'כלים רשומים'}
                       </div>
                     </div>
                   </div>
@@ -234,7 +234,7 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
                       {cat.toolCount}
                     </span>
                     <div className="w-8 h-8 rounded-full bg-blue-50 group-hover:bg-blue-600 group-hover:text-white flex items-center justify-center transition-colors">
-                      <ChevronRight className="w-4 h-4 stroke-[3] text-blue-600 group-hover:text-white" />
+                      <ChevronLeft className="w-4 h-4 stroke-[3] text-blue-600 group-hover:text-white" />
                     </div>
                   </div>
                 </button>
@@ -246,21 +246,21 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
           <div className="space-y-4">
             {/* Search filter within active category */}
             <div className="relative">
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-600" />
+              <Search className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-600 pointer-events-none" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder={`Search ${activeCategory.name} tools, serials, brands...`}
-                className="w-full min-h-[50px] bg-white text-blue-950 font-bold text-sm pl-10 pr-4 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none placeholder:text-slate-400 shadow-sm"
+                placeholder={`חיפוש לפי שם כלי, מותג, ברקוד או עובד...`}
+                className="w-full min-h-[50px] bg-white text-blue-950 font-bold text-sm pr-10 pl-14 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none placeholder:text-slate-400 shadow-sm"
               />
               {searchQuery && (
                 <button
                   type="button"
                   onClick={() => setSearchQuery('')}
-                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-blue-600 hover:text-blue-800"
+                  className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-blue-600 hover:text-blue-800 cursor-pointer"
                 >
-                  Clear
+                  נקה
                 </button>
               )}
             </div>
@@ -270,19 +270,19 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
               <div className="p-10 rounded-2xl border-2 border-dashed border-blue-200 bg-white text-center space-y-3 shadow-sm">
                 <Wrench className="w-10 h-10 text-blue-400 mx-auto" />
                 <div className="text-sm font-bold text-blue-950">
-                  No tools found in this view
+                  לא נמצאו כלים בתצוגה זו
                 </div>
                 <p className="text-xs text-slate-500 max-w-xs mx-auto">
                   {searchQuery
-                    ? 'No assets match your search query.'
-                    : 'No tools currently registered for this category in the selected warehouse.'}
+                    ? 'אין כלים התואמים את מונח החיפוש.'
+                    : 'אין כלים רשומים כרגע בקטגוריה זו במחסן הנבחר.'}
                 </p>
                 <Link
                   href="/"
                   className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 text-white font-black text-xs uppercase tracking-wider shadow-md hover:bg-blue-700 active:scale-95 transition-all"
                 >
                   <Scan className="w-3.5 h-3.5" />
-                  <span>Onboard New Tool</span>
+                  <span>רישום כלי חדש</span>
                 </Link>
               </div>
             ) : (
@@ -307,8 +307,8 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
                             {asset.toolName}
                           </h3>
                           {asset.modelNumber && (
-                            <div className="text-xs font-mono text-slate-500 mt-0.5">
-                              Model: {asset.modelNumber}
+                            <div className="text-xs font-mono text-slate-500 mt-0.5" dir="ltr">
+                              דגם: {asset.modelNumber}
                             </div>
                           )}
                         </div>
@@ -318,19 +318,19 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
                           {isAvailable && (
                             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black bg-emerald-50 text-emerald-700 border border-emerald-300">
                               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                              Available
+                              זמין במלאי
                             </span>
                           )}
                           {isCheckedOut && (
                             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black bg-amber-50 text-amber-800 border border-amber-300">
                               <UserCheck className="w-3.5 h-3.5 text-amber-600" />
-                              Checked Out
+                              בשימוש
                             </span>
                           )}
                           {isMaintenance && (
                             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black bg-red-50 text-red-700 border border-red-300">
                               <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
-                              Maintenance
+                              בתיקון / בדיקה
                             </span>
                           )}
                         </div>
@@ -340,13 +340,13 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
                       {isCheckedOut && asset.currentAssignedWorker && (
                         <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-xs font-bold text-amber-900 flex items-center gap-2">
                           <UserCheck className="w-4 h-4 text-amber-600 shrink-0" />
-                          <span>In custody of: <strong>{asset.currentAssignedWorker}</strong></span>
+                          <span>נמצא בשימוש אצל: <strong>{asset.currentAssignedWorker}</strong></span>
                         </div>
                       )}
 
                       {/* Footer: QR Serial Code & Warehouse Location */}
                       <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs font-bold">
-                        <div className="flex items-center gap-1.5 text-blue-900 font-mono">
+                        <div className="flex items-center gap-1.5 text-blue-900 font-mono" dir="ltr">
                           <QrCode className="w-3.5 h-3.5 text-blue-600 shrink-0" />
                           <span className="bg-blue-50 text-blue-950 px-2 py-0.5 rounded border border-blue-200">
                             {asset.qrCode}
@@ -369,7 +369,7 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
 
       {/* 3. UNIVERSAL BOTTOM NAVIGATION BAR (FIXED) */}
       <nav
-        aria-label="Bottom Navigation"
+        aria-label="ניווט ראשי"
         className="fixed bottom-0 left-0 right-0 z-50 bg-white/95 backdrop-blur-lg border-t border-blue-100 px-3 py-2 shadow-lg shadow-blue-950/5"
       >
         <div className="max-w-lg mx-auto grid grid-cols-4 gap-1 sm:gap-2">
@@ -379,7 +379,7 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
             className="min-h-[54px] rounded-xl flex flex-col items-center justify-center text-slate-500 hover:text-blue-700 active:bg-blue-50/50 transition-colors group"
           >
             <Scan className="w-5 h-5 group-hover:text-blue-600 transition-colors" />
-            <span className="text-[10px] sm:text-[11px] font-bold mt-1">Scanner</span>
+            <span className="text-[10px] sm:text-[11px] font-bold mt-1">סורק מהיר / ניפוק</span>
           </Link>
 
           {/* 2. Tools Catalog (ACTIVE) */}
@@ -388,7 +388,7 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
             className="min-h-[54px] rounded-xl bg-blue-50 border border-blue-200 flex flex-col items-center justify-center text-blue-700 font-black shadow-sm"
           >
             <Layers className="w-5 h-5 text-blue-600" />
-            <span className="text-[10px] sm:text-[11px] font-black mt-1">Catalog</span>
+            <span className="text-[10px] sm:text-[11px] font-black mt-1">קטלוג ומלאי</span>
           </Link>
 
           {/* 3. History */}
@@ -397,7 +397,7 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
             className="min-h-[54px] rounded-xl flex flex-col items-center justify-center text-slate-500 hover:text-blue-700 active:bg-blue-50/50 transition-colors group"
           >
             <HistoryIcon className="w-5 h-5 group-hover:text-blue-600 transition-colors" />
-            <span className="text-[10px] sm:text-[11px] font-bold mt-1">History</span>
+            <span className="text-[10px] sm:text-[11px] font-bold mt-1">יומן תנועות</span>
           </Link>
 
           {/* 4. Print QR Tags */}
@@ -406,7 +406,7 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
             className="min-h-[54px] rounded-xl flex flex-col items-center justify-center text-slate-500 hover:text-blue-700 active:bg-blue-50/50 transition-colors group"
           >
             <Printer className="w-5 h-5 group-hover:text-blue-600 transition-colors" />
-            <span className="text-[10px] sm:text-[11px] font-bold mt-1">Print Tags</span>
+            <span className="text-[10px] sm:text-[11px] font-bold mt-1">הדפסת תגיות</span>
           </Link>
         </div>
       </nav>

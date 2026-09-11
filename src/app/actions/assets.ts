@@ -234,17 +234,17 @@ export interface CatalogDataPayload {
 }
 
 const FALLBACK_CATALOG_WAREHOUSES = [
-  { id: 'wh-main-01', name: 'Central Depot - Bay A', code: 'CDB-01' },
-  { id: 'wh-site-02', name: 'Site Container Bravo', code: 'SCB-02' },
-  { id: 'wh-van-03', name: 'Mobile Service Van 05', code: 'MSV-05' },
+  { id: 'wh-main-01', name: "מחסן מרכזי - אגף א'", code: 'CDB-01' },
+  { id: 'wh-site-02', name: "אתר בנייה - מכולה ב'", code: 'SCB-02' },
+  { id: 'wh-van-03', name: "רכב שירות נייד 05", code: 'MSV-05' },
 ];
 
 const FALLBACK_CATALOG_CATEGORIES_BASE = [
-  { id: 'cat-weld', name: 'Welding', slug: 'welding', icon: 'flame' },
-  { id: 'cat-lift', name: 'Lifting', slug: 'lifting', icon: 'crane' },
-  { id: 'cat-cut', name: 'Cutting', slug: 'cutting', icon: 'scissors' },
-  { id: 'cat-drill', name: 'Drilling', slug: 'drilling', icon: 'drill' },
-  { id: 'cat-meas', name: 'Measurement', slug: 'measurement', icon: 'ruler' },
+  { id: 'cat-weld', name: 'ריתוך והלחמה', slug: 'welding', icon: 'flame' },
+  { id: 'cat-lift', name: 'הרמה ושינוע', slug: 'lifting', icon: 'crane' },
+  { id: 'cat-cut', name: 'חיתוך וניסור', slug: 'cutting', icon: 'scissors' },
+  { id: 'cat-drill', name: 'קידוח והברגה', slug: 'drilling', icon: 'drill' },
+  { id: 'cat-meas', name: 'מדידה ופילוס', slug: 'measurement', icon: 'ruler' },
 ];
 
 const FALLBACK_ASSETS: CatalogAssetItem[] = [

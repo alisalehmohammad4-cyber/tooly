@@ -1,6 +1,14 @@
 import type { Metadata, Viewport } from "next";
+import { Heebo } from "next/font/google";
 import "./globals.css";
 import { PwaInstallBanner } from "@/components/modules/PwaInstallBanner";
+
+const heebo = Heebo({
+  subsets: ["hebrew", "latin"],
+  weight: ["300", "400", "500", "600", "700", "800", "900"],
+  variable: "--font-heebo",
+  display: "swap",
+});
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -12,9 +20,9 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "Tooly - Industrial Tool & Asset Management",
+  title: "Tooly | ניהול ציוד וכלי עבודה",
   description:
-    "Enterprise QR barcode asset management, quick field onboarding, custody check-in/out, and multi-warehouse inventory.",
+    "מערכת מתקדמת לניהול ציוד וכלי עבודה, ניפוק מרוכז, בדיקת אביזרים, סריקת ברקוד QR ויומן תנועות.",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
@@ -28,8 +36,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="bg-white text-blue-950">
-      <body className="min-h-screen bg-white text-blue-950 antialiased selection:bg-blue-600 selection:text-white">
+    <html lang="he" dir="rtl" className={`${heebo.variable} ${heebo.className} bg-white text-blue-950`}>
+      <body className="min-h-screen bg-white text-blue-950 antialiased selection:bg-blue-600 selection:text-white font-sans">
         {children}
         <PwaInstallBanner />
       </body>

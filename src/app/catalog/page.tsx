@@ -5,8 +5,8 @@ import CatalogView from '@/components/modules/CatalogView';
 export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
-  title: 'Tooly - Tools Catalog',
-  description: 'Interactive equipment categories and multi-warehouse asset inventory hub.',
+  title: 'Tooly | קטלוג ומלאי כלים',
+  description: 'קטלוג כלי עבודה, סינון לפי קטגוריות ומעקב מלאי לפי מחסנים ואתרים.',
 };
 
 export default async function CatalogPage() {

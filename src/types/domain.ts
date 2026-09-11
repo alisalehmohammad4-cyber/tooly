@@ -48,4 +48,10 @@ export interface Asset {
   status: AssetStatus;
   condition: AssetCondition;
   version: number;
+  expectedReturnDate?: string | null;
+  accessories?: {
+    batteriesCount: number;
+    hasCharger: boolean;
+    hasCase: boolean;
+  } | null;
 }

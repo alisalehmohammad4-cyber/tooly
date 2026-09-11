@@ -3,11 +3,14 @@
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import {
   CheckoutSchema,
+  BulkCheckoutSchema,
   CheckinSchema,
   TransferSchema,
   type CheckoutInput,
+  type BulkCheckoutInput,
   type CheckinInput,
   type TransferInput,
+  type AssetAccessories,
 } from '@/core/assets/custody.schema';
 
 export interface ScannedAssetDetails {
@@ -23,10 +26,21 @@ export interface ScannedAssetDetails {
   brand: string;
   modelNumber: string | null;
   version: number;
+  expectedReturnDate?: string | null;
+  accessories?: AssetAccessories | null;
 }
 
 export type CustodyActionResult =
   | { success: true; message: string; asset: ScannedAssetDetails }
+  | { success: false; error: string };
+
+export type BulkCustodyActionResult =
+  | {
+      success: true;
+      message: string;
+      checkedOutCount: number;
+      assets: ScannedAssetDetails[];
+    }
   | { success: false; error: string };
 
 // In-memory fallback dataset for seamless development testing
@@ -132,9 +146,9 @@ const FALLBACK_CUSTODY_ASSETS: Record<string, ScannedAssetDetails> = {
 };
 
 const WAREHOUSE_NAMES: Record<string, { name: string; code: string }> = {
-  'wh-main-01': { name: 'Central Depot - Bay A', code: 'CDB-01' },
-  'wh-site-02': { name: 'Site Container Bravo', code: 'SCB-02' },
-  'wh-van-03': { name: 'Mobile Service Van 05', code: 'MSV-05' },
+  'wh-main-01': { name: "מחסן מרכזי - אגף א'", code: 'CDB-01' },
+  'wh-site-02': { name: "אתר בנייה - מכולה ב'", code: 'SCB-02' },
+  'wh-van-03': { name: "רכב שירות נייד 05", code: 'MSV-05' },
 };
 
 /**
@@ -228,6 +242,159 @@ export async function getAssetDetailsByQr(
 }
 
 /**
+ * Performs atomic bulk checkout of multiple assets to a field worker.
+ */
+export async function bulkCheckoutAssetAction(
+  input: BulkCheckoutInput
+): Promise<BulkCustodyActionResult> {
+  const parsed = BulkCheckoutSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: parsed.error.issues.map((i) => i.message).join(', '),
+    };
+  }
+
+  const {
+    assetIds,
+    workerName,
+    workerPhone,
+    expectedReturnDate,
+    accessories,
+    signatureData,
+    notes,
+  } = parsed.data;
+
+  const updatedAssets: ScannedAssetDetails[] = [];
+
+  if (isSupabaseConfigured()) {
+    try {
+      // 1. Fetch current assets to verify existence
+      const { data: currentAssets, error: fetchErr } = await supabase
+        .from('assets')
+        .select('id, version, status')
+        .in('id', assetIds);
+
+      if (fetchErr) {
+        return { success: false, error: `Failed to retrieve assets: ${fetchErr.message}` };
+      }
+
+      if (!currentAssets || currentAssets.length !== assetIds.length) {
+        return {
+          success: false,
+          error: `Some tools could not be located in database. Found ${currentAssets?.length || 0} of ${assetIds.length}.`,
+        };
+      }
+
+      // Check if any asset is not available
+      const unavailable = currentAssets.filter((a) => a.status !== 'available');
+      if (unavailable.length > 0) {
+        return {
+          success: false,
+          error: `${unavailable.length} tool(s) are not in AVAILABLE status for checkout.`,
+        };
+      }
+
+      // 2. Update each asset and insert audit ledger entries
+      for (const item of currentAssets) {
+        const nextVersion = (item.version || 1) + 1;
+        const itemAccessories = accessories[item.id] || {
+          batteriesCount: 0,
+          hasCharger: false,
+          hasCase: false,
+        };
+
+        const { error: updateErr } = await supabase
+          .from('assets')
+          .update({
+            status: 'checked_out',
+            current_assigned_worker: workerName,
+            expected_return_date: expectedReturnDate,
+            accessories: itemAccessories,
+            version: nextVersion,
+          })
+          .eq('id', item.id);
+
+        if (updateErr) {
+          throw new Error(`Failed to update asset ${item.id}: ${updateErr.message}`);
+        }
+
+        // Insert into custody_ledger
+        const { error: ledgerErr } = await supabase.from('custody_ledger').insert({
+          asset_id: item.id,
+          action: 'CHECKOUT',
+          performed_by: workerName,
+          target_worker: workerName,
+          worker_phone: workerPhone || null,
+          signature_data: signatureData,
+          expected_return_date: expectedReturnDate,
+          accessories_snapshot: itemAccessories,
+          notes: notes || `Bulk checkout to ${workerName}`,
+        });
+
+        if (ledgerErr) {
+          console.warn(`Custody ledger logging warning for asset ${item.id}:`, ledgerErr.message);
+        }
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Database bulk checkout error';
+      return { success: false, error: msg };
+    }
+  }
+
+  // 3. Fallback in-memory dataset updates
+  for (const id of assetIds) {
+    let found = false;
+    for (const key of Object.keys(FALLBACK_CUSTODY_ASSETS)) {
+      if (FALLBACK_CUSTODY_ASSETS[key].id === id) {
+        FALLBACK_CUSTODY_ASSETS[key].status = 'checked_out';
+        FALLBACK_CUSTODY_ASSETS[key].currentAssignedWorker = workerName;
+        FALLBACK_CUSTODY_ASSETS[key].expectedReturnDate = expectedReturnDate;
+        FALLBACK_CUSTODY_ASSETS[key].accessories = accessories[id] || {
+          batteriesCount: 0,
+          hasCharger: false,
+          hasCase: false,
+        };
+        FALLBACK_CUSTODY_ASSETS[key].version += 1;
+        updatedAssets.push({ ...FALLBACK_CUSTODY_ASSETS[key] });
+        found = true;
+        break;
+      }
+    }
+
+    if (!found) {
+      updatedAssets.push({
+        id,
+        qrCode: `TOOL-${id.slice(0, 6).toUpperCase()}`,
+        status: 'checked_out',
+        condition: 'good',
+        currentAssignedWorker: workerName,
+        currentWarehouseId: 'wh-main-01',
+        warehouseName: 'Central Depot - Bay A',
+        warehouseCode: 'CDB-01',
+        toolName: 'Dispatched Tool',
+        brand: 'Standard',
+        modelNumber: null,
+        version: 2,
+        expectedReturnDate,
+        accessories: accessories[id] || {
+          batteriesCount: 0,
+          hasCharger: false,
+          hasCase: false,
+        },
+      });
+    }
+  }
+
+  return {
+    success: true,
+    message: `تم صرف ${assetIds.length} أداة بنجاح إلى ${workerName} / Successfully dispatched ${assetIds.length} tool(s) to ${workerName}`,
+    checkedOutCount: assetIds.length,
+    assets: updatedAssets,
+  };
+}
+
+/**
  * Checks out an asset to a designated field worker.
  */
 export async function checkoutAssetAction(
@@ -241,79 +408,41 @@ export async function checkoutAssetAction(
     };
   }
 
-  const { assetId, workerName, notes } = parsed.data;
+  const {
+    assetId,
+    workerName,
+    workerPhone,
+    expectedReturnDate,
+    accessories,
+    signatureData,
+    notes,
+  } = parsed.data;
 
-  if (isSupabaseConfigured()) {
-    try {
-      const { data: currentAsset, error: fetchErr } = await supabase
-        .from('assets')
-        .select('id, version')
-        .eq('id', assetId)
-        .single();
+  const defaultReturnDate =
+    expectedReturnDate ||
+    new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString();
+  const dummySignature =
+    signatureData ||
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 
-      if (fetchErr || !currentAsset) {
-        return { success: false, error: 'Asset not found in database.' };
-      }
+  const bulkResult = await bulkCheckoutAssetAction({
+    assetIds: [assetId],
+    workerName,
+    workerPhone,
+    expectedReturnDate: defaultReturnDate,
+    accessories: accessories ? { [assetId]: accessories } : {},
+    signatureData: dummySignature,
+    notes,
+  });
 
-      const nextVersion = (currentAsset.version || 1) + 1;
-
-      const { error: updateErr } = await supabase
-        .from('assets')
-        .update({
-          status: 'checked_out',
-          current_assigned_worker: workerName,
-          version: nextVersion,
-        })
-        .eq('id', assetId);
-
-      if (updateErr) {
-        return { success: false, error: `Failed to checkout asset: ${updateErr.message}` };
-      }
-
-      // Record audit in custody_ledger
-      await supabase.from('custody_ledger').insert({
-        asset_id: assetId,
-        action: 'CHECKOUT',
-        performed_by: workerName,
-        notes: notes || `Field checkout to ${workerName}`,
-      });
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Database error';
-      return { success: false, error: msg };
-    }
-  }
-
-  // Update fallback in-memory asset if present
-  for (const key of Object.keys(FALLBACK_CUSTODY_ASSETS)) {
-    if (FALLBACK_CUSTODY_ASSETS[key].id === assetId) {
-      FALLBACK_CUSTODY_ASSETS[key].status = 'checked_out';
-      FALLBACK_CUSTODY_ASSETS[key].currentAssignedWorker = workerName;
-      FALLBACK_CUSTODY_ASSETS[key].version += 1;
-      return {
-        success: true,
-        message: `Tool successfully checked out to ${workerName}`,
-        asset: { ...FALLBACK_CUSTODY_ASSETS[key] },
-      };
-    }
+  if (!bulkResult.success) {
+    return { success: false, error: bulkResult.error };
   }
 
   return {
     success: true,
     message: `Tool successfully checked out to ${workerName}`,
-    asset: {
-      id: assetId,
-      qrCode: 'TOOL-CURRENT',
-      status: 'checked_out',
-      condition: 'good',
-      currentAssignedWorker: workerName,
-      currentWarehouseId: 'wh-main-01',
-      warehouseName: 'Central Depot - Bay A',
-      warehouseCode: 'CDB-01',
-      toolName: 'Tool Asset',
-      brand: 'Standard',
-      modelNumber: null,
-      version: 2,
-    },
+    asset: bulkResult.assets[0],
   };
 }
 

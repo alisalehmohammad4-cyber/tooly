@@ -26,6 +26,13 @@ export interface AuditHistoryRecord {
   warehouseCode: string;
   notes: string | null;
   createdAt: string;
+  expectedReturnDate?: string | null;
+  signatureData?: string | null;
+  accessoriesSnapshot?: {
+    batteriesCount: number;
+    hasCharger: boolean;
+    hasCase: boolean;
+  } | null;
 }
 
 export interface AuditHistoryFilters {
@@ -41,9 +48,9 @@ export interface AuditHistoryPayload {
 }
 
 const FALLBACK_WAREHOUSES = [
-  { id: 'wh-main-01', name: 'Central Depot - Bay A', code: 'CDB-01' },
-  { id: 'wh-site-02', name: 'Site Container Bravo', code: 'SCB-02' },
-  { id: 'wh-van-03', name: 'Mobile Service Van 05', code: 'MSV-05' },
+  { id: 'wh-main-01', name: "מחסן מרכזי - אגף א'", code: 'CDB-01' },
+  { id: 'wh-site-02', name: "אתר בנייה - מכולה ב'", code: 'SCB-02' },
+  { id: 'wh-van-03', name: "רכב שירות נייד 05", code: 'MSV-05' },
 ];
 
 const FALLBACK_HISTORY_ENTRIES: AuditHistoryRecord[] = [

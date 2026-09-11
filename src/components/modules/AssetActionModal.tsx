@@ -10,7 +10,7 @@ import {
   QrCode,
   AlertTriangle,
   Loader2,
-  ArrowRight,
+  ArrowLeft,
 } from 'lucide-react';
 import type { Warehouse, AssetCondition } from '@/types/domain';
 import {
@@ -26,6 +26,8 @@ interface AssetActionModalProps {
   isOpen: boolean;
   onClose: () => void;
   onActionComplete: (message: string, updatedAsset: ScannedAssetDetails) => void;
+  onAddToCart?: (asset: ScannedAssetDetails) => void;
+  isInCart?: boolean;
 }
 
 type ModalTab = 'checkout' | 'checkin' | 'transfer';
@@ -36,6 +38,8 @@ export default function AssetActionModal({
   isOpen,
   onClose,
   onActionComplete,
+  onAddToCart,
+  isInCart = false,
 }: AssetActionModalProps) {
   // Tab Mode: auto-select Check-In if already checked_out, otherwise Check-Out
   const initialTab: ModalTab =
@@ -66,7 +70,7 @@ export default function AssetActionModal({
   const handleCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!workerName.trim()) {
-      setActionError('Worker name is required for custody assignment.');
+      setActionError('שם העובד נדרש לניפוק הכלי.');
       return;
     }
 
@@ -119,7 +123,7 @@ export default function AssetActionModal({
   const handleTransfer = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!targetWarehouseId) {
-      setActionError('Please select a target facility.');
+      setActionError('אנא בחר אתר יעד להעברה.');
       return;
     }
 
@@ -156,8 +160,8 @@ export default function AssetActionModal({
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close dialog"
-            className="absolute top-4 right-4 w-9 h-9 rounded-full bg-white hover:bg-blue-50 text-blue-700 border border-blue-200 flex items-center justify-center active:scale-95 transition-all cursor-pointer shadow-sm"
+            aria-label="סגור חלון"
+            className="absolute top-4 left-4 w-9 h-9 rounded-full bg-white hover:bg-blue-50 text-blue-700 border border-blue-200 flex items-center justify-center active:scale-95 transition-all cursor-pointer shadow-sm"
           >
             <X className="w-5 h-5" />
           </button>
@@ -166,7 +170,7 @@ export default function AssetActionModal({
             <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200">
               {asset.brand}
             </span>
-            <div className="flex items-center gap-1 text-xs font-mono text-blue-900">
+            <div className="flex items-center gap-1 text-xs font-mono text-blue-900" dir="ltr">
               <QrCode className="w-3.5 h-3.5 text-blue-600" />
               <span className="font-bold">{asset.qrCode}</span>
             </div>
@@ -174,14 +178,14 @@ export default function AssetActionModal({
 
           <h2
             id="asset-modal-title"
-            className="text-lg font-black text-blue-950 leading-tight pr-8"
+            className="text-lg font-black text-blue-950 leading-tight pl-8"
           >
             {asset.toolName}
           </h2>
 
           {asset.modelNumber && (
-            <div className="text-xs font-mono text-slate-500 mt-0.5">
-              Model: {asset.modelNumber}
+            <div className="text-xs font-mono text-slate-500 mt-0.5" dir="ltr">
+              דגם: {asset.modelNumber}
             </div>
           )}
 
@@ -196,19 +200,19 @@ export default function AssetActionModal({
               {isAvailable && (
                 <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-black bg-emerald-50 text-emerald-700 border border-emerald-300">
                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                  Available
+                  זמין במלאי
                 </span>
               )}
               {isCheckedOut && (
                 <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-black bg-amber-50 text-amber-800 border border-amber-300">
                   <UserCheck className="w-3.5 h-3.5 text-amber-600" />
-                  Custody: {asset.currentAssignedWorker}
+                  בשימוש: {asset.currentAssignedWorker}
                 </span>
               )}
               {isMaintenance && (
                 <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-black bg-red-50 text-red-700 border border-red-300">
                   <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
-                  Maintenance
+                  בתיקון / בדיקה
                 </span>
               )}
             </div>
@@ -230,7 +234,7 @@ export default function AssetActionModal({
             }`}
           >
             <UserCheck className="w-4 h-4" />
-            <span>صرف (Check Out)</span>
+            <span>ניפוק כלי</span>
           </button>
 
           <button
@@ -246,7 +250,7 @@ export default function AssetActionModal({
             }`}
           >
             <CheckCircle2 className="w-4 h-4" />
-            <span>إرجاع (Check In)</span>
+            <span>החזרה למחסן</span>
           </button>
 
           <button
@@ -262,7 +266,7 @@ export default function AssetActionModal({
             }`}
           >
             <Truck className="w-4 h-4" />
-            <span>نقل (Transfer)</span>
+            <span>העברה לאתר</span>
           </button>
         </div>
 
@@ -278,42 +282,70 @@ export default function AssetActionModal({
           {/* TAB A: CHECK-OUT FORM */}
           {activeTab === 'checkout' && (
             <form onSubmit={handleCheckout} className="space-y-4">
+              {onAddToCart && isAvailable && (
+                <div className="p-3 bg-blue-50/80 rounded-2xl border border-blue-200 flex items-center justify-between gap-2 shadow-sm">
+                  <div>
+                    <div className="text-xs font-black text-blue-950">
+                      {isInCart ? 'הכלי כבר נמצא בסל הניפוק' : 'מעוניין בניפוק מרוכז?'}
+                    </div>
+                    <div className="text-[11px] text-blue-700 font-medium mt-0.5">
+                      {isInCart
+                        ? 'כלי זה כבר צורף לסל הניפוק הנוכחי'
+                        : 'הוסף כלי זה לסל הניפוק כדי לנפק מספר כלים לעובד בחתימה דיגיטלית מרוכזת'}
+                    </div>
+                  </div>
+                  {!isInCart && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onAddToCart(asset);
+                        onClose();
+                      }}
+                      className="px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black shrink-0 flex items-center gap-1 shadow-sm cursor-pointer transition-all active:scale-95"
+                    >
+                      <span>+ הוסף לסל</span>
+                    </button>
+                  )}
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
-                  Worker Name (اسم المستلم) <span className="text-blue-600">*</span>
+                  שם העובד המקבל <span className="text-blue-600">*</span>
                 </label>
                 <input
                   type="text"
                   required
                   value={workerName}
                   onChange={(e) => setWorkerName(e.target.value)}
-                  placeholder="e.g. Ahmad Al-Sayed"
+                  placeholder="לדוגמה: ישראל ישראלי"
                   className="w-full min-h-[56px] bg-white text-blue-950 font-bold text-base px-4 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none placeholder:text-slate-400 shadow-sm"
                 />
               </div>
 
               <div>
                 <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
-                  Worker Phone / Badge ID (رقم الجوال أو الهوية)
+                  טלפון נייד / תעודת זהות (אופציונלי)
                 </label>
                 <input
                   type="text"
                   value={workerPhone}
                   onChange={(e) => setWorkerPhone(e.target.value)}
-                  placeholder="e.g. +966 50 123 4567"
+                  placeholder="לדוגמה: 050-1234567"
                   className="w-full min-h-[56px] bg-white text-blue-950 font-bold text-base px-4 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none placeholder:text-slate-400 shadow-sm"
+                  dir="ltr"
                 />
               </div>
 
               <div>
                 <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
-                  Notes (ملاحظات الصرف)
+                  הערות ניפוק
                 </label>
                 <input
                   type="text"
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
-                  placeholder="e.g. Assigned to Site B Project"
+                  placeholder="לדוגמה: לצורך עבודות קידוח בקומה 3"
                   className="w-full min-h-[50px] bg-white text-blue-950 font-medium text-sm px-4 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none placeholder:text-slate-400 shadow-sm"
                 />
               </div>
@@ -328,7 +360,7 @@ export default function AssetActionModal({
                 ) : (
                   <>
                     <UserCheck className="w-6 h-6 stroke-[2.5]" />
-                    <span>Confirm Check-Out (تأكيد صرف العهدة)</span>
+                    <span>אשר ניפוק כלי (הוצאה לשימוש)</span>
                   </>
                 )}
               </button>
@@ -340,33 +372,33 @@ export default function AssetActionModal({
             <form onSubmit={handleCheckin} className="space-y-4">
               <div>
                 <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-2">
-                  Return Condition (حالة المعدة عند الإرجاع)
+                  מצב הכלי בעת ההחזרה
                 </label>
                 <div className="grid grid-cols-2 gap-2">
                   {(
                     [
                       {
                         value: 'good',
-                        label: 'سليمة وجاهزة للعمل',
-                        sub: 'Good / Ready',
+                        label: 'תקין ומוכן לעבודה',
+                        sub: 'טוב / תקין',
                         color: 'emerald',
                       },
                       {
                         value: 'excellent',
-                        label: 'ممتازة كالجديدة',
-                        sub: 'Excellent',
+                        label: 'מצב מעולה כחדש',
+                        sub: 'מעולה',
                         color: 'emerald',
                       },
                       {
                         value: 'needs_repair',
-                        label: 'تحتاج صيانة / فحص',
-                        sub: 'Needs Repair',
+                        label: 'דורש תיקון / בדיקה',
+                        sub: 'בדיקה נדרשת',
                         color: 'red',
                       },
                       {
                         value: 'retired',
-                        label: 'تالفة / خارج الخدمة',
-                        sub: 'Retired',
+                        label: 'מושבת / יצא משימוש',
+                        sub: 'מושבת',
                         color: 'zinc',
                       },
                     ] as const
@@ -399,13 +431,13 @@ export default function AssetActionModal({
 
               <div>
                 <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
-                  Inspection Notes (ملاحظات الفحص)
+                  הערות בדיקה והחזרה
                 </label>
                 <input
                   type="text"
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
-                  placeholder="e.g. Cleaned and tested in good order"
+                  placeholder="לדוגמה: נוקה ונבדק, כל החלקים קיימים"
                   className="w-full min-h-[50px] bg-white text-blue-950 font-medium text-sm px-4 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none placeholder:text-slate-400 shadow-sm"
                 />
               </div>
@@ -420,7 +452,7 @@ export default function AssetActionModal({
                 ) : (
                   <>
                     <CheckCircle2 className="w-6 h-6 stroke-[2.5]" />
-                    <span>Confirm Check-In (تأكيد إرجاع العهدة)</span>
+                    <span>אשר החזרת כלי למחסן</span>
                   </>
                 )}
               </button>
@@ -432,7 +464,7 @@ export default function AssetActionModal({
             <form onSubmit={handleTransfer} className="space-y-4">
               <div>
                 <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
-                  Target Facility / Warehouse (الموقع الجديد)
+                  אתר / מחסן יעד
                 </label>
                 <div className="relative">
                   <select
@@ -443,11 +475,11 @@ export default function AssetActionModal({
                     {warehouses.map((wh) => (
                       <option key={wh.id} value={wh.id} className="bg-white text-blue-950">
                         {wh.code ? `[${wh.code}] ` : ''}
-                        {wh.name} {wh.id === asset.currentWarehouseId ? '(Current)' : ''}
+                        {wh.name} {wh.id === asset.currentWarehouseId ? '(נוכחי)' : ''}
                       </option>
                     ))}
                   </select>
-                  <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-blue-600 text-sm">
+                  <div className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none text-blue-600 text-sm">
                     ▼
                   </div>
                 </div>
@@ -455,13 +487,13 @@ export default function AssetActionModal({
 
               <div>
                 <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
-                  Transfer Dispatch Notes (ملاحظات النقل)
+                  הערות העברה ושינוע
                 </label>
                 <input
                   type="text"
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
-                  placeholder="e.g. Transferred with crew van for Site B"
+                  placeholder="לדוגמה: נשלח ברכב שירות לאתר המרכזי"
                   className="w-full min-h-[50px] bg-white text-blue-950 font-medium text-sm px-4 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none placeholder:text-slate-400 shadow-sm"
                 />
               </div>
@@ -476,8 +508,8 @@ export default function AssetActionModal({
                 ) : (
                   <>
                     <Truck className="w-6 h-6 stroke-[2.5]" />
-                    <span>Confirm Transfer (تأكيد نقل المعدة)</span>
-                    <ArrowRight className="w-5 h-5 stroke-[2.5]" />
+                    <span>אשר העברה לאתר היעד</span>
+                    <ArrowLeft className="w-5 h-5 stroke-[2.5]" />
                   </>
                 )}
               </button>
