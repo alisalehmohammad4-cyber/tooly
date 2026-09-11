@@ -16,11 +16,13 @@ import {
   Briefcase,
   ShieldCheck,
   Layers,
+  Lock,
 } from 'lucide-react';
 import type { ScannedAssetDetails } from '@/app/actions/custody';
 import { bulkCheckoutAssetAction } from '@/app/actions/custody';
 import type { AssetAccessories } from '@/core/assets/custody.schema';
 import SignaturePadModal from '@/components/common/SignaturePadModal';
+import { getCurrentGpsCoordinates } from '@/lib/geo';
 
 interface BulkCheckoutModalProps {
   isOpen: boolean;
@@ -116,6 +118,16 @@ export default function BulkCheckoutModal({
     return customDate ? new Date(customDate).toISOString() : getEndOfShiftDate();
   }, [preset, customDate]);
 
+  // Identify any locked or safety-overdue tools in the cart
+  const lockedItems = useMemo(() => {
+    const now = new Date().getTime();
+    return items.filter(
+      (item) =>
+        item.isLocked ||
+        (item.safetyInspectionDue && new Date(item.safetyInspectionDue).getTime() < now)
+    );
+  }, [items]);
+
   if (!isOpen) return null;
 
   // Accessory change handler
@@ -146,6 +158,13 @@ export default function BulkCheckoutModal({
       return;
     }
 
+    if (lockedItems.length > 0) {
+      setFormError(
+        `קיימים ${lockedItems.length} כלים בסל שנעולים מנהלתית או שפג תוקף בדיקת הבטיחות שלהם. יש להסירם מהסל כדי להמשיך בניפוק.`
+      );
+      return;
+    }
+
     if (!workerName.trim() || workerName.trim().length < 2) {
       setFormError('שם העובד המקבל נדרש (לפחות 2 תווים).');
       return;
@@ -159,6 +178,9 @@ export default function BulkCheckoutModal({
     setIsSubmitting(true);
 
     try {
+      // Fetch silent GPS coordinates
+      const gps = await getCurrentGpsCoordinates();
+
       // Build complete accessories map with defaults for any untouched tools
       const compiledAccessories: Record<string, AssetAccessories> = {};
       items.forEach((tool) => {
@@ -177,6 +199,7 @@ export default function BulkCheckoutModal({
         accessories: compiledAccessories,
         signatureData,
         notes: notes.trim() || undefined,
+        gps,
       });
 
       setIsSubmitting(false);
@@ -281,6 +304,25 @@ export default function BulkCheckoutModal({
                                 {tool.qrCode}
                               </span>
                             </div>
+                            {(tool.isLocked ||
+                              (tool.safetyInspectionDue &&
+                                new Date(tool.safetyInspectionDue).getTime() < new Date().getTime())) && (
+                              <div className="mt-1 flex flex-wrap gap-1">
+                                {tool.isLocked && (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded bg-red-100 text-red-800 border border-red-300">
+                                    <Lock className="w-3 h-3 text-red-600" />
+                                    נעול מנהלתית
+                                  </span>
+                                )}
+                                {tool.safetyInspectionDue &&
+                                  new Date(tool.safetyInspectionDue).getTime() < new Date().getTime() && (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-300">
+                                      <AlertCircle className="w-3 h-3 text-rose-600" />
+                                      פג תוקף בטיחות
+                                    </span>
+                                  )}
+                              </div>
+                            )}
                           </div>
 
                           <button

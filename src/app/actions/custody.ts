@@ -12,6 +12,7 @@ import {
   type TransferInput,
   type AssetAccessories,
 } from '@/core/assets/custody.schema';
+import type { AssetReservation } from '@/types/domain';
 
 export interface ScannedAssetDetails {
   id: string;
@@ -28,6 +29,15 @@ export interface ScannedAssetDetails {
   version: number;
   expectedReturnDate?: string | null;
   accessories?: AssetAccessories | null;
+  // Phase 13 Fleet Control & Safety Lockout fields:
+  purchaseDate?: string;
+  purchaseCost?: number; // ILS / ₪
+  warrantyUntil?: string;
+  photoUrl?: string;
+  safetyInspectionDue?: string; // ISO date
+  isLocked?: boolean;
+  lockReason?: string;
+  reservation?: AssetReservation | null;
 }
 
 export type CustodyActionResult =
@@ -43,7 +53,7 @@ export type BulkCustodyActionResult =
     }
   | { success: false; error: string };
 
-// In-memory fallback dataset for seamless development testing
+// In-memory fallback dataset enriched with Phase 13 fleet & lockout properties
 const FALLBACK_CUSTODY_ASSETS: Record<string, ScannedAssetDetails> = {
   'TOOL-WLD-001': {
     id: 'ast-wld-01',
@@ -52,26 +62,36 @@ const FALLBACK_CUSTODY_ASSETS: Record<string, ScannedAssetDetails> = {
     condition: 'excellent',
     currentAssignedWorker: null,
     currentWarehouseId: 'wh-main-01',
-    warehouseName: 'Central Depot - Bay A',
+    warehouseName: "מחסן מרכזי - אגף א'",
     warehouseCode: 'CDB-01',
-    toolName: 'Multimatic 220 AC/DC TIG/MIG Welder',
+    toolName: 'רתכת משולבת Multimatic 220 AC/DC TIG/MIG',
     brand: 'Miller',
     modelNumber: '907757',
     version: 1,
+    purchaseDate: '2024-01-15',
+    purchaseCost: 8450,
+    warrantyUntil: '2026-01-15',
+    safetyInspectionDue: '2026-12-31', // Valid
+    isLocked: false,
   },
   'TOOL-WLD-002': {
     id: 'ast-wld-02',
     qrCode: 'TOOL-WLD-002',
     status: 'checked_out',
     condition: 'good',
-    currentAssignedWorker: 'Carlos Mendez',
+    currentAssignedWorker: 'ישראל ישראלי',
     currentWarehouseId: 'wh-site-02',
-    warehouseName: 'Site Container Bravo',
+    warehouseName: "אתר בנייה - מכולה ב'",
     warehouseCode: 'SCB-02',
-    toolName: 'Power MIG 210 MP Multi-Process',
+    toolName: 'רתכת Power MIG 210 MP Multi-Process',
     brand: 'Lincoln Electric',
     modelNumber: 'K3963-1',
     version: 2,
+    purchaseDate: '2023-05-10',
+    purchaseCost: 6200,
+    warrantyUntil: '2025-05-10',
+    safetyInspectionDue: '2026-11-20', // Valid
+    isLocked: false,
   },
   'TOOL-WLD-003': {
     id: 'ast-wld-03',
@@ -80,12 +100,17 @@ const FALLBACK_CUSTODY_ASSETS: Record<string, ScannedAssetDetails> = {
     condition: 'needs_repair',
     currentAssignedWorker: null,
     currentWarehouseId: 'wh-main-01',
-    warehouseName: 'Central Depot - Bay A',
+    warehouseName: "מחסן מרכזי - אגף א'",
     warehouseCode: 'CDB-01',
-    toolName: 'Rebel EMP 205ic Multi-Material System',
+    toolName: 'רתכת Rebel EMP 205ic Multi-Material',
     brand: 'ESAB',
     modelNumber: '0558102553',
     version: 1,
+    purchaseDate: '2023-09-01',
+    purchaseCost: 9100,
+    warrantyUntil: '2025-09-01',
+    safetyInspectionDue: '2026-03-01',
+    isLocked: false,
   },
   'TOOL-CUT-020': {
     id: 'ast-cut-01',
@@ -94,26 +119,36 @@ const FALLBACK_CUSTODY_ASSETS: Record<string, ScannedAssetDetails> = {
     condition: 'excellent',
     currentAssignedWorker: null,
     currentWarehouseId: 'wh-main-01',
-    warehouseName: 'Central Depot - Bay A',
+    warehouseName: "מחסן מרכזי - אגף א'",
     warehouseCode: 'CDB-01',
-    toolName: '14-Inch Portable Cut-Off Saw 15A',
+    toolName: 'מסור שורף נייד 14 אינץ 15A',
     brand: 'Makita',
     modelNumber: 'LW1401',
     version: 1,
+    purchaseDate: '2023-11-05',
+    purchaseCost: 2850,
+    warrantyUntil: '2025-11-05',
+    safetyInspectionDue: '2026-01-10', // EXPIRED! Demonstrates overdue inspection lockout
+    isLocked: false,
   },
   'TOOL-CUT-021': {
     id: 'ast-cut-02',
     qrCode: 'TOOL-CUT-021',
     status: 'checked_out',
     condition: 'good',
-    currentAssignedWorker: 'Sami Al-Hassan',
+    currentAssignedWorker: 'סמי אל-חסן',
     currentWarehouseId: 'wh-van-03',
-    warehouseName: 'Mobile Service Van 05',
+    warehouseName: 'רכב שירות נייד 05',
     warehouseCode: 'MSV-05',
-    toolName: '20V MAX Deep Cut Cordless Band Saw',
+    toolName: 'מסור סרט נטען 20V MAX Deep Cut',
     brand: 'DeWalt',
     modelNumber: 'DCS374B',
     version: 3,
+    purchaseDate: '2024-02-14',
+    purchaseCost: 3400,
+    warrantyUntil: '2027-02-14',
+    safetyInspectionDue: '2026-12-15',
+    isLocked: false,
   },
   'TOOL-DRL-030': {
     id: 'ast-drl-01',
@@ -122,12 +157,22 @@ const FALLBACK_CUSTODY_ASSETS: Record<string, ScannedAssetDetails> = {
     condition: 'excellent',
     currentAssignedWorker: null,
     currentWarehouseId: 'wh-main-01',
-    warehouseName: 'Central Depot - Bay A',
+    warehouseName: "מחסן מרכזי - אגף א'",
     warehouseCode: 'CDB-01',
-    toolName: 'TE 70-ATC/AVR Heavy Rotary Hammer SDS-Max',
+    toolName: 'פטישון חציבה כבד TE 70-ATC/AVR SDS-Max',
     brand: 'Hilti',
     modelNumber: 'TE-70-ATC',
     version: 1,
+    purchaseDate: '2024-04-10',
+    purchaseCost: 5600,
+    warrantyUntil: '2026-04-10',
+    safetyInspectionDue: '2026-10-01',
+    isLocked: false,
+    reservation: {
+      projectName: 'מגדל שלום - שלב ב׳',
+      reservedForDate: '2026-10-15',
+      reservedBy: 'יוסי כהן',
+    },
   },
   'TOOL-MEA-040': {
     id: 'ast-mea-01',
@@ -136,12 +181,18 @@ const FALLBACK_CUSTODY_ASSETS: Record<string, ScannedAssetDetails> = {
     condition: 'excellent',
     currentAssignedWorker: null,
     currentWarehouseId: 'wh-main-01',
-    warehouseName: 'Central Depot - Bay A',
+    warehouseName: "מחסן מרכזי - אגף א'",
     warehouseCode: 'CDB-01',
-    toolName: 'Rugby 610 Self-Leveling Rotary Laser System',
+    toolName: 'מערכת פילוס לייזר רוטטיבי Rugby 610',
     brand: 'Leica Geosystems',
     modelNumber: '6005983',
     version: 1,
+    purchaseDate: '2023-08-20',
+    purchaseCost: 7900,
+    warrantyUntil: '2025-08-20',
+    safetyInspectionDue: '2026-11-01',
+    isLocked: true, // LOCKED! Demonstrates administrative lockout
+    lockReason: 'נעול מנהלית - נדרש כיול לייזר שנתי במעבדה מוסמכת לפני חזרה לשימוש',
   },
 };
 
@@ -150,6 +201,31 @@ const WAREHOUSE_NAMES: Record<string, { name: string; code: string }> = {
   'wh-site-02': { name: "אתר בנייה - מכולה ב'", code: 'SCB-02' },
   'wh-van-03': { name: "רכב שירות נייד 05", code: 'MSV-05' },
 };
+
+/**
+ * Checks whether an asset is restricted by administrative lock or overdue safety inspection.
+ */
+function checkToolLockout(asset: ScannedAssetDetails): { allowed: boolean; error?: string } {
+  if (asset.isLocked) {
+    return {
+      allowed: false,
+      error: `הכלי נעול מנהלית: ${asset.lockReason || 'נעול להוצאה מהמחסן'}`,
+    };
+  }
+
+  if (asset.safetyInspectionDue) {
+    const dueTime = new Date(asset.safetyInspectionDue).getTime();
+    if (!isNaN(dueTime) && dueTime < Date.now()) {
+      const formatted = new Date(asset.safetyInspectionDue).toLocaleDateString('he-IL');
+      return {
+        allowed: false,
+        error: `⚠️ הכלי נעול לשימוש! בדיקת בטיחות תקופתית פגת תוקף (${formatted})`,
+      };
+    }
+  }
+
+  return { allowed: true };
+}
 
 /**
  * Retrieves full asset details by QR Code, joining tool model and warehouse.
@@ -172,6 +248,13 @@ export async function getAssetDetailsByQr(
           current_assigned_worker,
           current_warehouse_id,
           version,
+          purchase_date,
+          purchase_cost,
+          warranty_until,
+          safety_inspection_due,
+          is_locked,
+          lock_reason,
+          reservation,
           tool_models:tool_model_id (
             id,
             name,
@@ -196,6 +279,13 @@ export async function getAssetDetailsByQr(
           current_assigned_worker: string | null;
           current_warehouse_id: string;
           version: number;
+          purchase_date?: string;
+          purchase_cost?: number;
+          warranty_until?: string;
+          safety_inspection_due?: string;
+          is_locked?: boolean;
+          lock_reason?: string;
+          reservation?: AssetReservation | null;
           tool_models: {
             id: string;
             name: string;
@@ -223,6 +313,13 @@ export async function getAssetDetailsByQr(
           brand: row.tool_models?.brand || 'Standard',
           modelNumber: row.tool_models?.model_number || null,
           version: row.version || 1,
+          purchaseDate: row.purchase_date,
+          purchaseCost: row.purchase_cost,
+          warrantyUntil: row.warranty_until,
+          safetyInspectionDue: row.safety_inspection_due,
+          isLocked: row.is_locked,
+          lockReason: row.lock_reason,
+          reservation: row.reservation,
         };
       }
     } catch (err) {
@@ -243,6 +340,7 @@ export async function getAssetDetailsByQr(
 
 /**
  * Performs atomic bulk checkout of multiple assets to a field worker.
+ * Strictly enforces administrative lockout and safety inspection validity.
  */
 export async function bulkCheckoutAssetAction(
   input: BulkCheckoutInput
@@ -262,17 +360,38 @@ export async function bulkCheckoutAssetAction(
     expectedReturnDate,
     accessories,
     signatureData,
+    gps,
     notes,
   } = parsed.data;
+
+  // 1. Pre-validation: Enforce Administrative Lockout & Periodic Safety Inspection Due
+  for (const id of assetIds) {
+    let targetAsset: ScannedAssetDetails | null = null;
+    for (const key of Object.keys(FALLBACK_CUSTODY_ASSETS)) {
+      if (FALLBACK_CUSTODY_ASSETS[key].id === id) {
+        targetAsset = FALLBACK_CUSTODY_ASSETS[key];
+        break;
+      }
+    }
+    if (targetAsset) {
+      const lockCheck = checkToolLockout(targetAsset);
+      if (!lockCheck.allowed) {
+        return {
+          success: false,
+          error: `${targetAsset.toolName} (${targetAsset.qrCode}): ${lockCheck.error}`,
+        };
+      }
+    }
+  }
 
   const updatedAssets: ScannedAssetDetails[] = [];
 
   if (isSupabaseConfigured()) {
     try {
-      // 1. Fetch current assets to verify existence
+      // 1. Fetch current assets to verify existence and lockout
       const { data: currentAssets, error: fetchErr } = await supabase
         .from('assets')
-        .select('id, version, status')
+        .select('id, version, status, is_locked, lock_reason, safety_inspection_due')
         .in('id', assetIds);
 
       if (fetchErr) {
@@ -286,12 +405,32 @@ export async function bulkCheckoutAssetAction(
         };
       }
 
+      // Check lockouts in DB
+      for (const item of currentAssets) {
+        if (item.is_locked) {
+          return {
+            success: false,
+            error: `הכלי נעול מנהלית: ${item.lock_reason || 'נעול להוצאה מהמחסן'}`,
+          };
+        }
+        if (item.safety_inspection_due) {
+          const dueTime = new Date(item.safety_inspection_due).getTime();
+          if (!isNaN(dueTime) && dueTime < Date.now()) {
+            const formatted = new Date(item.safety_inspection_due).toLocaleDateString('he-IL');
+            return {
+              success: false,
+              error: `⚠️ הכלי נעול לשימוש! בדיקת בטיחות תקופתית פגת תוקף (${formatted})`,
+            };
+          }
+        }
+      }
+
       // Check if any asset is not available
       const unavailable = currentAssets.filter((a) => a.status !== 'available');
       if (unavailable.length > 0) {
         return {
           success: false,
-          error: `${unavailable.length} tool(s) are not in AVAILABLE status for checkout.`,
+          error: `${unavailable.length} כלי/כלים אינם זמינים במלאי לניפוק.`,
         };
       }
 
@@ -329,6 +468,8 @@ export async function bulkCheckoutAssetAction(
           signature_data: signatureData,
           expected_return_date: expectedReturnDate,
           accessories_snapshot: itemAccessories,
+          gps_lat: gps?.lat ?? null,
+          gps_lng: gps?.lng ?? null,
           notes: notes || `Bulk checkout to ${workerName}`,
         });
 
@@ -370,9 +511,9 @@ export async function bulkCheckoutAssetAction(
         condition: 'good',
         currentAssignedWorker: workerName,
         currentWarehouseId: 'wh-main-01',
-        warehouseName: 'Central Depot - Bay A',
+        warehouseName: "מחסן מרכזי - אגף א'",
         warehouseCode: 'CDB-01',
-        toolName: 'Dispatched Tool',
+        toolName: 'כלי שנופק',
         brand: 'Standard',
         modelNumber: null,
         version: 2,
@@ -388,7 +529,7 @@ export async function bulkCheckoutAssetAction(
 
   return {
     success: true,
-    message: `تم صرف ${assetIds.length} أداة بنجاح إلى ${workerName} / Successfully dispatched ${assetIds.length} tool(s) to ${workerName}`,
+    message: `נופקו בהצלחה ${assetIds.length} כלים לעובד ${workerName}`,
     checkedOutCount: assetIds.length,
     assets: updatedAssets,
   };
@@ -415,6 +556,7 @@ export async function checkoutAssetAction(
     expectedReturnDate,
     accessories,
     signatureData,
+    gps,
     notes,
   } = parsed.data;
 
@@ -432,6 +574,7 @@ export async function checkoutAssetAction(
     expectedReturnDate: defaultReturnDate,
     accessories: accessories ? { [assetId]: accessories } : {},
     signatureData: dummySignature,
+    gps,
     notes,
   });
 
@@ -441,13 +584,14 @@ export async function checkoutAssetAction(
 
   return {
     success: true,
-    message: `Tool successfully checked out to ${workerName}`,
+    message: `הכלי נופק בהצלחה לעובד ${workerName}`,
     asset: bulkResult.assets[0],
   };
 }
 
 /**
  * Checks in an asset back to the warehouse inventory.
+ * Supports damage incident reports and GPS coordinate logging.
  */
 export async function checkinAssetAction(
   input: CheckinInput
@@ -460,8 +604,11 @@ export async function checkinAssetAction(
     };
   }
 
-  const { assetId, condition, notes } = parsed.data;
-  const newStatus = condition === 'needs_repair' ? 'maintenance' : 'available';
+  const { assetId, condition, damageReport, gps, notes } = parsed.data;
+  
+  // If damage is reported, enforce maintenance status
+  const isDamaged = damageReport?.isDamaged || condition === 'needs_repair' || condition === 'retired';
+  const newStatus = isDamaged ? 'maintenance' : 'available';
 
   if (isSupabaseConfigured()) {
     try {
@@ -497,6 +644,9 @@ export async function checkinAssetAction(
         action: 'CHECKIN',
         performed_by: 'Field Agent',
         notes: notes || `Field check-in (Condition: ${condition})`,
+        damage_report: damageReport || null,
+        gps_lat: gps?.lat ?? null,
+        gps_lng: gps?.lng ?? null,
       });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Database error';
@@ -515,8 +665,8 @@ export async function checkinAssetAction(
         success: true,
         message:
           newStatus === 'maintenance'
-            ? 'Tool checked in and routed to MAINTENANCE.'
-            : 'Tool checked in and marked AVAILABLE in inventory.',
+            ? 'הכלי הוחזר והועבר ישירות לסטטוס בבדיקה / תיקון.'
+            : 'הכלי הוחזר למחסן וסומן כזמין במלאי.',
         asset: { ...FALLBACK_CUSTODY_ASSETS[key] },
       };
     }
@@ -524,17 +674,17 @@ export async function checkinAssetAction(
 
   return {
     success: true,
-    message: 'Tool checked in successfully.',
+    message: 'הכלי הוחזר למחסן בהצלחה.',
     asset: {
       id: assetId,
-      qrCode: 'TOOL-CURRENT',
+      qrCode: 'TOOL-CHECKIN',
       status: newStatus,
       condition,
       currentAssignedWorker: null,
       currentWarehouseId: 'wh-main-01',
-      warehouseName: 'Central Depot - Bay A',
+      warehouseName: "מחסן מרכזי - אגף א'",
       warehouseCode: 'CDB-01',
-      toolName: 'Tool Asset',
+      toolName: 'כלי שהוחזר',
       brand: 'Standard',
       modelNumber: null,
       version: 2,
@@ -543,7 +693,7 @@ export async function checkinAssetAction(
 }
 
 /**
- * Transfers an asset to a different warehouse or mobile unit.
+ * Transfers an asset to a different warehouse/site container.
  */
 export async function transferAssetAction(
   input: TransferInput
@@ -556,7 +706,7 @@ export async function transferAssetAction(
     };
   }
 
-  const { assetId, targetWarehouseId, notes } = parsed.data;
+  const { assetId, targetWarehouseId, gps, notes } = parsed.data;
 
   if (isSupabaseConfigured()) {
     try {
@@ -589,6 +739,8 @@ export async function transferAssetAction(
         asset_id: assetId,
         action: 'TRANSFER_RECEIVE',
         performed_by: 'Field Agent',
+        gps_lat: gps?.lat ?? null,
+        gps_lng: gps?.lng ?? null,
         notes: notes || `Transferred to warehouse ${targetWarehouseId}`,
       });
     } catch (err: unknown) {
@@ -611,7 +763,7 @@ export async function transferAssetAction(
       FALLBACK_CUSTODY_ASSETS[key].version += 1;
       return {
         success: true,
-        message: `Tool location updated to ${targetWhMeta.name}`,
+        message: `מיקום הכלי עודכן בהצלחה ל-${targetWhMeta.name}`,
         asset: { ...FALLBACK_CUSTODY_ASSETS[key] },
       };
     }
@@ -619,7 +771,7 @@ export async function transferAssetAction(
 
   return {
     success: true,
-    message: `Tool location updated to ${targetWhMeta.name}`,
+    message: `מיקום הכלי עודכן ל-${targetWhMeta.name}`,
     asset: {
       id: assetId,
       qrCode: 'TOOL-CURRENT',
@@ -630,6 +782,287 @@ export async function transferAssetAction(
       warehouseName: targetWhMeta.name,
       warehouseCode: targetWhMeta.code,
       toolName: 'Tool Asset',
+      brand: 'Standard',
+      modelNumber: null,
+      version: 2,
+    },
+  };
+}
+
+/**
+ * Toggles administrative lock / quarantine on an asset.
+ */
+export async function toggleAssetLockAction(
+  assetId: string,
+  isLocked: boolean,
+  lockReason?: string
+): Promise<CustodyActionResult> {
+  if (isSupabaseConfigured()) {
+    try {
+      await supabase
+        .from('assets')
+        .update({
+          is_locked: isLocked,
+          lock_reason: isLocked ? lockReason || 'נעול מנהלית' : null,
+        })
+        .eq('id', assetId);
+
+      await supabase.from('custody_ledger').insert({
+        asset_id: assetId,
+        action: 'LOCK_STATUS',
+        performed_by: 'מנהל מערכת',
+        notes: isLocked ? `נעילת כלי: ${lockReason || 'ללא סיבה'}` : 'שחרור נעילת כלי',
+      });
+    } catch (err) {
+      console.warn('Database error in toggleAssetLockAction:', err);
+    }
+  }
+
+  // Update fallback asset
+  for (const key of Object.keys(FALLBACK_CUSTODY_ASSETS)) {
+    if (FALLBACK_CUSTODY_ASSETS[key].id === assetId) {
+      FALLBACK_CUSTODY_ASSETS[key].isLocked = isLocked;
+      FALLBACK_CUSTODY_ASSETS[key].lockReason = isLocked ? lockReason || 'נעול מנהלית' : undefined;
+      return {
+        success: true,
+        message: isLocked
+          ? 'הכלי ננעל בהצלחה להוצאה מהמחסן.'
+          : 'נעילת הכלי שוחררה בהצלחה - הכלי זמין להוצאה.',
+        asset: { ...FALLBACK_CUSTODY_ASSETS[key] },
+      };
+    }
+  }
+
+  return { success: false, error: 'הכלי לא נמצא במערכת.' };
+}
+
+/**
+ * Renews the periodic safety inspection due date of an asset.
+ */
+export async function renewSafetyInspectionAction(
+  assetId: string,
+  nextDueDate: string,
+  inspectedBy?: string
+): Promise<CustodyActionResult> {
+  if (isSupabaseConfigured()) {
+    try {
+      await supabase
+        .from('assets')
+        .update({
+          safety_inspection_due: nextDueDate,
+        })
+        .eq('id', assetId);
+
+      await supabase.from('custody_ledger').insert({
+        asset_id: assetId,
+        action: 'SAFETY_INSPECTION',
+        performed_by: inspectedBy || 'בודק בטיחות מוסמך',
+        notes: `חידוש בדיקת בטיחות תקופתית עד ${nextDueDate}`,
+      });
+    } catch (err) {
+      console.warn('Database error in renewSafetyInspectionAction:', err);
+    }
+  }
+
+  // Update fallback asset
+  for (const key of Object.keys(FALLBACK_CUSTODY_ASSETS)) {
+    if (FALLBACK_CUSTODY_ASSETS[key].id === assetId) {
+      FALLBACK_CUSTODY_ASSETS[key].safetyInspectionDue = nextDueDate;
+      return {
+        success: true,
+        message: `תוקף בדיקת הבטיחות חודש בהצלחה עד ${new Date(nextDueDate).toLocaleDateString('he-IL')}.`,
+        asset: { ...FALLBACK_CUSTODY_ASSETS[key] },
+      };
+    }
+  }
+
+  return { success: false, error: 'הכלי לא נמצא במערכת.' };
+}
+
+/**
+ * Assigns or cancels a project advance reservation on an asset.
+ */
+export async function reserveAssetAction(
+  assetId: string,
+  reservation: AssetReservation | null
+): Promise<CustodyActionResult> {
+  if (isSupabaseConfigured()) {
+    try {
+      await supabase
+        .from('assets')
+        .update({
+          reservation,
+        })
+        .eq('id', assetId);
+
+      await supabase.from('custody_ledger').insert({
+        asset_id: assetId,
+        action: 'CHECKIN',
+        performed_by: reservation?.reservedBy || 'מנהל פרויקט',
+        notes: reservation
+          ? `שריון כלי לפרויקט ${reservation.projectName} לתאריך ${reservation.reservedForDate}`
+          : 'ביטול שריון כלי',
+      });
+    } catch (err) {
+      console.warn('Database error in reserveAssetAction:', err);
+    }
+  }
+
+  // Update fallback asset
+  for (const key of Object.keys(FALLBACK_CUSTODY_ASSETS)) {
+    if (FALLBACK_CUSTODY_ASSETS[key].id === assetId) {
+      FALLBACK_CUSTODY_ASSETS[key].reservation = reservation;
+      return {
+        success: true,
+        message: reservation
+          ? `הכלי שוריין בהצלחה לפרויקט "${reservation.projectName}".`
+          : 'שריון הכלי בוטל בהצלחה.',
+        asset: { ...FALLBACK_CUSTODY_ASSETS[key] },
+      };
+    }
+  }
+
+  return { success: false, error: 'הכלי לא נמצא במערכת.' };
+}
+
+export interface ReportDamageInput {
+  assetId: string;
+  reportedBy: string;
+  issueType: string;
+  notes?: string;
+}
+
+export async function reportAssetDamageAction(
+  input: ReportDamageInput
+): Promise<CustodyActionResult> {
+  const { assetId, reportedBy, issueType, notes } = input;
+
+  if (isSupabaseConfigured()) {
+    try {
+      const { error: updateErr } = await supabase
+        .from('assets')
+        .update({
+          status: 'maintenance',
+          condition: 'needs_repair',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', assetId);
+
+      if (updateErr) {
+        return { success: false, error: `שגיאה בעדכון תקלה: ${updateErr.message}` };
+      }
+
+      await supabase.from('custody_ledger').insert({
+        asset_id: assetId,
+        action: 'MAINTENANCE_IN',
+        performed_by: reportedBy || 'עובד שטח',
+        notes: `דיווח תקלה (${issueType}): ${notes || 'ללא הערות'}`,
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Database error';
+      return { success: false, error: msg };
+    }
+  }
+
+  // Update fallback in-memory asset
+  for (const key of Object.keys(FALLBACK_CUSTODY_ASSETS)) {
+    if (FALLBACK_CUSTODY_ASSETS[key].id === assetId) {
+      FALLBACK_CUSTODY_ASSETS[key].status = 'maintenance';
+      FALLBACK_CUSTODY_ASSETS[key].condition = 'needs_repair';
+      FALLBACK_CUSTODY_ASSETS[key].version += 1;
+      return {
+        success: true,
+        message: 'דיווח על תקלה נקלט בהצלחה. הכלי הועבר לסטטוס בבדיקה/תיקון.',
+        asset: { ...FALLBACK_CUSTODY_ASSETS[key] },
+      };
+    }
+  }
+
+  return {
+    success: true,
+    message: 'דיווח על תקלה נקלט בהצלחה.',
+    asset: {
+      id: assetId,
+      qrCode: 'TOOL-REPORTED',
+      status: 'maintenance',
+      condition: 'needs_repair',
+      currentAssignedWorker: null,
+      currentWarehouseId: 'wh-main-01',
+      warehouseName: 'מחסן מרכזי - תל אביב',
+      warehouseCode: 'TLV-01',
+      toolName: 'כלי בבדיקה',
+      brand: 'Standard',
+      modelNumber: null,
+      version: 2,
+    },
+  };
+}
+
+export interface RetireAssetInput {
+  assetId: string;
+  retiredBy: string;
+  reason: string;
+}
+
+export async function retireAssetAction(
+  input: RetireAssetInput
+): Promise<CustodyActionResult> {
+  const { assetId, retiredBy, reason } = input;
+
+  if (isSupabaseConfigured()) {
+    try {
+      const { error: updateErr } = await supabase
+        .from('assets')
+        .update({
+          status: 'maintenance',
+          condition: 'retired',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', assetId);
+
+      if (updateErr) {
+        return { success: false, error: `שגיאה בהשבתת כלי: ${updateErr.message}` };
+      }
+
+      await supabase.from('custody_ledger').insert({
+        asset_id: assetId,
+        action: 'DECOMMISSION',
+        performed_by: retiredBy || 'מנהל מערכת',
+        notes: `השבתת כלי וגריעה ממלאי: ${reason}`,
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Database error';
+      return { success: false, error: msg };
+    }
+  }
+
+  // Update fallback in-memory asset
+  for (const key of Object.keys(FALLBACK_CUSTODY_ASSETS)) {
+    if (FALLBACK_CUSTODY_ASSETS[key].id === assetId) {
+      FALLBACK_CUSTODY_ASSETS[key].status = 'maintenance';
+      FALLBACK_CUSTODY_ASSETS[key].condition = 'retired';
+      FALLBACK_CUSTODY_ASSETS[key].version += 1;
+      return {
+        success: true,
+        message: 'הכלי הושבת ונגרע מפעילות בהצלחה.',
+        asset: { ...FALLBACK_CUSTODY_ASSETS[key] },
+      };
+    }
+  }
+
+  return {
+    success: true,
+    message: 'הכלי הושבת בהצלחה.',
+    asset: {
+      id: assetId,
+      qrCode: 'TOOL-RETIRED',
+      status: 'maintenance',
+      condition: 'retired',
+      currentAssignedWorker: null,
+      currentWarehouseId: 'wh-main-01',
+      warehouseName: 'מחסן מרכזי - תל אביב',
+      warehouseCode: 'TLV-01',
+      toolName: 'כלי שהושבת',
       brand: 'Standard',
       modelNumber: null,
       version: 2,

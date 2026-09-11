@@ -11,14 +11,28 @@ import {
   AlertTriangle,
   Loader2,
   ArrowLeft,
+  Wrench,
+  ShieldAlert,
+  ShieldCheck,
+  KeyRound,
+  Trash2,
+  Check,
+  FileText,
+  Lock,
+  DollarSign,
 } from 'lucide-react';
-import type { Warehouse, AssetCondition } from '@/types/domain';
+import type { Warehouse, AssetCondition, DamageType, ChargeParty } from '@/types/domain';
 import {
   type ScannedAssetDetails,
   checkoutAssetAction,
   checkinAssetAction,
   transferAssetAction,
+  reportAssetDamageAction,
+  retireAssetAction,
 } from '@/app/actions/custody';
+import { getCurrentGpsCoordinates } from '@/lib/geo';
+import { useAuth } from '@/context/AuthContext';
+import ToolPassportModal from '@/components/modules/ToolPassportModal';
 
 interface AssetActionModalProps {
   asset: ScannedAssetDetails | null;
@@ -30,7 +44,7 @@ interface AssetActionModalProps {
   isInCart?: boolean;
 }
 
-type ModalTab = 'checkout' | 'checkin' | 'transfer';
+type ModalTab = 'checkout' | 'checkin' | 'transfer' | 'retire';
 
 export default function AssetActionModal({
   asset,
@@ -41,10 +55,15 @@ export default function AssetActionModal({
   onAddToCart,
   isInCart = false,
 }: AssetActionModalProps) {
+  const { role, user, openPinModal } = useAuth();
+
   // Tab Mode: auto-select Check-In if already checked_out, otherwise Check-Out
   const initialTab: ModalTab =
     asset?.status === 'checked_out' ? 'checkin' : 'checkout';
   const [activeTab, setActiveTab] = useState<ModalTab>(initialTab);
+
+  // Digital Tool Passport Modal State
+  const [isPassportOpen, setIsPassportOpen] = useState<boolean>(false);
 
   // Form states
   const [workerName, setWorkerName] = useState<string>('');
@@ -56,6 +75,19 @@ export default function AssetActionModal({
   );
   const [notes, setNotes] = useState<string>('');
 
+  // Damage report state (Checkin tab when condition is repair/retired)
+  const [damageType, setDamageType] = useState<DamageType>('impact_drop');
+  const [damageEstimatedCost, setDamageEstimatedCost] = useState<string>('');
+  const [damageChargeParty, setDamageChargeParty] = useState<ChargeParty>('company');
+  const [damageReportNotes, setDamageReportNotes] = useState<string>('');
+
+  // Damage report state (Worker mode)
+  const [damageIssueType, setDamageIssueType] = useState<string>('שבר פיזי');
+  const [damageNotes, setDamageNotes] = useState<string>('');
+
+  // Admin retire state
+  const [retireReason, setRetireReason] = useState<string>('');
+
   // Status & loading
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -66,7 +98,13 @@ export default function AssetActionModal({
   const isCheckedOut = asset.status === 'checked_out';
   const isMaintenance = asset.status === 'maintenance';
 
-  // Handle Checkout Action
+  // Safety inspection check
+  const isInspectionOverdue = Boolean(
+    asset.safetyInspectionDue &&
+      new Date(asset.safetyInspectionDue).getTime() < new Date().getTime()
+  );
+
+  // Handle Checkout Action (Supervisor & Admin)
   const handleCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!workerName.trim()) {
@@ -74,14 +112,27 @@ export default function AssetActionModal({
       return;
     }
 
+    if (asset.isLocked) {
+      setActionError(`כלי זה נעול מנהלתית: ${asset.lockReason || 'נדרש שחרור בדרכון הכלי'}`);
+      return;
+    }
+
+    if (isInspectionOverdue) {
+      setActionError('חל איסור לנפק כלי זה - תוקף בדיקת הבטיחות פג!');
+      return;
+    }
+
     setIsSubmitting(true);
     setActionError(null);
+
+    const gps = await getCurrentGpsCoordinates();
 
     const res = await checkoutAssetAction({
       assetId: asset.id,
       workerName: workerName.trim(),
       workerPhone: workerPhone.trim() || undefined,
       notes: notes.trim() || undefined,
+      gps,
     });
 
     setIsSubmitting(false);
@@ -95,17 +146,34 @@ export default function AssetActionModal({
     onClose();
   };
 
-  // Handle Check-in Action
+  // Handle Check-in Action (Supervisor & Admin)
   const handleCheckin = async (e: React.FormEvent) => {
     e.preventDefault();
 
     setIsSubmitting(true);
     setActionError(null);
 
+    const gps = await getCurrentGpsCoordinates();
+
+    const isDamagedOrRetired =
+      checkinCondition === 'needs_repair' || checkinCondition === 'retired';
+
+    const damageReport = isDamagedOrRetired
+      ? {
+          isDamaged: true,
+          damageType,
+          estimatedCost: damageEstimatedCost ? Number(damageEstimatedCost) : undefined,
+          chargeParty: damageChargeParty,
+          notes: damageReportNotes.trim() || undefined,
+        }
+      : undefined;
+
     const res = await checkinAssetAction({
       assetId: asset.id,
       condition: checkinCondition,
       notes: notes.trim() || undefined,
+      damageReport,
+      gps,
     });
 
     setIsSubmitting(false);
@@ -119,7 +187,7 @@ export default function AssetActionModal({
     onClose();
   };
 
-  // Handle Transfer Action
+  // Handle Transfer Action (Supervisor & Admin)
   const handleTransfer = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!targetWarehouseId) {
@@ -130,10 +198,66 @@ export default function AssetActionModal({
     setIsSubmitting(true);
     setActionError(null);
 
+    const gps = await getCurrentGpsCoordinates();
+
     const res = await transferAssetAction({
       assetId: asset.id,
       targetWarehouseId,
       notes: notes.trim() || undefined,
+      gps,
+    });
+
+    setIsSubmitting(false);
+
+    if (!res.success) {
+      setActionError(res.error);
+      return;
+    }
+
+    onActionComplete(res.message, res.asset);
+    onClose();
+  };
+
+  // Handle Report Damage Action (Worker mode)
+  const handleReportDamage = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    setIsSubmitting(true);
+    setActionError(null);
+
+    const res = await reportAssetDamageAction({
+      assetId: asset.id,
+      reportedBy: user.fullName || 'עובד שטח',
+      issueType: damageIssueType,
+      notes: damageNotes.trim() || undefined,
+    });
+
+    setIsSubmitting(false);
+
+    if (!res.success) {
+      setActionError(res.error);
+      return;
+    }
+
+    onActionComplete(res.message, res.asset);
+    onClose();
+  };
+
+  // Handle Retire Asset Action (Admin mode)
+  const handleRetireAsset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!retireReason.trim()) {
+      setActionError('נא לציין סיבת השבתה מפורטת.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    setActionError(null);
+
+    const res = await retireAssetAction({
+      assetId: asset.id,
+      retiredBy: user.fullName || 'מנהל פרויקט',
+      reason: retireReason.trim(),
     });
 
     setIsSubmitting(false);
@@ -148,375 +272,694 @@ export default function AssetActionModal({
   };
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="asset-modal-title"
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200"
-    >
-      <div className="w-full max-w-lg bg-white border-2 border-blue-200 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col animate-in slide-in-from-bottom-4 duration-200 text-blue-950">
-        {/* TOP TOOL BANNER */}
-        <div className="bg-blue-50/80 border-b border-blue-100 p-4 relative">
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="סגור חלון"
-            className="absolute top-4 left-4 w-9 h-9 rounded-full bg-white hover:bg-blue-50 text-blue-700 border border-blue-200 flex items-center justify-center active:scale-95 transition-all cursor-pointer shadow-sm"
-          >
-            <X className="w-5 h-5" />
-          </button>
+    <>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="asset-modal-title"
+        className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200"
+      >
+        <div className="w-full max-w-lg bg-white border-2 border-blue-200 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col animate-in slide-in-from-bottom-4 duration-200 text-blue-950">
+          {/* TOP TOOL BANNER */}
+          <div className="bg-blue-50/80 border-b border-blue-100 p-4 relative">
+            <div className="absolute top-4 left-4 flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setIsPassportOpen(true)}
+                className="px-2.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black flex items-center gap-1 shadow-sm transition-all cursor-pointer active:scale-95"
+                title="צפה בדרכון הכלי המלא"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>דרכון כלי</span>
+              </button>
 
-          <div className="flex items-center gap-2 mb-1.5">
-            <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200">
-              {asset.brand}
-            </span>
-            <div className="flex items-center gap-1 text-xs font-mono text-blue-900" dir="ltr">
-              <QrCode className="w-3.5 h-3.5 text-blue-600" />
-              <span className="font-bold">{asset.qrCode}</span>
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="סגור חלון"
+                className="w-9 h-9 rounded-full bg-white hover:bg-blue-50 text-blue-700 border border-blue-200 flex items-center justify-center active:scale-95 transition-all cursor-pointer shadow-sm"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200">
+                {asset.brand}
+              </span>
+              <div className="flex items-center gap-1 text-xs font-mono text-blue-900" dir="ltr">
+                <QrCode className="w-3.5 h-3.5 text-blue-600" />
+                <span className="font-bold">{asset.qrCode}</span>
+              </div>
+              {role === 'worker' && (
+                <span className="text-[10px] font-extrabold px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300">
+                  כרטיס כלי (עובד שטח)
+                </span>
+              )}
+            </div>
+
+            <h2
+              id="asset-modal-title"
+              className="text-lg font-black text-blue-950 leading-tight pl-24"
+            >
+              {asset.toolName}
+            </h2>
+
+            {asset.modelNumber && (
+              <div className="text-xs font-mono text-slate-500 mt-0.5" dir="ltr">
+                דגם: {asset.modelNumber}
+              </div>
+            )}
+
+            {/* Lockout or Inspection alerts in banner */}
+            {(asset.isLocked || isInspectionOverdue) && (
+              <div className="mt-2.5 flex flex-wrap gap-1.5">
+                {asset.isLocked && (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-black px-2 py-0.5 rounded bg-red-100 text-red-800 border border-red-300">
+                    <Lock className="w-3 h-3 text-red-600" />
+                    נעול מנהלתית
+                  </span>
+                )}
+                {isInspectionOverdue && (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-black px-2 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-300">
+                    <ShieldAlert className="w-3 h-3 text-rose-600" />
+                    נדרשת בדיקת בטיחות
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Current Location & Live Status Pill */}
+            <div className="mt-3 pt-3 border-t border-blue-200/60 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-1.5 text-slate-600 font-bold">
+                <Building2 className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                <span className="truncate max-w-[200px]">{asset.warehouseName}</span>
+              </div>
+
+              <div>
+                {isAvailable && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-black bg-emerald-50 text-emerald-700 border border-emerald-300">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                    זמין במלאי
+                  </span>
+                )}
+                {isCheckedOut && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-black bg-amber-50 text-amber-800 border border-amber-300">
+                    <UserCheck className="w-3.5 h-3.5 text-amber-600" />
+                    בשימוש: {asset.currentAssignedWorker}
+                  </span>
+                )}
+                {isMaintenance && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-black bg-red-50 text-red-700 border border-red-300">
+                    <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
+                    בתיקון / בדיקה
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
-          <h2
-            id="asset-modal-title"
-            className="text-lg font-black text-blue-950 leading-tight pl-8"
-          >
-            {asset.toolName}
-          </h2>
+          {/* WORKER VIEW: SAFETY NOTES & DAMAGE REPORT (NO TABS) */}
+          {role === 'worker' ? (
+            <div className="p-4 overflow-y-auto flex-1 space-y-5">
+              {/* Safety Guidelines Card */}
+              <div className="p-3.5 rounded-2xl bg-amber-50/70 border border-amber-200 space-y-2">
+                <div className="flex items-center gap-2 text-amber-900 font-black text-xs">
+                  <ShieldAlert className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>הנחיות בטיחות ושימוש בשטח</span>
+                </div>
+                <ul className="text-[12px] text-amber-950 font-medium space-y-1 list-disc list-inside">
+                  <li>חובה ללבוש ציוד מגן אישי מתאים (משקפי מגן, כפפות עבודה, אטמי אוזניים).</li>
+                  <li>בדוק תקינות כבלים, מגני שבבים ושלמות מעטפת הכלי לפני כל הפעלה.</li>
+                  <li>חל איסור להשתמש בכלי פגום או כאשר קיים רעש/ריח חריג.</li>
+                </ul>
+              </div>
 
-          {asset.modelNumber && (
-            <div className="text-xs font-mono text-slate-500 mt-0.5" dir="ltr">
-              דגם: {asset.modelNumber}
-            </div>
-          )}
-
-          {/* Current Location & Live Status Pill */}
-          <div className="mt-3 pt-3 border-t border-blue-200/60 flex flex-wrap items-center justify-between gap-2 text-xs">
-            <div className="flex items-center gap-1.5 text-slate-600 font-bold">
-              <Building2 className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-              <span className="truncate max-w-[200px]">{asset.warehouseName}</span>
-            </div>
-
-            <div>
-              {isAvailable && (
-                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-black bg-emerald-50 text-emerald-700 border border-emerald-300">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                  זמין במלאי
-                </span>
-              )}
-              {isCheckedOut && (
-                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-black bg-amber-50 text-amber-800 border border-amber-300">
-                  <UserCheck className="w-3.5 h-3.5 text-amber-600" />
-                  בשימוש: {asset.currentAssignedWorker}
-                </span>
-              )}
-              {isMaintenance && (
-                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-black bg-red-50 text-red-700 border border-red-300">
-                  <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
-                  בתיקון / בדיקה
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* THREE ACTION TABS */}
-        <div className="grid grid-cols-3 gap-1 p-2 bg-slate-100/80 border-b border-blue-100 text-xs font-black">
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('checkout');
-              setActionError(null);
-            }}
-            className={`min-h-[48px] rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-              activeTab === 'checkout'
-                ? 'bg-blue-600 text-white shadow-md font-black'
-                : 'text-slate-600 hover:text-blue-700'
-            }`}
-          >
-            <UserCheck className="w-4 h-4" />
-            <span>ניפוק כלי</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('checkin');
-              setActionError(null);
-            }}
-            className={`min-h-[48px] rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-              activeTab === 'checkin'
-                ? 'bg-blue-600 text-white shadow-md font-black'
-                : 'text-slate-600 hover:text-blue-700'
-            }`}
-          >
-            <CheckCircle2 className="w-4 h-4" />
-            <span>החזרה למחסן</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('transfer');
-              setActionError(null);
-            }}
-            className={`min-h-[48px] rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-              activeTab === 'transfer'
-                ? 'bg-blue-600 text-white shadow-md font-black'
-                : 'text-slate-600 hover:text-blue-700'
-            }`}
-          >
-            <Truck className="w-4 h-4" />
-            <span>העברה לאתר</span>
-          </button>
-        </div>
-
-        {/* TAB CONTENTS & FORMS */}
-        <div className="p-4 overflow-y-auto flex-1">
-          {actionError && (
-            <div className="mb-4 p-3 rounded-xl bg-red-50 border border-red-300 text-red-800 text-xs font-bold flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
-              <span>{actionError}</span>
-            </div>
-          )}
-
-          {/* TAB A: CHECK-OUT FORM */}
-          {activeTab === 'checkout' && (
-            <form onSubmit={handleCheckout} className="space-y-4">
-              {onAddToCart && isAvailable && (
-                <div className="p-3 bg-blue-50/80 rounded-2xl border border-blue-200 flex items-center justify-between gap-2 shadow-sm">
-                  <div>
-                    <div className="text-xs font-black text-blue-950">
-                      {isInCart ? 'הכלי כבר נמצא בסל הניפוק' : 'מעוניין בניפוק מרוכז?'}
-                    </div>
-                    <div className="text-[11px] text-blue-700 font-medium mt-0.5">
-                      {isInCart
-                        ? 'כלי זה כבר צורף לסל הניפוק הנוכחי'
-                        : 'הוסף כלי זה לסל הניפוק כדי לנפק מספר כלים לעובד בחתימה דיגיטלית מרוכזת'}
-                    </div>
-                  </div>
-                  {!isInCart && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onAddToCart(asset);
-                        onClose();
-                      }}
-                      className="px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black shrink-0 flex items-center gap-1 shadow-sm cursor-pointer transition-all active:scale-95"
-                    >
-                      <span>+ הוסף לסל</span>
-                    </button>
-                  )}
+              {/* Error banner if any */}
+              {actionError && (
+                <div className="p-3 rounded-xl bg-red-50 border border-red-300 text-red-800 text-xs font-bold flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                  <span>{actionError}</span>
                 </div>
               )}
 
-              <div>
-                <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
-                  שם העובד המקבל <span className="text-blue-600">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={workerName}
-                  onChange={(e) => setWorkerName(e.target.value)}
-                  placeholder="לדוגמה: ישראל ישראלי"
-                  className="w-full min-h-[56px] bg-white text-blue-950 font-bold text-base px-4 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none placeholder:text-slate-400 shadow-sm"
-                />
-              </div>
+              {/* Single Action for Worker: Report Damage */}
+              <form onSubmit={handleReportDamage} className="space-y-4">
+                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
+                  <div className="flex items-center gap-2 text-slate-800 font-extrabold text-xs uppercase tracking-wider">
+                    <Wrench className="w-4 h-4 text-red-600" />
+                    <span>דיווח על תקלה או כלי לא תקין</span>
+                  </div>
 
-              <div>
-                <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
-                  טלפון נייד / תעודת זהות (אופציונלי)
-                </label>
-                <input
-                  type="text"
-                  value={workerPhone}
-                  onChange={(e) => setWorkerPhone(e.target.value)}
-                  placeholder="לדוגמה: 050-1234567"
-                  className="w-full min-h-[56px] bg-white text-blue-950 font-bold text-base px-4 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none placeholder:text-slate-400 shadow-sm"
-                  dir="ltr"
-                />
-              </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      סוג התקלה / הבעיה
+                    </label>
+                    <select
+                      value={damageIssueType}
+                      onChange={(e) => setDamageIssueType(e.target.value)}
+                      className="w-full min-h-[46px] bg-white text-slate-900 text-sm px-3 rounded-xl border border-slate-300 font-medium focus:border-red-600 focus:outline-none"
+                    >
+                      <option value="שבר פיזי">שבר פיזי / פגיעה במעטפת</option>
+                      <option value="מנוע שרוף">מנוע שרוף / התחממות חריגה</option>
+                      <option value="כבל חשמל פגום">כבל חשמל / סוללה פגומה</option>
+                      <option value="מתג הפעלה תקול">מתג הפעלה תקול</option>
+                      <option value="בלאי רצועה / להב">בלאי רצועה / להב שחוק</option>
+                      <option value="אביזר חסר">אביזר חסר / חלק מנותק</option>
+                    </select>
+                  </div>
 
-              <div>
-                <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
-                  הערות ניפוק
-                </label>
-                <input
-                  type="text"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="לדוגמה: לצורך עבודות קידוח בקומה 3"
-                  className="w-full min-h-[50px] bg-white text-blue-950 font-medium text-sm px-4 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none placeholder:text-slate-400 shadow-sm"
-                />
-              </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      תיאור התקלה (אופציונלי)
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={damageNotes}
+                      onChange={(e) => setDamageNotes(e.target.value)}
+                      placeholder="פרט מה קרה לכלי והיכן הוא נמצא כעת..."
+                      className="w-full bg-white text-slate-900 text-sm p-3 rounded-xl border border-slate-300 font-medium focus:border-red-600 focus:outline-none placeholder:text-slate-400"
+                    />
+                  </div>
 
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="w-full min-h-[60px] rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-base uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl shadow-blue-600/25 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-60"
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="w-full min-h-[50px] rounded-xl bg-red-600 hover:bg-red-700 text-white font-extrabold text-sm flex items-center justify-center gap-2 shadow-md shadow-red-600/25 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-60"
+                  >
+                    {isSubmitting ? (
+                      <Loader2 className="w-5 h-5 animate-spin text-white" />
+                    ) : (
+                      <>
+                        <AlertTriangle className="w-4 h-4" />
+                        <span>שלח דיווח על תקלה (העבר לבדיקה)</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+
+              {/* Supervisor elevation prompt */}
+              <div className="pt-2 text-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    openPinModal();
+                  }}
+                  className="inline-flex items-center gap-1.5 text-xs text-blue-700 font-bold hover:underline cursor-pointer"
+                >
+                  <KeyRound className="w-3.5 h-3.5" />
+                  <span>נדרש ניפוק, החזרה או העברה? לחץ להזנת קוד מנהל</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            /* SUPERVISOR & ADMIN VIEW: FULL ACTION TABS */
+            <>
+              <div
+                className={`grid ${
+                  role === 'admin' ? 'grid-cols-4' : 'grid-cols-3'
+                } gap-1 p-2 bg-slate-100/80 border-b border-blue-100 text-xs font-black`}
               >
-                {isSubmitting ? (
-                  <Loader2 className="w-6 h-6 animate-spin text-white" />
-                ) : (
-                  <>
-                    <UserCheck className="w-6 h-6 stroke-[2.5]" />
-                    <span>אשר ניפוק כלי (הוצאה לשימוש)</span>
-                  </>
-                )}
-              </button>
-            </form>
-          )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('checkout');
+                    setActionError(null);
+                  }}
+                  className={`min-h-[48px] rounded-xl flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                    activeTab === 'checkout'
+                      ? 'bg-blue-600 text-white shadow-md font-black'
+                      : 'text-slate-600 hover:text-blue-700'
+                  }`}
+                >
+                  <UserCheck className="w-3.5 h-3.5" />
+                  <span>ניפוק</span>
+                </button>
 
-          {/* TAB B: CHECK-IN FORM */}
-          {activeTab === 'checkin' && (
-            <form onSubmit={handleCheckin} className="space-y-4">
-              <div>
-                <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-2">
-                  מצב הכלי בעת ההחזרה
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  {(
-                    [
-                      {
-                        value: 'good',
-                        label: 'תקין ומוכן לעבודה',
-                        sub: 'טוב / תקין',
-                        color: 'emerald',
-                      },
-                      {
-                        value: 'excellent',
-                        label: 'מצב מעולה כחדש',
-                        sub: 'מעולה',
-                        color: 'emerald',
-                      },
-                      {
-                        value: 'needs_repair',
-                        label: 'דורש תיקון / בדיקה',
-                        sub: 'בדיקה נדרשת',
-                        color: 'red',
-                      },
-                      {
-                        value: 'retired',
-                        label: 'מושבת / יצא משימוש',
-                        sub: 'מושבת',
-                        color: 'zinc',
-                      },
-                    ] as const
-                  ).map((cond) => {
-                    const isSelected = checkinCondition === cond.value;
-                    return (
-                      <button
-                        key={cond.value}
-                        type="button"
-                        onClick={() => setCheckinCondition(cond.value)}
-                        className={`min-h-[56px] px-3 py-2 rounded-xl text-xs font-black transition-all border-2 text-center flex flex-col items-center justify-center cursor-pointer ${
-                          isSelected
-                            ? 'bg-blue-600 text-white border-blue-600 shadow-md scale-[1.02]'
-                            : 'bg-slate-50 text-blue-950 border-slate-200 hover:border-blue-300'
-                        }`}
-                      >
-                        <span>{cond.label}</span>
-                        <span
-                          className={`text-[10px] font-bold ${
-                            isSelected ? 'text-white/80' : 'text-slate-500'
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('checkin');
+                    setActionError(null);
+                  }}
+                  className={`min-h-[48px] rounded-xl flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                    activeTab === 'checkin'
+                      ? 'bg-blue-600 text-white shadow-md font-black'
+                      : 'text-slate-600 hover:text-blue-700'
+                  }`}
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>החזרה</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('transfer');
+                    setActionError(null);
+                  }}
+                  className={`min-h-[48px] rounded-xl flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                    activeTab === 'transfer'
+                      ? 'bg-blue-600 text-white shadow-md font-black'
+                      : 'text-slate-600 hover:text-blue-700'
+                  }`}
+                >
+                  <Truck className="w-3.5 h-3.5" />
+                  <span>העברה</span>
+                </button>
+
+                {role === 'admin' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('retire');
+                      setActionError(null);
+                    }}
+                    className={`min-h-[48px] rounded-xl flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                      activeTab === 'retire'
+                        ? 'bg-red-600 text-white shadow-md font-black'
+                        : 'text-red-700 hover:bg-red-50'
+                    }`}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>השבתה</span>
+                  </button>
+                )}
+              </div>
+
+              {/* TAB CONTENTS & FORMS */}
+              <div className="p-4 overflow-y-auto flex-1">
+                {actionError && (
+                  <div className="mb-4 p-3 rounded-xl bg-red-50 border border-red-300 text-red-800 text-xs font-bold flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                    <span>{actionError}</span>
+                  </div>
+                )}
+
+                {/* TAB A: CHECK-OUT FORM */}
+                {activeTab === 'checkout' && (
+                  <form onSubmit={handleCheckout} className="space-y-4">
+                    {/* Lockout or Inspection Banner */}
+                    {(asset.isLocked || isInspectionOverdue) && (
+                      <div className="p-3 bg-red-50 border-2 border-red-300 rounded-2xl text-red-900 text-xs space-y-1">
+                        <div className="font-black flex items-center gap-1.5 text-red-700">
+                          <AlertTriangle className="w-4 h-4" />
+                          <span>פעולת הניפוק חסומה!</span>
+                        </div>
+                        {asset.isLocked && (
+                          <p>
+                            כלי זה נעול מנהלתית: {asset.lockReason || 'נדרש שחרור בדרכון הכלי'}
+                          </p>
+                        )}
+                        {isInspectionOverdue && (
+                          <p>
+                            תוקף בדיקת הבטיחות פג! יש לחדש בדיקה בדרכון הכלי לפני ניפוקו.
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {onAddToCart && isAvailable && !asset.isLocked && !isInspectionOverdue && (
+                      <div className="p-3 bg-blue-50/80 rounded-2xl border border-blue-200 flex items-center justify-between gap-2 shadow-sm">
+                        <div>
+                          <div className="text-xs font-black text-blue-950">
+                            {isInCart ? 'הכלי כבר נמצא בסל הניפוק' : 'מעוניין בניפוק מרוכז?'}
+                          </div>
+                          <div className="text-[11px] text-blue-700 font-medium mt-0.5">
+                            {isInCart
+                              ? 'כלי זה כבר צורף לסל הניפוק הנוכחי'
+                              : 'הוסף כלי זה לסל הניפוק כדי לנפק מספר כלים לעובד בחתימה דיגיטלית מרוכזת'}
+                          </div>
+                        </div>
+                        {!isInCart && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onAddToCart(asset);
+                              onClose();
+                            }}
+                            className="px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black shrink-0 flex items-center gap-1 shadow-sm cursor-pointer transition-all active:scale-95"
+                          >
+                            <span>+ הוסף לסל</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
+                        שם העובד המקבל <span className="text-blue-600">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={workerName}
+                        onChange={(e) => setWorkerName(e.target.value)}
+                        placeholder="לדוגמה: ישראל ישראלי"
+                        className="w-full min-h-[50px] bg-white text-blue-950 font-bold text-base px-4 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none placeholder:text-slate-400 shadow-sm"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
+                        טלפון נייד
+                      </label>
+                      <input
+                        type="tel"
+                        value={workerPhone}
+                        onChange={(e) => setWorkerPhone(e.target.value)}
+                        placeholder="לדוגמה: 050-1234567"
+                        dir="ltr"
+                        className="w-full min-h-[50px] bg-white text-blue-950 font-bold text-base px-4 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none placeholder:text-slate-400 shadow-sm text-right"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
+                        הערות ניפוק (אתר עבודה, צוות)
+                      </label>
+                      <input
+                        type="text"
+                        value={notes}
+                        onChange={(e) => setNotes(e.target.value)}
+                        placeholder="לדוגמה: אתר בנייה מגדל שלום - קומה 12"
+                        className="w-full min-h-[50px] bg-white text-blue-950 font-medium text-sm px-4 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none placeholder:text-slate-400 shadow-sm"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={isSubmitting || asset.isLocked || isInspectionOverdue}
+                      className="w-full min-h-[60px] rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-base uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl shadow-blue-600/25 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isSubmitting ? (
+                        <Loader2 className="w-6 h-6 animate-spin text-white" />
+                      ) : (
+                        <>
+                          <UserCheck className="w-6 h-6 stroke-[2.5]" />
+                          <span>אשר ניפוק לעובד</span>
+                          <ArrowLeft className="w-5 h-5 stroke-[2.5]" />
+                        </>
+                      )}
+                    </button>
+                  </form>
+                )}
+
+                {/* TAB B: CHECK-IN FORM */}
+                {activeTab === 'checkin' && (
+                  <form onSubmit={handleCheckin} className="space-y-4">
+                    <div>
+                      <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-2">
+                        בדיקת מצב הכלי בעת ההחזרה <span className="text-blue-600">*</span>
+                      </label>
+                      <div className="grid grid-cols-3 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setCheckinCondition('excellent')}
+                          className={`min-h-[54px] p-2 rounded-xl border-2 font-bold text-xs flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
+                            checkinCondition === 'excellent'
+                              ? 'border-emerald-600 bg-emerald-50 text-emerald-900 shadow-sm'
+                              : 'border-slate-200 bg-slate-50 text-slate-600'
                           }`}
                         >
-                          {cond.sub}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                          <span>מצוין (חדש)</span>
+                        </button>
 
-              <div>
-                <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
-                  הערות בדיקה והחזרה
-                </label>
-                <input
-                  type="text"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="לדוגמה: נוקה ונבדק, כל החלקים קיימים"
-                  className="w-full min-h-[50px] bg-white text-blue-950 font-medium text-sm px-4 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none placeholder:text-slate-400 shadow-sm"
-                />
-              </div>
+                        <button
+                          type="button"
+                          onClick={() => setCheckinCondition('good')}
+                          className={`min-h-[54px] p-2 rounded-xl border-2 font-bold text-xs flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
+                            checkinCondition === 'good'
+                              ? 'border-blue-600 bg-blue-50 text-blue-900 shadow-sm'
+                              : 'border-slate-200 bg-slate-50 text-slate-600'
+                          }`}
+                        >
+                          <Check className="w-4 h-4 text-blue-600" />
+                          <span>טוב (בלאי קל)</span>
+                        </button>
 
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="w-full min-h-[60px] rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-base uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl shadow-blue-600/25 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-60"
-              >
-                {isSubmitting ? (
-                  <Loader2 className="w-6 h-6 animate-spin text-white" />
-                ) : (
-                  <>
-                    <CheckCircle2 className="w-6 h-6 stroke-[2.5]" />
-                    <span>אשר החזרת כלי למחסן</span>
-                  </>
+                        <button
+                          type="button"
+                          onClick={() => setCheckinCondition('needs_repair')}
+                          className={`min-h-[54px] p-2 rounded-xl border-2 font-bold text-xs flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
+                            checkinCondition === 'needs_repair'
+                              ? 'border-red-600 bg-red-50 text-red-900 shadow-sm'
+                              : 'border-slate-200 bg-slate-50 text-slate-600'
+                          }`}
+                        >
+                          <AlertTriangle className="w-4 h-4 text-red-600" />
+                          <span>דורש תיקון</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* DAMAGE INCIDENT REPORT SUB-FORM (Auto-expanded when condition is repair or retired) */}
+                    {(checkinCondition === 'needs_repair' || checkinCondition === 'retired') && (
+                      <div className="p-4 rounded-2xl bg-red-50/70 border-2 border-red-200 space-y-3 animate-in fade-in">
+                        <div className="flex items-center gap-2 text-red-900 font-black text-xs uppercase tracking-wider">
+                          <AlertTriangle className="w-4 h-4 text-red-600" />
+                          <span>דוח אירוע נזק / תקלה (Damage Incident Report)</span>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-red-950 mb-1">
+                            סיווג סוג הנזק <span className="text-red-600">*</span>
+                          </label>
+                          <select
+                            value={damageType}
+                            onChange={(e) => setDamageType(e.target.value as DamageType)}
+                            className="w-full min-h-[46px] bg-white text-slate-900 text-xs px-3 rounded-xl border border-red-300 font-bold focus:border-red-600 focus:outline-none"
+                          >
+                            <option value="impact_drop">נפילה / שבר פיזי (Impact / Drop)</option>
+                            <option value="burned_motor">מנוע שרוף / עומס יתר (Burned Motor)</option>
+                            <option value="wear_tear">בלאי טבעי / שימוש ממושך (Wear & Tear)</option>
+                            <option value="misuse">שימוש לא נכון / חריג (Misuse)</option>
+                            <option value="other">אחר (Other)</option>
+                          </select>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-xs font-bold text-red-950 mb-1 flex items-center gap-1">
+                              <DollarSign className="w-3.5 h-3.5 text-emerald-600" />
+                              אומדן עלות תיקון (₪)
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={damageEstimatedCost}
+                              onChange={(e) => setDamageEstimatedCost(e.target.value)}
+                              placeholder="0 ₪"
+                              className="w-full min-h-[46px] bg-white text-slate-900 font-bold text-sm px-3 rounded-xl border border-red-300 focus:border-red-600 focus:outline-none"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-xs font-bold text-red-950 mb-1">
+                              גורם לחיוב
+                            </label>
+                            <div className="grid grid-cols-3 gap-1">
+                              <button
+                                type="button"
+                                onClick={() => setDamageChargeParty('company')}
+                                className={`py-2 rounded-lg text-[10px] font-bold border transition-colors cursor-pointer ${
+                                  damageChargeParty === 'company'
+                                    ? 'bg-red-600 text-white border-red-600'
+                                    : 'bg-white text-slate-700 border-slate-300'
+                                }`}
+                              >
+                                החברה
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setDamageChargeParty('worker')}
+                                className={`py-2 rounded-lg text-[10px] font-bold border transition-colors cursor-pointer ${
+                                  damageChargeParty === 'worker'
+                                    ? 'bg-red-600 text-white border-red-600'
+                                    : 'bg-white text-slate-700 border-slate-300'
+                                }`}
+                              >
+                                עובד
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setDamageChargeParty('subcontractor')}
+                                className={`py-2 rounded-lg text-[10px] font-bold border transition-colors cursor-pointer ${
+                                  damageChargeParty === 'subcontractor'
+                                    ? 'bg-red-600 text-white border-red-600'
+                                    : 'bg-white text-slate-700 border-slate-300'
+                                }`}
+                              >
+                                קבלן
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-red-950 mb-1">
+                            פירוט נזק וממצאי בדיקה
+                          </label>
+                          <textarea
+                            rows={2}
+                            value={damageReportNotes}
+                            onChange={(e) => setDamageReportNotes(e.target.value)}
+                            placeholder="תאר את הנזק והנסיבות..."
+                            className="w-full bg-white text-slate-900 text-xs p-2.5 rounded-xl border border-red-300 font-medium focus:border-red-600 focus:outline-none"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
+                        הערות החזרה (תקלות, אביזרים חסרים)
+                      </label>
+                      <input
+                        type="text"
+                        value={notes}
+                        onChange={(e) => setNotes(e.target.value)}
+                        placeholder="לדוגמה: הוחזר ללא סוללה נוספת, נדרש ניקוי"
+                        className="w-full min-h-[50px] bg-white text-blue-950 font-medium text-sm px-4 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none placeholder:text-slate-400 shadow-sm"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={isSubmitting}
+                      className="w-full min-h-[60px] rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-base uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl shadow-blue-600/25 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-60"
+                    >
+                      {isSubmitting ? (
+                        <Loader2 className="w-6 h-6 animate-spin text-white" />
+                      ) : (
+                        <>
+                          <CheckCircle2 className="w-6 h-6 stroke-[2.5]" />
+                          <span>אשר החזרת כלי למחסן</span>
+                          <ArrowLeft className="w-5 h-5 stroke-[2.5]" />
+                        </>
+                      )}
+                    </button>
+                  </form>
                 )}
-              </button>
-            </form>
-          )}
 
-          {/* TAB C: TRANSFER FORM */}
-          {activeTab === 'transfer' && (
-            <form onSubmit={handleTransfer} className="space-y-4">
-              <div>
-                <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
-                  אתר / מחסן יעד
-                </label>
-                <div className="relative">
-                  <select
-                    value={targetWarehouseId}
-                    onChange={(e) => setTargetWarehouseId(e.target.value)}
-                    className="w-full min-h-[56px] bg-white text-blue-950 font-bold text-base px-4 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none appearance-none cursor-pointer shadow-sm"
-                  >
-                    {warehouses.map((wh) => (
-                      <option key={wh.id} value={wh.id} className="bg-white text-blue-950">
-                        {wh.code ? `[${wh.code}] ` : ''}
-                        {wh.name} {wh.id === asset.currentWarehouseId ? '(נוכחי)' : ''}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none text-blue-600 text-sm">
-                    ▼
-                  </div>
-                </div>
-              </div>
+                {/* TAB C: SITE TRANSFER FORM */}
+                {activeTab === 'transfer' && (
+                  <form onSubmit={handleTransfer} className="space-y-4">
+                    <div>
+                      <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
+                        אתר יעד להעברה <span className="text-blue-600">*</span>
+                      </label>
+                      <div className="relative">
+                        <select
+                          value={targetWarehouseId}
+                          onChange={(e) => setTargetWarehouseId(e.target.value)}
+                          className="w-full min-h-[56px] bg-white text-blue-950 font-bold text-base px-4 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none appearance-none cursor-pointer shadow-sm"
+                        >
+                          {warehouses.map((wh) => (
+                            <option key={wh.id} value={wh.id} className="bg-white text-blue-950">
+                              {wh.code ? `[${wh.code}] ` : ''}
+                              {wh.name} {wh.id === asset.currentWarehouseId ? '(נוכחי)' : ''}
+                            </option>
+                          ))}
+                        </select>
+                        <div className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none text-blue-600 text-sm">
+                          ▼
+                        </div>
+                      </div>
+                    </div>
 
-              <div>
-                <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
-                  הערות העברה ושינוע
-                </label>
-                <input
-                  type="text"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="לדוגמה: נשלח ברכב שירות לאתר המרכזי"
-                  className="w-full min-h-[50px] bg-white text-blue-950 font-medium text-sm px-4 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none placeholder:text-slate-400 shadow-sm"
-                />
-              </div>
+                    <div>
+                      <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
+                        הערות העברה ושינוע
+                      </label>
+                      <input
+                        type="text"
+                        value={notes}
+                        onChange={(e) => setNotes(e.target.value)}
+                        placeholder="לדוגמה: נשלח ברכב שירות לאתר המרכזי"
+                        className="w-full min-h-[50px] bg-white text-blue-950 font-medium text-sm px-4 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none placeholder:text-slate-400 shadow-sm"
+                      />
+                    </div>
 
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="w-full min-h-[60px] rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-base uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl shadow-blue-600/25 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-60"
-              >
-                {isSubmitting ? (
-                  <Loader2 className="w-6 h-6 animate-spin text-white" />
-                ) : (
-                  <>
-                    <Truck className="w-6 h-6 stroke-[2.5]" />
-                    <span>אשר העברה לאתר היעד</span>
-                    <ArrowLeft className="w-5 h-5 stroke-[2.5]" />
-                  </>
+                    <button
+                      type="submit"
+                      disabled={isSubmitting}
+                      className="w-full min-h-[60px] rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-base uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl shadow-blue-600/25 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-60"
+                    >
+                      {isSubmitting ? (
+                        <Loader2 className="w-6 h-6 animate-spin text-white" />
+                      ) : (
+                        <>
+                          <Truck className="w-6 h-6 stroke-[2.5]" />
+                          <span>אשר העברה לאתר היעד</span>
+                          <ArrowLeft className="w-5 h-5 stroke-[2.5]" />
+                        </>
+                      )}
+                    </button>
+                  </form>
                 )}
-              </button>
-            </form>
+
+                {/* TAB D: RETIRE ASSET (ADMIN ONLY) */}
+                {activeTab === 'retire' && role === 'admin' && (
+                  <form onSubmit={handleRetireAsset} className="space-y-4">
+                    <div className="p-3.5 bg-red-50 border border-red-200 rounded-2xl text-red-900 text-xs space-y-1">
+                      <div className="font-extrabold flex items-center gap-1.5 text-red-700">
+                        <ShieldCheck className="w-4 h-4" />
+                        <span>פעולת מנהל מערכת: השבתת כלי וגריעה ממלאי</span>
+                      </div>
+                      <p>
+                        פעולה זו תשבית את הכלי לצמיתות ותגרע אותו ממצאי הכלים הפעילים בכל האתרים.
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs uppercase font-extrabold text-red-900 tracking-wider mb-1">
+                        סיבת השבתה / גריעה <span className="text-red-600">*</span>
+                      </label>
+                      <textarea
+                        rows={3}
+                        required
+                        value={retireReason}
+                        onChange={(e) => setRetireReason(e.target.value)}
+                        placeholder="לדוגמה: בלאי סופני במנוע וגיר, עלות תיקון עולה על כלי חדש..."
+                        className="w-full bg-white text-slate-900 text-sm p-3 rounded-xl border-2 border-red-200 font-medium focus:border-red-600 focus:outline-none"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={isSubmitting}
+                      className="w-full min-h-[56px] rounded-xl bg-red-600 hover:bg-red-700 text-white font-black text-base uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl shadow-red-600/25 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-60"
+                    >
+                      {isSubmitting ? (
+                        <Loader2 className="w-6 h-6 animate-spin text-white" />
+                      ) : (
+                        <>
+                          <Trash2 className="w-5 h-5" />
+                          <span>אשר השבתה וגריעה מהמערכת</span>
+                        </>
+                      )}
+                    </button>
+                  </form>
+                )}
+              </div>
+            </>
           )}
         </div>
       </div>
-    </div>
+
+      {/* DIGITAL TOOL PASSPORT MODAL */}
+      <ToolPassportModal
+        isOpen={isPassportOpen}
+        asset={asset}
+        onClose={() => setIsPassportOpen(false)}
+        onAssetUpdated={(updated) => {
+          onActionComplete('דרכון הכלי עודכן בהצלחה', updated);
+        }}
+      />
+    </>
   );
 }

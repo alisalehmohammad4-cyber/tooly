@@ -8,12 +8,15 @@ import {
   Settings2,
   Wrench,
   Sparkles,
-  RefreshCw,
-  FileSpreadsheet,
   Scan,
   Layers,
   History as HistoryIcon,
+  ShieldAlert,
+  KeyRound,
+  HardHat,
 } from 'lucide-react';
+import { useAuth } from '@/context/AuthContext';
+import UserRoleHeaderPill from '@/components/common/UserRoleHeaderPill';
 
 interface TagItem {
   serial: string;
@@ -21,6 +24,8 @@ interface TagItem {
 }
 
 export default function PrintTagsView() {
+  const { role, openPinModal } = useAuth();
+
   // Config state
   const [prefix, setPrefix] = useState<string>('TOOL-');
   const [startNumber, setStartNumber] = useState<number>(1);
@@ -165,183 +170,224 @@ export default function PrintTagsView() {
             </div>
           </div>
 
-          {/* Primary Action Button */}
-          <button
-            type="button"
-            onClick={handlePrint}
-            disabled={isGenerating || tags.length === 0}
-            className="min-h-[52px] px-5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-sm uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-blue-600/25 active:scale-95 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Printer className="w-5 h-5 stroke-[2.5]" />
-            <span>הדפס גיליון תגיות</span>
-          </button>
+          {/* Right Header Actions */}
+          <div className="flex items-center gap-2">
+            <UserRoleHeaderPill />
+
+            {role !== 'worker' && (
+              <button
+                type="button"
+                onClick={handlePrint}
+                disabled={isGenerating || tags.length === 0}
+                className="min-h-[52px] px-5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-sm uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-blue-600/25 active:scale-95 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Printer className="w-5 h-5 stroke-[2.5]" />
+                <span>הדפס גיליון תגיות</span>
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
-      {/* 2. CONFIGURATION DRAWER (Screen-only) */}
-      <div className="print:hidden max-w-4xl mx-auto px-4 py-4">
-        <div className="rounded-2xl border-2 border-blue-100 bg-white p-5 shadow-sm shadow-blue-950/5 space-y-4">
-          <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
-            <Settings2 className="w-5 h-5 text-blue-600" />
-            <h2 className="text-sm font-black uppercase tracking-wider text-blue-950">
-              הגדרות תגיות ומספור סידורי
-            </h2>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-            {/* Prefix */}
+      {/* WORKER RESTRICTED SCREEN */}
+      {role === 'worker' ? (
+        <div className="print:hidden max-w-md mx-auto my-12 px-4">
+          <div className="rounded-3xl bg-white border-2 border-amber-200 p-6 shadow-xl text-center space-y-4">
+            <div className="w-16 h-16 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center mx-auto border border-amber-300">
+              <ShieldAlert className="w-8 h-8" />
+            </div>
             <div>
-              <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
-                קידומת מזהה (Prefix)
-              </label>
-              <input
-                type="text"
-                value={prefix}
-                onChange={(e) => setPrefix(e.target.value)}
-                placeholder="TOOL-"
-                className="w-full min-h-[48px] bg-white text-blue-950 font-mono font-bold text-sm px-3 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none shadow-sm"
-                dir="ltr"
-              />
+              <h2 className="text-lg font-black text-slate-900">
+                גישה מוגבלת - הדפסת תגיות ברקוד
+              </h2>
+              <p className="text-xs text-slate-600 font-medium mt-1">
+                הדפסת תגיות וקליטת פריטים חדשים למחסן שמורות למנהלי עבודה ומנהלי פרויקט בלבד.
+              </p>
             </div>
-
-            {/* Start Number */}
-            <div>
-              <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
-                מספר התחלתי
-              </label>
-              <input
-                type="number"
-                min="1"
-                value={startNumber}
-                onChange={(e) => setStartNumber(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                className="w-full min-h-[48px] bg-white text-blue-950 font-mono font-bold text-sm px-3 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none shadow-sm"
-                dir="ltr"
-              />
+            <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-xs text-amber-900 font-bold flex items-center justify-center gap-1.5">
+              <HardHat className="w-4 h-4 text-amber-600" />
+              <span>אתה מחובר כעת במצב עובד שטח</span>
             </div>
-
-            {/* Quantity Presets & Custom */}
-            <div>
-              <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
-                כמות להדפסה ({quantity})
-              </label>
-              <div className="flex gap-1.5">
-                {[12, 24, 48].map((qty) => (
-                  <button
-                    key={qty}
-                    type="button"
-                    onClick={() => handleQuantitySelect(qty)}
-                    className={`flex-1 min-h-[48px] rounded-xl text-xs font-black border transition-all cursor-pointer ${
-                      quantity === qty
-                        ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                        : 'bg-slate-50 text-blue-900 border-slate-200 hover:border-blue-300'
-                    }`}
-                  >
-                    {qty}
-                  </button>
-                ))}
-                <input
-                  type="number"
-                  min="1"
-                  max="200"
-                  value={customQtyInput}
-                  onChange={(e) => handleCustomQtyChange(e.target.value)}
-                  placeholder="מותאם"
-                  className="w-16 min-h-[48px] bg-white text-blue-950 font-bold text-xs text-center rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none shadow-sm"
-                  dir="ltr"
-                />
-              </div>
-            </div>
-
-            {/* Facility / Subtitle */}
-            <div>
-              <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
-                שם אתר / מחלקה לתגית
-              </label>
-              <input
-                type="text"
-                value={facilityText}
-                onChange={(e) => setFacilityText(e.target.value)}
-                placeholder="מחסן מרכזי"
-                className="w-full min-h-[48px] bg-white text-blue-950 font-bold text-sm px-3 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none shadow-sm"
-              />
-            </div>
-          </div>
-
-          {/* Quick Summary Bar */}
-          <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100 text-xs text-slate-500 font-medium">
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-blue-600" />
-              <span>
-                טווח קודים: <strong className="font-mono text-blue-950 font-bold" dir="ltr">{serials[0]}</strong> עד{' '}
-                <strong className="font-mono text-blue-950 font-bold" dir="ltr">{serials[serials.length - 1]}</strong>
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <FileSpreadsheet className="w-4 h-4 text-blue-500" />
-              <span>
-                הערכת גיליונות A4: כ-~{Math.ceil(serials.length / 12)} עמודים (12 תגיות לדף)
-              </span>
+            <div className="pt-2 flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={openPinModal}
+                className="w-full min-h-[52px] rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-blue-600/25 active:scale-95 transition-all cursor-pointer"
+              >
+                <KeyRound className="w-4 h-4" />
+                <span>הזן קוד PIN לכניסת מנהל</span>
+              </button>
+              <Link
+                href="/"
+                className="w-full py-2.5 text-xs font-bold text-slate-600 hover:text-slate-900 cursor-pointer"
+              >
+                חזור לסורק המהיר
+              </Link>
             </div>
           </div>
         </div>
-      </div>
+      ) : (
+        <>
+          {/* 2. CONFIGURATION DRAWER (Screen-only) */}
+          <div className="print:hidden max-w-4xl mx-auto px-4 py-4">
+            <div className="rounded-2xl border-2 border-blue-100 bg-white p-5 shadow-sm shadow-blue-950/5 space-y-4">
+              <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
+                <Settings2 className="w-5 h-5 text-blue-600" />
+                <h2 className="text-sm font-black uppercase tracking-wider text-blue-950">
+                  הגדרות תגיות ומספור סידורי
+                </h2>
+              </div>
 
-      {/* 3. PRINTABLE SHEET GRID */}
-      <main className="max-w-4xl mx-auto px-4 py-4 print:max-w-none print:m-0 print:p-0">
-        {isGenerating ? (
-          <div className="p-12 text-center text-slate-500 space-y-3">
-            <RefreshCw className="w-8 h-8 mx-auto text-blue-600 animate-spin" />
-            <div className="text-sm font-bold text-blue-950">מייצר תגיות ברקוד / QR ברזולוציה גבוהה...</div>
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 print:grid-cols-3 print:gap-3 print:p-1">
-            {tags.map((tag) => (
-              <div
-                key={tag.serial}
-                className="industrial-tag relative bg-white text-black border-2 border-dashed border-slate-300 print:border-black print:border-2 rounded-lg print:rounded-none p-3 flex flex-col items-center justify-between text-center shadow-sm overflow-hidden"
-              >
-                {/* Cut guidelines indicator */}
-                <div className="absolute top-1 left-1 w-2 h-2 border-t-2 border-l-2 border-slate-300 print:border-black pointer-events-none" />
-                <div className="absolute top-1 right-1 w-2 h-2 border-t-2 border-r-2 border-slate-300 print:border-black pointer-events-none" />
-                <div className="absolute bottom-1 left-1 w-2 h-2 border-b-2 border-l-2 border-slate-300 print:border-black pointer-events-none" />
-                <div className="absolute bottom-1 right-1 w-2 h-2 border-b-2 border-r-2 border-slate-300 print:border-black pointer-events-none" />
-
-                {/* Badge Industrial Header */}
-                <div className="w-full bg-blue-950 text-white text-[10px] font-black uppercase tracking-widest py-0.5 px-2 rounded-sm print:bg-black print:text-white flex items-center justify-center gap-1.5 shadow-sm">
-                  <Wrench className="w-2.5 h-2.5 text-blue-400 print:text-white shrink-0" />
-                  <span>ציוד מנוהל TOOLY</span>
-                </div>
-
-                {/* Crisp QR Code Center */}
-                <div className="my-2 p-1 bg-white flex items-center justify-center">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={tag.qrDataUrl}
-                    alt={tag.serial}
-                    className="w-28 h-28 object-contain"
-                    style={{ imageRendering: 'pixelated' }}
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+                {/* Prefix */}
+                <div>
+                  <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
+                    קידומת מזהה (Prefix)
+                  </label>
+                  <input
+                    type="text"
+                    value={prefix}
+                    onChange={(e) => setPrefix(e.target.value)}
+                    placeholder="TOOL-"
+                    className="w-full min-h-[48px] bg-white text-blue-950 font-mono font-bold text-base px-3.5 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none uppercase shadow-sm"
+                    dir="ltr"
                   />
                 </div>
 
-                {/* Badge Footer: Human Readable Monospace Serial & Facility */}
-                <div className="w-full border-t border-slate-200 print:border-black pt-1.5 space-y-0.5">
-                  <div className="font-mono font-black text-sm tracking-wider text-black" dir="ltr">
-                    {tag.serial}
-                  </div>
-                  {facilityText && (
-                    <div className="text-[9px] uppercase font-extrabold text-slate-700 print:text-black tracking-tight truncate">
-                      {facilityText}
-                    </div>
-                  )}
-                  <div className="text-[7px] uppercase tracking-widest text-slate-400 print:text-zinc-600 font-semibold">
-                    סרוק לבדיקה וניפוק &bull; אין להסיר
+                {/* Starting Number */}
+                <div>
+                  <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
+                    מספר התחלתי
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={startNumber}
+                    onChange={(e) => setStartNumber(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                    className="w-full min-h-[48px] bg-white text-blue-950 font-mono font-bold text-base px-3.5 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none shadow-sm"
+                    dir="ltr"
+                  />
+                </div>
+
+                {/* Facility / Warehouse Label */}
+                <div>
+                  <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
+                    שם האתר / מחסן על התגית
+                  </label>
+                  <input
+                    type="text"
+                    value={facilityText}
+                    onChange={(e) => setFacilityText(e.target.value)}
+                    placeholder="מחסן ראשי"
+                    className="w-full min-h-[48px] bg-white text-blue-950 font-bold text-sm px-3.5 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none shadow-sm"
+                  />
+                </div>
+
+                {/* Tag Quantity Presets */}
+                <div>
+                  <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
+                    כמות תגיות להדפסה
+                  </label>
+                  <div className="grid grid-cols-4 gap-1">
+                    {[12, 24, 48].map((qty) => (
+                      <button
+                        key={qty}
+                        type="button"
+                        onClick={() => handleQuantitySelect(qty)}
+                        className={`min-h-[48px] rounded-xl font-black text-xs transition-all border cursor-pointer ${
+                          quantity === qty
+                            ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                            : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-blue-50'
+                        }`}
+                      >
+                        {qty}
+                      </button>
+                    ))}
+                    <input
+                      type="number"
+                      min="1"
+                      max="200"
+                      value={customQtyInput}
+                      onChange={(e) => handleCustomQtyChange(e.target.value)}
+                      placeholder="מותאם"
+                      title="כמות מותאמת אישית"
+                      className="min-h-[48px] w-full text-center bg-white text-blue-950 font-bold text-xs rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none"
+                    />
                   </div>
                 </div>
               </div>
-            ))}
+
+              {/* Summary / Range Preview */}
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-2 text-xs font-medium text-slate-500 border-t border-slate-100">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-blue-600" />
+                  <span>
+                    טווח ברקודים מופק: <strong className="font-mono text-blue-950" dir="ltr">{serials[0]}</strong> עד{' '}
+                    <strong className="font-mono text-blue-950" dir="ltr">{serials[serials.length - 1]}</strong>
+                  </span>
+                </div>
+                <div className="text-slate-400">
+                  סה&quot;כ: <strong className="text-blue-900 font-bold">{tags.length} תגיות</strong> (מותאם לפורמט גיליון A4)
+                </div>
+              </div>
+            </div>
           </div>
-        )}
-      </main>
+
+          {/* 3. PRINTABLE INDUSTRIAL TAGS GRID (A4 Optimized) */}
+          <main className="max-w-4xl mx-auto px-4 pb-28 print:p-0 print:m-0 print:max-w-none">
+            {isGenerating ? (
+              <div className="p-12 text-center text-slate-400 font-bold text-sm">
+                מייצר תגיות QR באיכות גבוהה...
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 print:grid-cols-3 gap-3 print:gap-2">
+                {tags.map((tag) => (
+                  <div
+                    key={tag.serial}
+                    className="industrial-tag bg-white border-2 border-slate-900 rounded-xl p-3 flex flex-col items-center justify-between text-center shadow-sm print:shadow-none print:border-slate-800 print:rounded-lg print:p-2 min-h-[165px]"
+                  >
+                    {/* Tag Header */}
+                    <div className="w-full flex items-center justify-between border-b-2 border-slate-900 pb-1 mb-1.5 print:border-slate-800">
+                      <div className="flex items-center gap-1 font-black text-xs text-slate-950 tracking-wider">
+                        <Wrench className="w-3.5 h-3.5 text-blue-600 print:text-black" />
+                        <span>TOOLY</span>
+                      </div>
+                      <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-800 border border-slate-300 print:border-black">
+                        ציוד מבוקר
+                      </span>
+                    </div>
+
+                    {/* QR Code Canvas/Image */}
+                    <div className="my-1 p-1 bg-white rounded flex items-center justify-center">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={tag.qrDataUrl}
+                        alt={`QR Code for ${tag.serial}`}
+                        className="w-24 h-24 print:w-20 print:h-20 object-contain"
+                      />
+                    </div>
+
+                    {/* High-Contrast Monospace Serial Code */}
+                    <div className="w-full mt-1 pt-1 border-t border-slate-200 print:border-slate-400 text-center">
+                      <div className="text-xs font-mono font-black text-slate-950 tracking-wider select-all" dir="ltr">
+                        {tag.serial}
+                      </div>
+                      <div className="text-[9px] font-bold text-slate-600 truncate mt-0.5">
+                        {facilityText}
+                      </div>
+                    </div>
+
+                    {/* Micro Security Notice */}
+                    <div className="w-full text-[8px] font-semibold text-slate-400 mt-1 print:text-black flex items-center justify-center gap-1">
+                      <span>סרוק לבדיקה וניפוק • אין להסיר</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </main>
+        </>
+      )}
 
       {/* 4. UNIVERSAL BOTTOM NAVIGATION BAR (Screen only) */}
       <nav

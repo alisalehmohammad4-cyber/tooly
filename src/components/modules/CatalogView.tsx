@@ -20,10 +20,17 @@ import {
   Printer,
   Scan,
   Wrench,
-  Sparkles,
   History as HistoryIcon,
+  FileText,
+  Lock,
+  BookmarkCheck,
 } from 'lucide-react';
 import type { CatalogDataPayload } from '@/app/actions/assets';
+import { useAuth } from '@/context/AuthContext';
+import UserRoleHeaderPill from '@/components/common/UserRoleHeaderPill';
+import AssetActionModal from '@/components/modules/AssetActionModal';
+import ToolPassportModal from '@/components/modules/ToolPassportModal';
+import type { ScannedAssetDetails } from '@/app/actions/custody';
 
 interface CatalogViewProps {
   initialData: CatalogDataPayload;
@@ -40,13 +47,15 @@ function getCategoryIcon(iconName: string | null, className: string = 'w-6 h-6')
     case 'lifting':
       return <Anchor className={className} />;
     case 'scissors':
+    case 'saw':
     case 'cutting':
       return <Scissors className={className} />;
+    case 'hammer':
     case 'drill':
     case 'drilling':
       return <Hammer className={className} />;
     case 'ruler':
-    case 'gauge':
+    case 'level':
     case 'measurement':
       return <Ruler className={className} />;
     default:
@@ -55,11 +64,18 @@ function getCategoryIcon(iconName: string | null, className: string = 'w-6 h-6')
 }
 
 export default function CatalogView({ initialData }: CatalogViewProps) {
+  const { role } = useAuth();
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>(
     initialData.selectedWarehouseId || 'all'
   );
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
+
+  // Modal inspection & custody state
+  const [selectedAsset, setSelectedAsset] = useState<ScannedAssetDetails | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+  const [passportAsset, setPassportAsset] = useState<ScannedAssetDetails | null>(null);
+  const [isPassportOpen, setIsPassportOpen] = useState<boolean>(false);
 
   // Filter assets by selected warehouse
   const filteredAssets = useMemo(() => {
@@ -137,12 +153,14 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
 
           {/* Quick Nav Shortcut to Scanner, History or Print */}
           <div className="flex items-center gap-1.5">
+            <UserRoleHeaderPill />
+
             <Link
               href="/"
               className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-50/80 hover:bg-blue-100 text-blue-800 border border-blue-200 text-xs font-bold transition-all active:scale-95 shadow-sm"
               title="סורק מהיר"
             >
-              <Scan className="w-3.5 h-3.5 text-blue-600" />
+              <Scan className="w-3.5 h-3.5 text-blue-600 shrink-0" />
               <span>סורק</span>
             </Link>
             <Link
@@ -150,17 +168,19 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
               className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-50/80 hover:bg-blue-100 text-blue-800 border border-blue-200 text-xs font-bold transition-all active:scale-95 shadow-sm"
               title="יומן תנועות"
             >
-              <HistoryIcon className="w-3.5 h-3.5 text-blue-600" />
+              <HistoryIcon className="w-3.5 h-3.5 text-blue-600 shrink-0" />
               <span>יומן</span>
             </Link>
-            <Link
-              href="/print-tags"
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-50/80 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-bold transition-all active:scale-95 shadow-sm"
-              title="הדפסת תגיות"
-            >
-              <Printer className="w-3.5 h-3.5 text-blue-600" />
-              <span>תגיות</span>
-            </Link>
+            {role !== 'worker' && (
+              <Link
+                href="/print-tags"
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-50/80 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-bold transition-all active:scale-95 shadow-sm"
+                title="הדפסת תגיות"
+              >
+                <Printer className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                <span>תגיות</span>
+              </Link>
+            )}
           </div>
         </div>
 
@@ -173,11 +193,9 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
               onChange={(e) => setSelectedWarehouseId(e.target.value)}
               className="w-full min-h-[50px] bg-white text-blue-950 font-bold text-sm pr-10 pl-9 py-2.5 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none appearance-none cursor-pointer transition-colors shadow-sm"
             >
-              <option value="all" className="bg-white text-blue-950 font-bold">
-                כל האתרים והמחסנים ({filteredAssets.length} כלים סה&quot;כ)
-              </option>
+              <option value="all">כל המחסנים והאתרים הפעילים</option>
               {initialData.warehouses.map((wh) => (
-                <option key={wh.id} value={wh.id} className="bg-white text-blue-950 font-bold">
+                <option key={wh.id} value={wh.id}>
                   {wh.code ? `[${wh.code}] ` : ''}
                   {wh.name}
                 </option>
@@ -192,100 +210,109 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
 
       {/* 2. MAIN CONTENT AREA */}
       <main className="max-w-lg mx-auto px-4 py-4 space-y-4">
-        {/* VIEW A: CATEGORIES LIST (REFERENCE DESIGN MATCH) */}
-        {!activeCategory ? (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between px-1">
-              <span className="text-xs uppercase font-extrabold tracking-wider text-blue-900">
-                קטגוריות ציוד וכלי עבודה
-              </span>
-              <span className="text-xs font-bold text-blue-700 flex items-center gap-1">
-                <Sparkles className="w-3.5 h-3.5 text-blue-600" />
-                {filteredAssets.length} כלים במלאי
+        {/* VIEW A: CATEGORIES OVERVIEW GRID */}
+        {!activeCategoryId && (
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Layers className="w-4 h-4 text-blue-600" />
+                <h2 className="text-xs uppercase font-extrabold text-blue-900 tracking-wider">
+                  קטגוריות ציוד ({categoriesWithCount.length})
+                </h2>
+              </div>
+              <span className="text-xs text-slate-500 font-bold">
+                סה&quot;כ {filteredAssets.length} כלים במלאי
               </span>
             </div>
 
-            <div className="space-y-2.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {categoriesWithCount.map((cat) => (
                 <button
                   key={cat.id}
                   type="button"
-                  onClick={() => setActiveCategoryId(cat.id)}
-                  className="w-full min-h-[76px] bg-white hover:bg-blue-50/50 text-blue-950 rounded-2xl p-4 flex items-center justify-between border-2 border-blue-100 shadow-sm hover:shadow-md transition-all active:scale-[0.99] group cursor-pointer text-right"
+                  onClick={() => {
+                    setActiveCategoryId(cat.id);
+                    setSearchQuery('');
+                  }}
+                  className="p-4 rounded-2xl bg-white border-2 border-blue-100 hover:border-blue-400 hover:shadow-md transition-all flex items-center justify-between text-right group active:scale-[0.98] cursor-pointer"
                 >
-                  <div className="flex items-center gap-4">
-                    {/* Category Icon Capsule */}
-                    <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white flex items-center justify-center transition-colors shadow-inner shrink-0">
-                      {getCategoryIcon(cat.icon, 'w-6 h-6 stroke-[2.2]')}
+                  <div className="flex items-center gap-3.5">
+                    <div className="w-12 h-12 rounded-xl bg-blue-50 group-hover:bg-blue-600 group-hover:text-white text-blue-600 flex items-center justify-center transition-colors shrink-0 shadow-sm border border-blue-100">
+                      {getCategoryIcon(cat.icon)}
                     </div>
-
                     <div>
-                      <h2 className="text-base font-black text-blue-950 tracking-tight leading-snug">
+                      <h3 className="text-base font-black text-blue-950 group-hover:text-blue-600 transition-colors leading-snug">
                         {cat.name}
-                      </h2>
-                      <div className="text-xs font-bold text-blue-600/80 mt-0.5">
-                        {cat.toolCount} {cat.toolCount === 1 ? 'כלי רשום' : 'כלים רשומים'}
-                      </div>
+                      </h3>
+                      <p className="text-xs text-slate-500 font-bold mt-0.5">
+                        {cat.toolCount} כלים רשומים
+                      </p>
                     </div>
                   </div>
-
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-extrabold px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
-                      {cat.toolCount}
-                    </span>
-                    <div className="w-8 h-8 rounded-full bg-blue-50 group-hover:bg-blue-600 group-hover:text-white flex items-center justify-center transition-colors">
-                      <ChevronLeft className="w-4 h-4 stroke-[3] text-blue-600 group-hover:text-white" />
-                    </div>
-                  </div>
+                  <ChevronLeft className="w-5 h-5 text-slate-400 group-hover:text-blue-600 transition-colors shrink-0" />
                 </button>
               ))}
             </div>
           </div>
-        ) : (
-          /* VIEW B: CATEGORY DRILLDOWN ASSET LIST */
+        )}
+
+        {/* VIEW B: CATEGORY DRILLDOWN & TOOL LIST */}
+        {activeCategoryId && (
           <div className="space-y-4">
-            {/* Search filter within active category */}
+            {/* Search Filter Inside Category */}
             <div className="relative">
-              <Search className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-600 pointer-events-none" />
+              <Search className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder={`חיפוש לפי שם כלי, מותג, ברקוד או עובד...`}
-                className="w-full min-h-[50px] bg-white text-blue-950 font-bold text-sm pr-10 pl-14 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none placeholder:text-slate-400 shadow-sm"
+                placeholder="חיפוש לפי שם כלי, דגם או מספר סידורי..."
+                className="w-full min-h-[50px] bg-white text-blue-950 font-medium text-sm pr-10 pl-14 py-2.5 rounded-xl border-2 border-blue-100 focus:border-blue-600 focus:outline-none shadow-sm placeholder:text-slate-400"
               />
               {searchQuery && (
                 <button
                   type="button"
                   onClick={() => setSearchQuery('')}
-                  className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-blue-600 hover:text-blue-800 cursor-pointer"
+                  className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400 hover:text-blue-600 cursor-pointer"
                 >
                   נקה
                 </button>
               )}
             </div>
 
-            {/* Assets List */}
-            {categoryAssets.length === 0 ? (
-              <div className="p-10 rounded-2xl border-2 border-dashed border-blue-200 bg-white text-center space-y-3 shadow-sm">
-                <Wrench className="w-10 h-10 text-blue-400 mx-auto" />
-                <div className="text-sm font-bold text-blue-950">
-                  לא נמצאו כלים בתצוגה זו
-                </div>
-                <p className="text-xs text-slate-500 max-w-xs mx-auto">
-                  {searchQuery
-                    ? 'אין כלים התואמים את מונח החיפוש.'
-                    : 'אין כלים רשומים כרגע בקטגוריה זו במחסן הנבחר.'}
+            {/* Results Count Header */}
+            <div className="flex items-center justify-between text-xs font-bold text-slate-500 px-1">
+              <span>
+                נמצאו <strong>{categoryAssets.length}</strong> כלים
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveCategoryId(null);
+                  setSearchQuery('');
+                }}
+                className="text-blue-600 hover:underline flex items-center gap-1 cursor-pointer font-black"
+              >
+                <span>חזור לכל הקטגוריות</span>
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* Empty State */}
+            {categoryAssets.length === 0 && (
+              <div className="p-8 rounded-2xl border-2 border-dashed border-slate-200 bg-white text-center space-y-2">
+                <Wrench className="w-8 h-8 text-slate-300 mx-auto" />
+                <p className="text-sm font-black text-slate-700">
+                  לא נמצאו כלים בקטגוריה זו
                 </p>
-                <Link
-                  href="/"
-                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 text-white font-black text-xs uppercase tracking-wider shadow-md hover:bg-blue-700 active:scale-95 transition-all"
-                >
-                  <Scan className="w-3.5 h-3.5" />
-                  <span>רישום כלי חדש</span>
-                </Link>
+                <p className="text-xs text-slate-500">
+                  נסה לשנות את הסינון או המחסן שנבחר.
+                </p>
               </div>
-            ) : (
+            )}
+
+            {/* Tool Cards List */}
+            {categoryAssets.length > 0 && (
               <div className="space-y-3">
                 {categoryAssets.map((asset) => {
                   const isAvailable = asset.status === 'available';
@@ -295,7 +322,7 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
                   return (
                     <div
                       key={asset.id}
-                      className="rounded-2xl border-2 border-blue-100 bg-white p-4 shadow-sm shadow-blue-950/5 space-y-3 hover:border-blue-300 transition-colors"
+                      className="p-4 rounded-2xl bg-white border-2 border-blue-100 shadow-sm hover:border-blue-300 transition-all space-y-3"
                     >
                       {/* Top Header: Brand & Live Status Badge */}
                       <div className="flex items-start justify-between gap-2">
@@ -358,6 +385,115 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
                           <span className="truncate max-w-[180px]">{asset.warehouseName}</span>
                         </div>
                       </div>
+
+                      {/* Lockout, Safety Overdue & Reservation Badges */}
+                      {(asset.isLocked ||
+                        (asset.safetyInspectionDue &&
+                          new Date(asset.safetyInspectionDue).getTime() < new Date().getTime()) ||
+                        asset.reservation) && (
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {asset.isLocked && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded bg-red-100 text-red-800 border border-red-300">
+                              <Lock className="w-3 h-3 text-red-600" />
+                              נעול מנהלתית
+                            </span>
+                          )}
+                          {asset.safetyInspectionDue &&
+                            new Date(asset.safetyInspectionDue).getTime() < new Date().getTime() && (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-300">
+                                <AlertTriangle className="w-3 h-3 text-rose-600" />
+                                בדיקת בטיחות פגה
+                              </span>
+                            )}
+                          {asset.reservation && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300">
+                              <BookmarkCheck className="w-3 h-3 text-amber-600" />
+                              משוריין: {asset.reservation.projectName}
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Action Buttons: Custody Modal & Passport Modal */}
+                      <div className="flex items-center gap-2 mt-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedAsset({
+                              id: asset.id,
+                              qrCode: asset.qrCode,
+                              status: asset.status,
+                              condition: asset.condition,
+                              currentAssignedWorker: asset.currentAssignedWorker,
+                              currentWarehouseId: asset.warehouseId,
+                              warehouseName: asset.warehouseName,
+                              warehouseCode: 'WH',
+                              toolName: asset.toolName,
+                              brand: asset.brand,
+                              modelNumber: asset.modelNumber,
+                              version: 1,
+                              purchaseDate: asset.purchaseDate,
+                              purchaseCost: asset.purchaseCost,
+                              warrantyUntil: asset.warrantyUntil,
+                              safetyInspectionDue: asset.safetyInspectionDue,
+                              isLocked: asset.isLocked || false,
+                              lockReason: asset.lockReason,
+                              reservation: asset.reservation,
+                            });
+                            setIsModalOpen(true);
+                          }}
+                          className={`flex-1 min-h-[44px] rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] cursor-pointer shadow-sm ${
+                            role === 'worker'
+                              ? 'bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300'
+                              : 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-600/20'
+                          }`}
+                        >
+                          {role === 'worker' ? (
+                            <>
+                              <Wrench className="w-3.5 h-3.5" />
+                              <span>כרטיס כלי ודיווח תקלה</span>
+                            </>
+                          ) : (
+                            <>
+                              <UserCheck className="w-3.5 h-3.5" />
+                              <span>פעולות ניפוק והחזרה</span>
+                            </>
+                          )}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPassportAsset({
+                              id: asset.id,
+                              qrCode: asset.qrCode,
+                              status: asset.status,
+                              condition: asset.condition,
+                              currentAssignedWorker: asset.currentAssignedWorker,
+                              currentWarehouseId: asset.warehouseId,
+                              warehouseName: asset.warehouseName,
+                              warehouseCode: 'WH',
+                              toolName: asset.toolName,
+                              brand: asset.brand,
+                              modelNumber: asset.modelNumber,
+                              version: 1,
+                              purchaseDate: asset.purchaseDate,
+                              purchaseCost: asset.purchaseCost,
+                              warrantyUntil: asset.warrantyUntil,
+                              safetyInspectionDue: asset.safetyInspectionDue,
+                              isLocked: asset.isLocked || false,
+                              lockReason: asset.lockReason,
+                              reservation: asset.reservation,
+                            });
+                            setIsPassportOpen(true);
+                          }}
+                          className="min-h-[44px] px-3 rounded-xl bg-white hover:bg-blue-50 text-blue-900 text-xs font-bold border border-blue-200 flex items-center gap-1 shadow-sm transition-all active:scale-95 cursor-pointer"
+                          title="דרכון כלי דיגיטלי"
+                        >
+                          <FileText className="w-3.5 h-3.5 text-blue-600" />
+                          <span>דרכון כלי</span>
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
@@ -366,6 +502,33 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
           </div>
         )}
       </main>
+
+      {/* CUSTODY & TOOL INFO ACTION MODAL */}
+      <AssetActionModal
+        isOpen={isModalOpen}
+        asset={selectedAsset}
+        warehouses={initialData.warehouses}
+        onClose={() => {
+          setIsModalOpen(false);
+          setSelectedAsset(null);
+        }}
+        onActionComplete={(_msg, updatedAsset) => {
+          setSelectedAsset(updatedAsset);
+        }}
+      />
+
+      {/* DIGITAL TOOL PASSPORT MODAL */}
+      <ToolPassportModal
+        isOpen={isPassportOpen}
+        asset={passportAsset}
+        onClose={() => {
+          setIsPassportOpen(false);
+          setPassportAsset(null);
+        }}
+        onAssetUpdated={(updated) => {
+          setPassportAsset(updated);
+        }}
+      />
 
       {/* 3. UNIVERSAL BOTTOM NAVIGATION BAR (FIXED) */}
       <nav

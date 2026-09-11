@@ -39,6 +39,34 @@ export type AssetCondition =
   | 'needs_repair'
   | 'retired';
 
+export interface AssetReservation {
+  projectName: string;
+  reservedForDate: string;
+  reservedBy: string;
+}
+
+export type DamageType =
+  | 'misuse'
+  | 'wear_tear'
+  | 'burned_motor'
+  | 'impact_drop'
+  | 'other';
+
+export type ChargeParty = 'worker' | 'subcontractor' | 'company';
+
+export interface DamageReport {
+  isDamaged: boolean;
+  damageType: DamageType;
+  estimatedCost?: number;
+  chargeParty?: ChargeParty;
+  notes?: string;
+}
+
+export interface GpsCoordinates {
+  lat: number;
+  lng: number;
+}
+
 export interface Asset {
   id: string;
   toolModelId: string;
@@ -54,4 +82,22 @@ export interface Asset {
     hasCharger: boolean;
     hasCase: boolean;
   } | null;
+  purchaseDate?: string;
+  purchaseCost?: number;
+  warrantyUntil?: string;
+  photoUrl?: string;
+  safetyInspectionDue?: string;
+  isLocked?: boolean;
+  lockReason?: string;
+  reservation?: AssetReservation | null;
 }
+
+export type UserRole = 'worker' | 'supervisor' | 'admin';
+
+export interface AppUser {
+  id: string;
+  fullName: string;
+  role: UserRole;
+  pinCode?: string;
+}
+

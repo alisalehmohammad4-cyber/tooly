@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from "next";
 import { Heebo } from "next/font/google";
 import "./globals.css";
 import { PwaInstallBanner } from "@/components/modules/PwaInstallBanner";
+import { AuthProvider } from "@/context/AuthContext";
+import PinPadModal from "@/components/common/PinPadModal";
 
 const heebo = Heebo({
   subsets: ["hebrew", "latin"],
@@ -38,8 +40,11 @@ export default function RootLayout({
   return (
     <html lang="he" dir="rtl" className={`${heebo.variable} ${heebo.className} bg-white text-blue-950`}>
       <body className="min-h-screen bg-white text-blue-950 antialiased selection:bg-blue-600 selection:text-white font-sans">
-        {children}
-        <PwaInstallBanner />
+        <AuthProvider>
+          {children}
+          <PinPadModal />
+          <PwaInstallBanner />
+        </AuthProvider>
       </body>
     </html>
   );

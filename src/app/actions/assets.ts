@@ -2,6 +2,7 @@
 
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { QuickOnboardSchema, type QuickOnboardInput } from '@/core/assets/onboard.schema';
+import type { AssetReservation } from '@/types/domain';
 
 export interface OnboardFormData {
   warehouses: Array<{
@@ -224,6 +225,14 @@ export interface CatalogAssetItem {
   toolName: string;
   brand: string;
   modelNumber: string | null;
+  purchaseDate?: string;
+  purchaseCost?: number;
+  warrantyUntil?: string;
+  photoUrl?: string;
+  safetyInspectionDue?: string;
+  isLocked?: boolean;
+  lockReason?: string;
+  reservation?: AssetReservation | null;
 }
 
 export interface CatalogDataPayload {
@@ -350,6 +359,9 @@ const FALLBACK_ASSETS: CatalogAssetItem[] = [
     toolName: '14-Inch Portable Cut-Off Saw 15A',
     brand: 'Makita',
     modelNumber: 'LW1401',
+    purchaseCost: 2800,
+    safetyInspectionDue: '2024-01-15T00:00:00.000Z',
+    isLocked: false,
   },
   {
     id: 'ast-cut-02',
@@ -466,6 +478,9 @@ const FALLBACK_ASSETS: CatalogAssetItem[] = [
     toolName: 'Rugby 610 Self-Leveling Rotary Laser System',
     brand: 'Leica Geosystems',
     modelNumber: '6005983',
+    purchaseCost: 6500,
+    isLocked: true,
+    lockReason: 'נעילה מנהלתית - נדרש כיול לייזר במעבדה מוסמכת',
   },
   {
     id: 'ast-mea-02',

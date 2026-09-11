@@ -1,13 +1,16 @@
 'use server';
 
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import type { DamageReport, GpsCoordinates } from '@/types/domain';
 
 export type AuditActionType =
   | 'CHECKOUT'
   | 'CHECKIN'
   | 'TRANSFER_RECEIVE'
   | 'MAINTENANCE_FLAG'
-  | 'ONBOARD';
+  | 'ONBOARD'
+  | 'LOCK_STATUS'
+  | 'SAFETY_INSPECTION';
 
 export interface AuditHistoryRecord {
   id: string;
@@ -33,6 +36,8 @@ export interface AuditHistoryRecord {
     hasCharger: boolean;
     hasCase: boolean;
   } | null;
+  gps?: GpsCoordinates | null;
+  damageReport?: DamageReport | null;
 }
 
 export interface AuditHistoryFilters {
@@ -62,69 +67,80 @@ const FALLBACK_HISTORY_ENTRIES: AuditHistoryRecord[] = [
     brand: 'Lincoln Electric',
     modelNumber: 'K3963-1',
     action: 'CHECKOUT',
-    performedBy: 'Field Supervisor',
-    targetWorker: 'Carlos Mendez',
-    workerPhone: '+966 50 882 1940',
+    performedBy: 'יוסי כהן (מנהל עבודה)',
+    targetWorker: 'ישראל ישראלי',
+    workerPhone: '050-8821940',
     condition: 'good',
     warehouseId: 'wh-site-02',
-    warehouseName: 'Site Container Bravo',
+    warehouseName: 'אתר בנייה - מכולה ב׳',
     warehouseCode: 'SCB-02',
-    notes: 'Dispatched for structural column welding at Sector 4.',
+    notes: 'ניפוק לריתוך עמודי קונסטרוקציה אגף דרומי.',
     createdAt: new Date(Date.now() - 1000 * 60 * 25).toISOString(), // 25 mins ago
+    gps: { lat: 32.0853, lng: 34.7818 }, // Tel Aviv
   },
   {
     id: 'aud-102',
     assetId: 'ast-lft-02',
     qrCode: 'TOOL-LFT-011',
-    toolName: 'LB Lever Puller Hoist 1.5-Ton',
+    toolName: 'כננת מנוף ידנית 1.5 טון',
     brand: 'Harrington',
     modelNumber: 'LB015',
     action: 'CHECKOUT',
-    performedBy: 'Lead Rigging Agent',
-    targetWorker: 'Marcus Vance',
-    workerPhone: '+966 55 319 4421',
+    performedBy: 'יוסי כהן (מנהל עבודה)',
+    targetWorker: 'מוחמד עלי',
+    workerPhone: '052-3194421',
     condition: 'good',
     warehouseId: 'wh-site-02',
-    warehouseName: 'Site Container Bravo',
+    warehouseName: 'אתר בנייה - מכולה ב׳',
     warehouseCode: 'SCB-02',
-    notes: 'Heavy pipe rack positioning crew checkout.',
+    notes: 'הרמת צנרת ראשית קומה 4.',
     createdAt: new Date(Date.now() - 1000 * 60 * 75).toISOString(), // 1 hr 15 mins ago
+    gps: { lat: 32.794, lng: 34.9896 }, // Haifa
   },
   {
     id: 'aud-103',
     assetId: 'ast-wld-03',
     qrCode: 'TOOL-WLD-003',
-    toolName: 'Rebel EMP 205ic Multi-Material System',
+    toolName: 'רתכת מקצועית Rebel EMP 205ic',
     brand: 'ESAB',
     modelNumber: '0558102553',
     action: 'MAINTENANCE_FLAG',
-    performedBy: 'Inspection Specialist',
+    performedBy: 'עובד שטח',
     targetWorker: null,
     workerPhone: null,
     condition: 'needs_repair',
     warehouseId: 'wh-main-01',
-    warehouseName: 'Central Depot - Bay A',
+    warehouseName: 'מחסן מרכזי - תל אביב',
     warehouseCode: 'CDB-01',
-    notes: 'Wire feed motor stalling intermittently. Sent to technician queue.',
+    notes: 'מנוע הזנת חוט נתקע ומקצר תחת עומס. הועבר לבדיקת מעבדה.',
     createdAt: new Date(Date.now() - 1000 * 60 * 180).toISOString(), // 3 hours ago
+    gps: { lat: 31.7683, lng: 35.2137 }, // Jerusalem
+    damageReport: {
+      isDamaged: true,
+      damageType: 'burned_motor',
+      estimatedCost: 650,
+      chargeParty: 'company',
+      notes: 'מנוע הזנת חוט התחמם ונשרף. דורש החלפת סלילים מקוריים.',
+    },
   },
   {
     id: 'aud-104',
     assetId: 'ast-cut-02',
     qrCode: 'TOOL-CUT-021',
-    toolName: '20V MAX Deep Cut Cordless Band Saw',
+    toolName: 'מסור סרט נטען 20V Deep Cut',
     brand: 'DeWalt',
     modelNumber: 'DCS374B',
     action: 'CHECKOUT',
-    performedBy: 'Tool Crib Agent',
-    targetWorker: 'Sami Al-Hassan',
-    workerPhone: '+966 54 112 8790',
+    performedBy: 'דני לוי (מנהל פרויקט)',
+    targetWorker: 'סמי אל-חסן',
+    workerPhone: '054-1128790',
     condition: 'good',
     warehouseId: 'wh-van-03',
-    warehouseName: 'Mobile Service Van 05',
+    warehouseName: 'רכב שירות נייד 05',
     warehouseCode: 'MSV-05',
-    notes: 'HVAC ducting modification on offshore barge.',
+    notes: 'חיתוך תעלות מיזוג אוויר בגג המבנה.',
     createdAt: new Date(Date.now() - 1000 * 60 * 240).toISOString(), // 4 hours ago
+    gps: { lat: 31.2529, lng: 34.7915 }, // Beer Sheva
   },
   {
     id: 'aud-105',

@@ -22,15 +22,23 @@ import {
   History as HistoryIcon,
   ShoppingCart,
   Zap,
+  HardHat,
+  KeyRound,
+  FileText,
+  Lock,
+  BookmarkCheck,
 } from 'lucide-react';
 import type { Category, Warehouse, AssetCondition } from '@/types/domain';
 import { checkQrCodeExists, onboardAsset } from '@/app/actions/assets';
 import AssetActionModal from '@/components/modules/AssetActionModal';
 import BulkCheckoutModal from '@/components/modules/BulkCheckoutModal';
+import ToolPassportModal from '@/components/modules/ToolPassportModal';
 import {
   getAssetDetailsByQr,
   type ScannedAssetDetails,
 } from '@/app/actions/custody';
+import { useAuth } from '@/context/AuthContext';
+import UserRoleHeaderPill from '@/components/common/UserRoleHeaderPill';
 
 interface QuickOnboardViewProps {
   categories: Category[];
@@ -56,6 +64,8 @@ export default function QuickOnboardView({
   categories,
   warehouses,
 }: QuickOnboardViewProps) {
+  const { role, openPinModal } = useAuth();
+
   // Sticky Warehouse State (Retained across scans)
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>(
     warehouses[0]?.id || ''
@@ -96,6 +106,7 @@ export default function QuickOnboardView({
   const [scannedRegisteredAsset, setScannedRegisteredAsset] =
     useState<ScannedAssetDetails | null>(null);
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+  const [isPassportOpen, setIsPassportOpen] = useState<boolean>(false);
 
   // Bulk Dispatch Cart State
   const [dispatchCart, setDispatchCart] = useState<ScannedAssetDetails[]>([]);
@@ -196,8 +207,8 @@ export default function QuickOnboardView({
         const existing = await getAssetDetailsByQr(cleanQr);
 
         if (existing) {
-          // RAPID CONTINUOUS DISPATCH MODE:
-          if (isRapidDispatchMode) {
+          // RAPID CONTINUOUS DISPATCH MODE (Supervisor & Admin only):
+          if (isRapidDispatchMode && role !== 'worker') {
             if (existing.status === 'available') {
               handleAddToCart(existing);
               // In rapid continuous dispatch, do not stop camera — continue scanning!
@@ -212,7 +223,7 @@ export default function QuickOnboardView({
             }
           }
 
-          // STANDARD MODE -> Open custody modal
+          // STANDARD MODE / WORKER MODE -> Open custody / tool info modal
           await stopScanner();
           setQrCode(cleanQr);
           setManualQrInput(cleanQr);
@@ -240,7 +251,7 @@ export default function QuickOnboardView({
         setIsVerifyingQr(false);
       }
     },
-    [isRapidDispatchMode, stopScanner, handleAddToCart]
+    [isRapidDispatchMode, stopScanner, handleAddToCart, role]
   );
 
   // Synchronize Scanner lifecycle without synchronous effect setState
@@ -439,6 +450,8 @@ export default function QuickOnboardView({
 
           {/* Right Header Actions */}
           <div className="flex items-center gap-1.5">
+            <UserRoleHeaderPill />
+
             <Link
               href="/catalog"
               className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-50/80 hover:bg-blue-100 text-blue-800 border border-blue-200 text-xs font-bold transition-all active:scale-95 shadow-sm"
@@ -457,14 +470,16 @@ export default function QuickOnboardView({
               <span>יומן</span>
             </Link>
 
-            <Link
-              href="/print-tags"
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-50/80 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-bold transition-all active:scale-95 shadow-sm"
-              title="הדפסת תגיות ברקוד"
-            >
-              <Printer className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-              <span>תגיות</span>
-            </Link>
+            {role !== 'worker' && (
+              <Link
+                href="/print-tags"
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-50/80 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-bold transition-all active:scale-95 shadow-sm"
+                title="הדפסת תגיות ברקוד"
+              >
+                <Printer className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                <span>תגיות</span>
+              </Link>
+            )}
 
             {/* Session Counter Badge */}
             <div className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-blue-50 border border-blue-200" title="פעולות בסשן הנוכחי">
@@ -550,24 +565,26 @@ export default function QuickOnboardView({
               </h2>
             </div>
             <div className="flex items-center gap-1.5">
-              {/* RAPID CONTINUOUS DISPATCH MODE TOGGLE */}
-              <button
-                type="button"
-                onClick={() => setIsRapidDispatchMode(!isRapidDispatchMode)}
-                className={`px-2.5 py-1.5 rounded-lg text-xs font-black transition-all border flex items-center gap-1.5 cursor-pointer ${
-                  isRapidDispatchMode
-                    ? 'bg-amber-100 text-amber-950 border-amber-400 shadow-sm'
-                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:border-blue-300'
-                }`}
-                title="תפעול מצב סריקה מהירה לסל ניפוק"
-              >
-                <Zap
-                  className={`w-3.5 h-3.5 ${
-                    isRapidDispatchMode ? 'text-amber-600 fill-amber-500' : 'text-slate-400'
+              {/* RAPID CONTINUOUS DISPATCH MODE TOGGLE (Supervisor & Admin only) */}
+              {role !== 'worker' && (
+                <button
+                  type="button"
+                  onClick={() => setIsRapidDispatchMode(!isRapidDispatchMode)}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-black transition-all border flex items-center gap-1.5 cursor-pointer ${
+                    isRapidDispatchMode
+                      ? 'bg-amber-100 text-amber-950 border-amber-400 shadow-sm'
+                      : 'bg-slate-50 text-slate-600 border-slate-200 hover:border-blue-300'
                   }`}
-                />
-                <span>{isRapidDispatchMode ? 'ניפוק מהיר: פעיל' : 'ניפוק מרוכז'}</span>
-              </button>
+                  title="תפעול מצב סריקה מהירה לסל ניפוק"
+                >
+                  <Zap
+                    className={`w-3.5 h-3.5 ${
+                      isRapidDispatchMode ? 'text-amber-600 fill-amber-500' : 'text-slate-400'
+                    }`}
+                  />
+                  <span>{isRapidDispatchMode ? 'ניפוק מהיר: פעיל' : 'ניפוק מרוכז'}</span>
+                </button>
+              )}
 
               {qrCode && (
                 <button
@@ -632,6 +649,36 @@ export default function QuickOnboardView({
                     </span>
                   </div>
 
+                  {/* Lockout / Safety Overdue / Reservation Badges */}
+                  {(scannedRegisteredAsset.isLocked ||
+                    (scannedRegisteredAsset.safetyInspectionDue &&
+                      new Date(scannedRegisteredAsset.safetyInspectionDue).getTime() <
+                        new Date().getTime()) ||
+                    scannedRegisteredAsset.reservation) && (
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {scannedRegisteredAsset.isLocked && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded bg-red-100 text-red-800 border border-red-300">
+                          <Lock className="w-3 h-3 text-red-600" />
+                          כלי נעול מנהלתית
+                        </span>
+                      )}
+                      {scannedRegisteredAsset.safetyInspectionDue &&
+                        new Date(scannedRegisteredAsset.safetyInspectionDue).getTime() <
+                          new Date().getTime() && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-300">
+                            <AlertTriangle className="w-3 h-3 text-rose-600" />
+                            בדיקת בטיחות פגה
+                          </span>
+                        )}
+                      {scannedRegisteredAsset.reservation && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300">
+                          <BookmarkCheck className="w-3 h-3 text-amber-600" />
+                          משוריין: {scannedRegisteredAsset.reservation.projectName}
+                        </span>
+                      )}
+                    </div>
+                  )}
+
                   <div className="pt-2 border-t border-blue-200 flex flex-wrap gap-2">
                     <button
                       type="button"
@@ -642,20 +689,31 @@ export default function QuickOnboardView({
                       <span>ניהול (ניפוק / החזרה / העברה)</span>
                     </button>
 
-                    {scannedRegisteredAsset.status === 'available' && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          handleAddToCart(scannedRegisteredAsset);
-                          handleReScan();
-                        }}
-                        className="min-h-[50px] px-3.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-black text-xs flex items-center gap-1.5 shadow-md shadow-amber-500/20 active:scale-95 transition-all cursor-pointer"
-                        title="הוסף לסל ניפוק וסרוק את הכלי הבא"
-                      >
-                        <ShoppingCart className="w-4 h-4" />
-                        <span>+ הוסף לסל</span>
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => setIsPassportOpen(true)}
+                      className="min-h-[50px] px-3.5 rounded-xl bg-white hover:bg-blue-50 text-blue-900 font-bold text-xs border border-blue-300 flex items-center gap-1.5 active:scale-95 transition-all cursor-pointer shadow-sm"
+                      title="צפה בדרכון הכלי המלא"
+                    >
+                      <FileText className="w-4 h-4 text-blue-600" />
+                      <span>דרכון כלי</span>
+                    </button>
+
+                    {scannedRegisteredAsset.status === 'available' &&
+                      !scannedRegisteredAsset.isLocked && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handleAddToCart(scannedRegisteredAsset);
+                            handleReScan();
+                          }}
+                          className="min-h-[50px] px-3.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-black text-xs flex items-center gap-1.5 shadow-md shadow-amber-500/20 active:scale-95 transition-all cursor-pointer"
+                          title="הוסף לסל ניפוק וסרוק את הכלי הבא"
+                        >
+                          <ShoppingCart className="w-4 h-4" />
+                          <span>+ הוסף לסל</span>
+                        </button>
+                      )}
 
                     <button
                       type="button"
@@ -760,11 +818,15 @@ export default function QuickOnboardView({
         {scannedRegisteredAsset ? (
           <div className="rounded-2xl border-2 border-blue-100 bg-white p-5 shadow-sm shadow-blue-950/5 text-center space-y-4">
             <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto border border-blue-100">
-              <UserCheck className="w-6 h-6" />
+              {role === 'worker' ? (
+                <HardHat className="w-6 h-6 text-amber-600" />
+              ) : (
+                <UserCheck className="w-6 h-6" />
+              )}
             </div>
             <div>
               <h2 className="text-base font-black text-blue-950">
-                כלי רשום במערכת &bull; {scannedRegisteredAsset.toolName}
+                {role === 'worker' ? 'כרטיס כלי' : 'כלי רשום במערכת'} &bull; {scannedRegisteredAsset.toolName}
               </h2>
               <p className="text-xs text-blue-800 max-w-xs mx-auto mt-1">
                 סטטוס נוכחי: <strong>{getStatusLabel(scannedRegisteredAsset.status)}</strong> ב-
@@ -774,11 +836,59 @@ export default function QuickOnboardView({
             <button
               type="button"
               onClick={() => setIsModalOpen(true)}
-              className="w-full min-h-[60px] rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-base uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl shadow-blue-600/25 active:scale-95 transition-all cursor-pointer"
+              className={`w-full min-h-[60px] rounded-xl text-white font-black text-base uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl active:scale-95 transition-all cursor-pointer ${
+                role === 'worker'
+                  ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/25'
+                  : 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/25'
+              }`}
             >
-              <UserCheck className="w-5 h-5 stroke-[2.5]" />
-              <span>פעולות תנועה ומשמורת (ניפוק / החזרה / העברה)</span>
+              {role === 'worker' ? (
+                <>
+                  <Wrench className="w-5 h-5 stroke-[2.5]" />
+                  <span>צפה בכרטיס כלי / דיווח על תקלה</span>
+                </>
+              ) : (
+                <>
+                  <UserCheck className="w-5 h-5 stroke-[2.5]" />
+                  <span>פעולות תנועה ומשמורת (ניפוק / החזרה / העברה)</span>
+                </>
+              )}
             </button>
+          </div>
+        ) : role === 'worker' ? (
+          <div className="rounded-2xl border-2 border-amber-200 bg-amber-50/70 p-5 shadow-sm text-center space-y-3">
+            <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center mx-auto border border-amber-300">
+              <HardHat className="w-6 h-6" />
+            </div>
+            <div>
+              <h2 className="text-base font-black text-amber-950">
+                קוד אינו רשום במערכת
+              </h2>
+              <p className="text-xs text-amber-900 max-w-xs mx-auto mt-1 font-medium">
+                פעולת קליטת כלי חדש למחסן שמורה למנהלי עבודה ומנהלי מערכת בלבד.
+              </p>
+            </div>
+            <div className="flex flex-col gap-2 pt-2">
+              <button
+                type="button"
+                onClick={openPinModal}
+                className="w-full min-h-[50px] rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-sm flex items-center justify-center gap-2 shadow-md cursor-pointer transition-all active:scale-95"
+              >
+                <KeyRound className="w-4 h-4" />
+                <span>כניסת מנהל עבודה (קוד PIN)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setQrCode('');
+                  setManualQrInput('');
+                  setScannerActive(true);
+                }}
+                className="w-full py-2 text-xs font-bold text-slate-600 hover:text-slate-900 cursor-pointer"
+              >
+                סרוק כלי קיים
+              </button>
+            </div>
           </div>
         ) : (
           <div className="rounded-2xl border-2 border-blue-100 bg-white p-4 shadow-sm shadow-blue-950/5 space-y-5">
@@ -946,8 +1056,8 @@ export default function QuickOnboardView({
         )}
       </main>
 
-      {/* DISPATCH CART FLOATING BAR */}
-      {dispatchCart.length > 0 && (
+      {/* DISPATCH CART FLOATING BAR (Supervisor & Admin only) */}
+      {role !== 'worker' && dispatchCart.length > 0 && (
         <aside
           aria-label="סל ניפוק כלים"
           className="fixed bottom-20 left-0 right-0 z-40 px-3 pointer-events-none"
@@ -1011,6 +1121,17 @@ export default function QuickOnboardView({
         onClose={() => setIsBulkModalOpen(false)}
         onRemoveItem={handleRemoveFromCart}
         onBulkCheckoutComplete={handleBulkCheckoutComplete}
+      />
+
+      {/* 8. DIGITAL TOOL PASSPORT MODAL */}
+      <ToolPassportModal
+        isOpen={isPassportOpen}
+        asset={scannedRegisteredAsset}
+        onClose={() => setIsPassportOpen(false)}
+        onAssetUpdated={(updated) => {
+          setScannedRegisteredAsset(updated);
+          setLastActionMessage('דרכון הכלי עודכן בהצלחה');
+        }}
       />
 
       {/* 5. UNIVERSAL BOTTOM NAVIGATION BAR (FIXED) */}

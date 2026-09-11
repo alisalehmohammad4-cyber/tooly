@@ -23,12 +23,16 @@ import {
   Briefcase,
   Calendar,
   PenTool,
+  HardHat,
+  MapPin,
 } from 'lucide-react';
 import type {
   AuditHistoryPayload,
   AuditHistoryRecord,
   AuditActionType,
 } from '@/app/actions/history';
+import { useAuth } from '@/context/AuthContext';
+import UserRoleHeaderPill from '@/components/common/UserRoleHeaderPill';
 
 interface HistoryViewProps {
   initialData: AuditHistoryPayload;
@@ -109,6 +113,36 @@ function getConditionLabel(condition?: string) {
   }
 }
 
+function getDamageTypeLabel(damageType?: string) {
+  switch (damageType) {
+    case 'misuse':
+      return 'שימוש לא נכון / חריג';
+    case 'wear_tear':
+      return 'בלאי טבעי';
+    case 'burned_motor':
+      return 'מנוע שרוף / עומס יתר';
+    case 'impact_drop':
+      return 'נפילה / שבר פיזי';
+    case 'other':
+      return 'אחר';
+    default:
+      return damageType || '';
+  }
+}
+
+function getChargePartyLabel(chargeParty?: string) {
+  switch (chargeParty) {
+    case 'worker':
+      return 'חיוב עובד';
+    case 'subcontractor':
+      return 'חיוב קבלן משנה';
+    case 'company':
+      return 'חיוב החברה (בלאי)';
+    default:
+      return chargeParty || '';
+  }
+}
+
 function renderActionBadge(action: AuditActionType) {
   switch (action) {
     case 'CHECKOUT':
@@ -150,6 +184,7 @@ function renderActionBadge(action: AuditActionType) {
 }
 
 export default function HistoryView({ initialData }: HistoryViewProps) {
+  const { role } = useAuth();
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedAction, setSelectedAction] = useState<string>('all');
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>('all');
@@ -201,15 +236,30 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
             </div>
           </div>
 
-          {/* Operation Counter Badge */}
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-50 border border-blue-200">
-            <Clock className="w-3.5 h-3.5 text-blue-600" />
-            <span className="text-xs font-black text-blue-700">
-              {filteredRecords.length}
-            </span>
-            <span className="text-xs font-bold text-slate-500">פעולות</span>
+          {/* Right Header Actions */}
+          <div className="flex items-center gap-2">
+            <UserRoleHeaderPill />
+
+            {/* Operation Counter Badge */}
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-50 border border-blue-200">
+              <Clock className="w-3.5 h-3.5 text-blue-600" />
+              <span className="text-xs font-black text-blue-700">
+                {filteredRecords.length}
+              </span>
+              <span className="text-xs font-bold text-slate-500">פעולות</span>
+            </div>
           </div>
         </div>
+
+        {/* Worker Notice Banner */}
+        {role === 'worker' && (
+          <div className="mt-2.5 max-w-lg mx-auto p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-bold flex items-center justify-between">
+            <span className="flex items-center gap-1.5">
+              <HardHat className="w-4 h-4 text-amber-600 shrink-0" />
+              מצב עובד שטח: צפייה ביומן בלבד (פעולות ניהול חסומות)
+            </span>
+          </div>
+        )}
 
         {/* Facility Dropdown Filter */}
         <div className="mt-3 max-w-lg mx-auto">
@@ -410,6 +460,33 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
                   </div>
                 )}
 
+                {/* Damage Report Card if present */}
+                {item.damageReport && item.damageReport.isDamaged && (
+                  <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs space-y-1.5">
+                    <div className="flex items-center justify-between font-black text-red-900">
+                      <div className="flex items-center gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0" />
+                        <span>דוח נזק: {getDamageTypeLabel(item.damageReport.damageType)}</span>
+                      </div>
+                      {item.damageReport.estimatedCost !== undefined && (
+                        <span className="bg-white px-2 py-0.5 rounded border border-red-200 text-red-700 font-bold">
+                          ₪{item.damageReport.estimatedCost.toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] text-red-800">
+                      <span>
+                        גורם לחיוב: <strong>{getChargePartyLabel(item.damageReport.chargeParty)}</strong>
+                      </span>
+                      {item.damageReport.notes && (
+                        <span className="italic truncate max-w-[200px]">
+                          &ldquo;{item.damageReport.notes}&rdquo;
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {/* Notes / Remarks */}
                 {item.notes && (
                   <div className="text-xs text-blue-900 bg-blue-50/50 p-2.5 rounded-xl border border-blue-100 italic">
@@ -417,12 +494,29 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
                   </div>
                 )}
 
-                {/* Footer: Location & Performed By */}
+                {/* Footer: Location, GPS Pin Link & Performed By */}
                 <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs font-bold text-slate-500">
-                  <div className="flex items-center gap-1.5">
-                    <Building2 className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                    <span className="truncate max-w-[180px]">{item.warehouseName}</span>
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <Building2 className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                      <span className="truncate max-w-[180px]">{item.warehouseName}</span>
+                    </div>
+
+                    {item.gps && (
+                      <a
+                        href={`https://maps.google.com/?q=${item.gps.lat},${item.gps.lng}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-700 hover:text-blue-900 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200 hover:bg-blue-100 transition-colors"
+                        title="פתח מיקום GPS ב-Google Maps"
+                        dir="ltr"
+                      >
+                        <MapPin className="w-3 h-3 text-red-500 shrink-0" />
+                        <span>{item.gps.lat.toFixed(4)}, {item.gps.lng.toFixed(4)}</span>
+                      </a>
+                    )}
                   </div>
+
                   <div className="text-[11px] text-slate-500">
                     בוצע ע&quot;י: <span className="text-blue-900 font-semibold">{item.performedBy}</span>
                   </div>
