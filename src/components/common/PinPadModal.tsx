@@ -11,7 +11,7 @@ export default function PinPadModal() {
 }
 
 function PinPadDialog() {
-  const { closePinModal, loginWithPin, switchToWorker, role } = useAuth();
+  const { closePinModal, loginWithPin, switchToWorker, role, pinDialogMessage } = useAuth();
   const [pin, setPin] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSuccess, setIsSuccess] = useState<boolean>(false);
@@ -73,28 +73,28 @@ function PinPadDialog() {
       role="dialog"
       aria-modal="true"
       aria-labelledby="pin-modal-title"
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/70 backdrop-blur-md animate-in fade-in duration-200"
+      className="fixed inset-0 z-[60] flex items-center justify-center p-3 sm:p-4 bg-slate-950/70 backdrop-blur-md animate-in fade-in duration-200"
     >
       <div className="w-full max-w-sm bg-white rounded-3xl shadow-2xl border-2 border-blue-200 overflow-hidden flex flex-col text-slate-900 animate-in zoom-in-95 duration-200">
         {/* Header */}
         <div className="p-4 bg-gradient-to-r from-blue-900 to-blue-950 text-white flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-blue-600/30 border border-blue-400/40 flex items-center justify-center text-blue-300">
+            <div className="w-9 h-9 rounded-xl bg-blue-600/30 border border-blue-400/40 flex items-center justify-center text-blue-300 shrink-0">
               <KeyRound className="w-5 h-5" />
             </div>
             <div>
               <h2 id="pin-modal-title" className="text-base font-black leading-tight">
                 החלפת הרשאה / כניסת מנהל
               </h2>
-              <p className="text-xs text-blue-200/80 font-semibold">
-                הזן קוד PIN בעל 4 ספרות
+              <p className="text-xs text-blue-200/90 font-semibold mt-0.5 leading-snug">
+                {pinDialogMessage || 'הזן קוד PIN בעל 4 ספרות'}
               </p>
             </div>
           </div>
           <button
             type="button"
             onClick={closePinModal}
-            className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors cursor-pointer"
+            className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors cursor-pointer shrink-0"
             title="סגור"
           >
             <X className="w-4 h-4" />
@@ -118,35 +118,41 @@ function PinPadDialog() {
           {/* 4-digit PIN Dots */}
           <div className="flex items-center gap-4 my-2">
             {[0, 1, 2, 3].map((index) => {
-              const isFilled = pin.length > index;
+              const hasDigit = pin.length > index;
               return (
                 <div
                   key={index}
-                  className={`w-5 h-5 rounded-full border-2 transition-all duration-200 ${
+                  className={`w-4 h-4 rounded-full border-2 transition-all duration-200 ${
                     isSuccess
-                      ? 'bg-emerald-500 border-emerald-600 scale-110 shadow-md shadow-emerald-500/30'
-                      : isFilled
-                      ? 'bg-blue-600 border-blue-700 scale-105 shadow-md shadow-blue-500/25'
-                      : 'bg-slate-100 border-slate-300'
+                      ? 'bg-emerald-500 border-emerald-500 scale-110 shadow-lg shadow-emerald-500/40'
+                      : errorMessage
+                      ? 'bg-red-500 border-red-500 animate-shake'
+                      : hasDigit
+                      ? 'bg-blue-600 border-blue-600 scale-105'
+                      : 'border-slate-300 bg-slate-100'
                   }`}
                 />
               );
             })}
           </div>
 
-          {/* Error Message */}
-          <div className="h-7 mt-1 flex items-center">
-            {errorMessage ? (
-              <span className="text-xs font-bold text-red-600 flex items-center gap-1 animate-in fade-in">
-                <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
-                {errorMessage}
+          {/* Dynamic Feedback Message */}
+          <div className="h-6 flex items-center justify-center text-center my-1">
+            {isSuccess ? (
+              <div className="text-xs font-black text-emerald-600 flex items-center gap-1 animate-in zoom-in-50 duration-150">
+                <CheckCircle2 className="w-4 h-4" />
+                <span>הקוד אומת בהצלחה!</span>
+              </div>
+            ) : errorMessage ? (
+              <div className="text-xs font-bold text-red-600 flex items-center gap-1 animate-in fade-in duration-150">
+                <ShieldAlert className="w-4 h-4" />
+                <span>{errorMessage}</span>
+              </div>
+            ) : (
+              <span className="text-xs text-slate-500">
+                הקש 4 ספרות או בחר מתג מנהל
               </span>
-            ) : isSuccess ? (
-              <span className="text-xs font-bold text-emerald-600 flex items-center gap-1 animate-in fade-in">
-                <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                אימות הצליח! מעביר הרשאה...
-              </span>
-            ) : null}
+            )}
           </div>
 
           {/* Touch-Optimized Numeric Keypad */}
@@ -156,7 +162,7 @@ function PinPadDialog() {
                 key={digit}
                 type="button"
                 onClick={() => handleDigit(digit)}
-                className="h-14 rounded-2xl bg-slate-100 hover:bg-blue-50 active:bg-blue-600 active:text-white border border-slate-200 text-xl font-black text-slate-800 transition-all flex items-center justify-center cursor-pointer shadow-sm active:scale-95"
+                className="h-14 rounded-2xl bg-slate-50 hover:bg-blue-50 active:bg-blue-600 active:text-white border border-slate-200 text-slate-800 text-xl font-black transition-all flex items-center justify-center cursor-pointer shadow-sm active:scale-95 select-none"
               >
                 {digit}
               </button>
@@ -171,7 +177,7 @@ function PinPadDialog() {
             <button
               type="button"
               onClick={() => handleDigit('0')}
-              className="h-14 rounded-2xl bg-slate-100 hover:bg-blue-50 active:bg-blue-600 active:text-white border border-slate-200 text-xl font-black text-slate-800 transition-all flex items-center justify-center cursor-pointer shadow-sm active:scale-95"
+              className="h-14 rounded-2xl bg-slate-50 hover:bg-blue-50 active:bg-blue-600 active:text-white border border-slate-200 text-slate-800 text-xl font-black transition-all flex items-center justify-center cursor-pointer shadow-sm active:scale-95 select-none"
             >
               0
             </button>
@@ -193,11 +199,11 @@ function PinPadDialog() {
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
-                onClick={() => handlePresetSelect('1234')}
+                onClick={() => handlePresetSelect('1111')}
                 className="px-2.5 py-2 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-200 text-xs font-black flex items-center justify-center gap-1 cursor-pointer transition-all active:scale-95"
               >
                 <UserCheck className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                <span>מנהל עבודה (1234)</span>
+                <span>מנהל עבודה (1111)</span>
               </button>
               <button
                 type="button"

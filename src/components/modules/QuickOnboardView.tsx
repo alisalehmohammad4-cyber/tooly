@@ -348,6 +348,40 @@ export default function QuickOnboardView({
     setScannerActive(true);
   };
 
+  // Handle Management (ניהול) button click
+  const handleManagementActionClick = useCallback(() => {
+    if (role === 'supervisor' || role === 'admin') {
+      setIsModalOpen(true);
+    } else {
+      // If current role is 'worker': do NOT show the worker card.
+      // Automatically trigger the Quick PIN Unlock Modal with requested message so the supervisor can enter PIN
+      // and immediately proceed with management actions upon successful authorization.
+      openPinModal(
+        () => {
+          setIsModalOpen(true);
+        },
+        'הזן קוד מנהל עבודה (PIN) לביצוע פעולות ניפוק והחזרה'
+      );
+    }
+  }, [role, openPinModal]);
+
+  // Handle Add to Cart with supervisor role check
+  const handleAddToCartClick = useCallback(() => {
+    if (!scannedRegisteredAsset) return;
+    if (role === 'supervisor' || role === 'admin') {
+      handleAddToCart(scannedRegisteredAsset);
+      handleReScan();
+    } else {
+      openPinModal(
+        () => {
+          handleAddToCart(scannedRegisteredAsset);
+          handleReScan();
+        },
+        'הזן קוד מנהל עבודה (PIN) להוספת כלי לסל ניפוק'
+      );
+    }
+  }, [role, scannedRegisteredAsset, handleAddToCart, openPinModal]);
+
   // Manual QR input submission
   const handleManualQrSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -479,6 +513,18 @@ export default function QuickOnboardView({
                 <Printer className="w-3.5 h-3.5 text-blue-600 shrink-0" />
                 <span>תגיות</span>
               </Link>
+            )}
+
+            {role !== 'worker' && dispatchCart.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setIsBulkModalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-black transition-all active:scale-95 shadow-sm cursor-pointer animate-pulse"
+                title="פתיחת סל ניפוק כלים"
+              >
+                <ShoppingCart className="w-3.5 h-3.5" />
+                <span>סל ניפוק ({dispatchCart.length})</span>
+              </button>
             )}
 
             {/* Session Counter Badge */}
@@ -682,11 +728,17 @@ export default function QuickOnboardView({
                   <div className="pt-2 border-t border-blue-200 flex flex-wrap gap-2">
                     <button
                       type="button"
-                      onClick={() => setIsModalOpen(true)}
+                      onClick={handleManagementActionClick}
                       className="flex-1 min-h-[50px] rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 active:scale-95 transition-all shadow-md shadow-blue-600/20 cursor-pointer"
                     >
                       <UserCheck className="w-4 h-4 stroke-[2.5]" />
                       <span>ניהול (ניפוק / החזרה / העברה)</span>
+                      {role === 'worker' && (
+                        <span className="text-[10px] bg-blue-700/70 border border-blue-400/40 text-blue-100 px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5">
+                          <KeyRound className="w-2.5 h-2.5 inline" />
+                          <span>PIN</span>
+                        </span>
+                      )}
                     </button>
 
                     <button
@@ -703,10 +755,7 @@ export default function QuickOnboardView({
                       !scannedRegisteredAsset.isLocked && (
                         <button
                           type="button"
-                          onClick={() => {
-                            handleAddToCart(scannedRegisteredAsset);
-                            handleReScan();
-                          }}
+                          onClick={handleAddToCartClick}
                           className="min-h-[50px] px-3.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-black text-xs flex items-center gap-1.5 shadow-md shadow-amber-500/20 active:scale-95 transition-all cursor-pointer"
                           title="הוסף לסל ניפוק וסרוק את הכלי הבא"
                         >
@@ -854,6 +903,17 @@ export default function QuickOnboardView({
                 </>
               )}
             </button>
+
+            {role === 'worker' && (
+              <button
+                type="button"
+                onClick={handleManagementActionClick}
+                className="w-full min-h-[46px] rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-200 text-xs font-black flex items-center justify-center gap-1.5 transition-all active:scale-95 cursor-pointer shadow-sm"
+              >
+                <KeyRound className="w-3.5 h-3.5 text-blue-600" />
+                <span>כניסת מנהל עבודה לניהול כלי זה (ניפוק / החזרה / העברה)</span>
+              </button>
+            )}
           </div>
         ) : role === 'worker' ? (
           <div className="rounded-2xl border-2 border-amber-200 bg-amber-50/70 p-5 shadow-sm text-center space-y-3">
@@ -1063,7 +1123,11 @@ export default function QuickOnboardView({
           className="fixed bottom-20 left-0 right-0 z-40 px-3 pointer-events-none"
         >
           <div className="max-w-lg mx-auto pointer-events-auto bg-blue-950 text-white p-3.5 rounded-2xl shadow-2xl border-2 border-amber-400 flex items-center justify-between gap-3 animate-in fade-in slide-in-from-bottom-3 duration-300">
-            <div className="flex items-center gap-3 min-w-0">
+            <div
+              onClick={() => setIsBulkModalOpen(true)}
+              className="flex items-center gap-3 min-w-0 cursor-pointer flex-1 select-none hover:opacity-95"
+              title="לחץ לפתיחת סל ניפוק כלים ובדיקת אביזרים"
+            >
               <div className="relative w-10 h-10 rounded-xl bg-amber-400 text-blue-950 flex items-center justify-center shrink-0 shadow-md font-black">
                 <ShoppingCart className="w-5 h-5" />
                 <span className="absolute -top-1.5 -left-1.5 w-5 h-5 rounded-full bg-blue-600 text-white font-black text-xs flex items-center justify-center border border-white shadow">
@@ -1071,8 +1135,9 @@ export default function QuickOnboardView({
                 </span>
               </div>
               <div className="min-w-0">
-                <div className="text-xs font-black text-amber-300 uppercase tracking-wider">
-                  סל ניפוק כלים ({dispatchCart.length})
+                <div className="text-xs font-black text-amber-300 uppercase tracking-wider flex items-center gap-1">
+                  <span>סל ניפוק כלים</span>
+                  <span className="text-[10px] bg-amber-400/20 px-1 py-0.5 rounded font-bold">({dispatchCart.length})</span>
                 </div>
                 <div className="text-xs font-bold text-white truncate">
                   {dispatchCart.map((t) => t.toolName).join(' ، ')}
@@ -1095,7 +1160,7 @@ export default function QuickOnboardView({
                 onClick={() => setIsBulkModalOpen(true)}
                 className="px-3.5 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-blue-950 text-xs font-black flex items-center gap-1.5 shadow-md shadow-amber-400/20 transition-all active:scale-95 cursor-pointer"
               >
-                <span>בדיקה ואישור ניפוק</span>
+                <span>סל ניפוק (אישור)</span>
                 <ArrowLeft className="w-4 h-4 stroke-[3]" />
               </button>
             </div>

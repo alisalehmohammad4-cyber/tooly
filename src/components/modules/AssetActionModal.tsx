@@ -464,7 +464,6 @@ export default function AssetActionModal({
                 <button
                   type="button"
                   onClick={() => {
-                    onClose();
                     openPinModal();
                   }}
                   className="inline-flex items-center gap-1.5 text-xs text-blue-700 font-bold hover:underline cursor-pointer"

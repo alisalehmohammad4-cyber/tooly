@@ -3,11 +3,10 @@ import Link from 'next/link';
 import {
   KeyRound,
   ShieldCheck,
-  UserCheck,
   HardHat,
-  RefreshCw,
   LayoutDashboard,
   Warehouse as WarehouseIcon,
+  LogOut,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 
@@ -16,10 +15,10 @@ export default function UserRoleHeaderPill() {
 
   if (role === 'admin') {
     return (
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1 sm:gap-1.5">
         <Link
           href="/dashboard/manager"
-          className="p-1.5 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-900 border border-purple-300 transition-colors flex items-center justify-center shadow-sm"
+          className="p-1.5 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-900 border border-purple-300 transition-colors flex items-center justify-center shadow-sm shrink-0"
           title="מעבר ללוח בקרה ניהולי (מנהל מפעל ופרויקטים)"
         >
           <LayoutDashboard className="w-3.5 h-3.5 text-purple-700" />
@@ -27,20 +26,21 @@ export default function UserRoleHeaderPill() {
         <button
           type="button"
           onClick={openPinModal}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-300 text-xs font-black shadow-sm transition-all active:scale-95 cursor-pointer"
-          title="מנהל פרויקט / מערכת - לחץ להחלפת משתמש"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white border border-purple-700 text-xs font-black shadow-sm transition-all active:scale-95 cursor-pointer"
+          title={`${user.fullName} - לחץ להחלפת משתמש`}
         >
-          <ShieldCheck className="w-3.5 h-3.5 text-purple-700 shrink-0" />
-          <span className="hidden sm:inline">{user.fullName}</span>
-          <span className="sm:hidden">מנהל פרויקט</span>
+          <ShieldCheck className="w-3.5 h-3.5 text-purple-200 shrink-0" />
+          <span>🛡️ מנהל פרויקט (מחובר)</span>
         </button>
         <button
           type="button"
           onClick={switchToWorker}
-          className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors"
-          title="חזרה למצב עובד שטח"
+          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-red-50 text-slate-700 hover:text-red-700 border border-slate-300 hover:border-red-200 text-xs font-bold transition-all cursor-pointer active:scale-95 shadow-sm"
+          title="התנתק / יציאה - חזרה למצב עובד שטח"
         >
-          <RefreshCw className="w-3 h-3" />
+          <LogOut className="w-3.5 h-3.5 text-red-600 shrink-0" />
+          <span className="hidden sm:inline">התנתק / יציאה</span>
+          <span className="sm:hidden">יציאה</span>
         </button>
       </div>
     );
@@ -48,10 +48,10 @@ export default function UserRoleHeaderPill() {
 
   if (role === 'supervisor') {
     return (
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1 sm:gap-1.5">
         <Link
           href="/dashboard/warehouse"
-          className="p-1.5 rounded-xl bg-blue-100 hover:bg-blue-200 text-blue-900 border border-blue-300 transition-colors flex items-center justify-center shadow-sm"
+          className="p-1.5 rounded-xl bg-blue-100 hover:bg-blue-200 text-blue-900 border border-blue-300 transition-colors flex items-center justify-center shadow-sm shrink-0"
           title="מעבר לעמדת מחסנאי ותפעול מלאי"
         >
           <WarehouseIcon className="w-3.5 h-3.5 text-blue-700" />
@@ -59,20 +59,21 @@ export default function UserRoleHeaderPill() {
         <button
           type="button"
           onClick={openPinModal}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-300 text-xs font-black shadow-sm transition-all active:scale-95 cursor-pointer"
-          title="מנהל עבודה - לחץ להחלפת משתמש"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white border border-blue-700 text-xs font-black shadow-sm transition-all active:scale-95 cursor-pointer"
+          title={`${user.fullName} - לחץ להחלפת משתמש`}
         >
-          <UserCheck className="w-3.5 h-3.5 text-blue-700 shrink-0" />
-          <span className="hidden sm:inline">{user.fullName}</span>
-          <span className="sm:hidden">מנהל עבודה</span>
+          <KeyRound className="w-3.5 h-3.5 text-blue-200 shrink-0" />
+          <span>🔑 מנהל עבודה (מחובר)</span>
         </button>
         <button
           type="button"
           onClick={switchToWorker}
-          className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors"
-          title="חזרה למצב עובד שטח"
+          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-red-50 text-slate-700 hover:text-red-700 border border-slate-300 hover:border-red-200 text-xs font-bold transition-all cursor-pointer active:scale-95 shadow-sm"
+          title="התנתק / יציאה - חזרה למצב עובד שטח (למסירת המכשיר לעובד)"
         >
-          <RefreshCw className="w-3 h-3" />
+          <LogOut className="w-3.5 h-3.5 text-red-600 shrink-0" />
+          <span className="hidden sm:inline">התנתק / יציאה</span>
+          <span className="sm:hidden">יציאה</span>
         </button>
       </div>
     );

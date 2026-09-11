@@ -38,8 +38,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="he" dir="rtl" className={`${heebo.variable} ${heebo.className} bg-white text-blue-950`}>
-      <body className="min-h-screen bg-white text-blue-950 antialiased selection:bg-blue-600 selection:text-white font-sans">
+    <html lang="he" dir="rtl" className={`${heebo.variable} ${heebo.className} bg-white text-blue-950`} suppressHydrationWarning>
+      <body className="min-h-screen bg-white text-blue-950 antialiased selection:bg-blue-600 selection:text-white font-sans" suppressHydrationWarning>
         <AuthProvider>
           {children}
           <PinPadModal />
