@@ -1,7 +1,14 @@
-'use client';
-
 import React from 'react';
-import { KeyRound, ShieldCheck, UserCheck, HardHat, RefreshCw } from 'lucide-react';
+import Link from 'next/link';
+import {
+  KeyRound,
+  ShieldCheck,
+  UserCheck,
+  HardHat,
+  RefreshCw,
+  LayoutDashboard,
+  Warehouse as WarehouseIcon,
+} from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 
 export default function UserRoleHeaderPill() {
@@ -10,6 +17,13 @@ export default function UserRoleHeaderPill() {
   if (role === 'admin') {
     return (
       <div className="flex items-center gap-1">
+        <Link
+          href="/dashboard/manager"
+          className="p-1.5 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-900 border border-purple-300 transition-colors flex items-center justify-center shadow-sm"
+          title="מעבר ללוח בקרה ניהולי (מנהל מפעל ופרויקטים)"
+        >
+          <LayoutDashboard className="w-3.5 h-3.5 text-purple-700" />
+        </Link>
         <button
           type="button"
           onClick={openPinModal}
@@ -35,6 +49,13 @@ export default function UserRoleHeaderPill() {
   if (role === 'supervisor') {
     return (
       <div className="flex items-center gap-1">
+        <Link
+          href="/dashboard/warehouse"
+          className="p-1.5 rounded-xl bg-blue-100 hover:bg-blue-200 text-blue-900 border border-blue-300 transition-colors flex items-center justify-center shadow-sm"
+          title="מעבר לעמדת מחסנאי ותפעול מלאי"
+        >
+          <WarehouseIcon className="w-3.5 h-3.5 text-blue-700" />
+        </Link>
         <button
           type="button"
           onClick={openPinModal}
