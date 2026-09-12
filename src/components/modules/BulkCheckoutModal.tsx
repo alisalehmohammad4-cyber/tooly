@@ -23,6 +23,11 @@ import { bulkCheckoutAssetAction } from '@/app/actions/custody';
 import type { AssetAccessories } from '@/core/assets/custody.schema';
 import SignaturePadModal from '@/components/common/SignaturePadModal';
 import { getCurrentGpsCoordinates } from '@/lib/geo';
+import {
+  enqueueSyncAction,
+  updateCachedAsset,
+  cacheAssets,
+} from '@/lib/offline/offlineDb';
 
 interface BulkCheckoutModalProps {
   isOpen: boolean;
@@ -191,7 +196,7 @@ export default function BulkCheckoutModal({
         };
       });
 
-      const res = await bulkCheckoutAssetAction({
+      const payload = {
         assetIds: items.map((i) => i.id),
         workerName: workerName.trim(),
         workerPhone: workerPhone.trim() || undefined,
@@ -200,7 +205,44 @@ export default function BulkCheckoutModal({
         signatureData,
         notes: notes.trim() || undefined,
         gps,
-      });
+      };
+
+      const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+
+      if (isOffline) {
+        await enqueueSyncAction('bulk_checkout', payload);
+        const updatedAssets = await Promise.all(
+          items.map(async (tool) => {
+            const updated = await updateCachedAsset(tool.id, {
+              status: 'checked_out',
+              currentAssignedWorker: workerName.trim(),
+              expectedReturnDate: resolvedReturnDate,
+              accessories: compiledAccessories[tool.id],
+            });
+            return (
+              updated || {
+                ...tool,
+                status: 'checked_out' as const,
+                currentAssignedWorker: workerName.trim(),
+                expectedReturnDate: resolvedReturnDate,
+                accessories: compiledAccessories[tool.id],
+              }
+            );
+          })
+        );
+        if (typeof window !== 'undefined' && 'vibrate' in navigator) {
+          try { navigator.vibrate([100, 50, 100]); } catch {}
+        }
+        setIsSubmitting(false);
+        onBulkCheckoutComplete(
+          `נשמר במכשיר במצב לא מקוון ויסונכרן בהתחברות לרשת (${items.length} כלים נופקו)`,
+          updatedAssets
+        );
+        onClose();
+        return;
+      }
+
+      const res = await bulkCheckoutAssetAction(payload);
 
       setIsSubmitting(false);
 
@@ -209,12 +251,60 @@ export default function BulkCheckoutModal({
         return;
       }
 
+      if (res.assets) await cacheAssets(res.assets);
       onBulkCheckoutComplete(res.message, res.assets);
       onClose();
-    } catch (err: unknown) {
-      setIsSubmitting(false);
-      const msg = err instanceof Error ? err.message : 'שגיאה בביצוע הניפוק';
-      setFormError(msg);
+    } catch {
+      // Fallback on network failure
+      try {
+        const compiledAccessories: Record<string, AssetAccessories> = {};
+        items.forEach((tool) => {
+          compiledAccessories[tool.id] = accessoriesMap[tool.id] || {
+            batteriesCount: 1,
+            hasCharger: true,
+            hasCase: true,
+          };
+        });
+        const payload = {
+          assetIds: items.map((i) => i.id),
+          workerName: workerName.trim(),
+          workerPhone: workerPhone.trim() || undefined,
+          expectedReturnDate: resolvedReturnDate,
+          accessories: compiledAccessories,
+          signatureData,
+          notes: notes.trim() || undefined,
+        };
+        await enqueueSyncAction('bulk_checkout', payload);
+        const updatedAssets = await Promise.all(
+          items.map(async (tool) => {
+            const updated = await updateCachedAsset(tool.id, {
+              status: 'checked_out',
+              currentAssignedWorker: workerName.trim(),
+              expectedReturnDate: resolvedReturnDate,
+              accessories: compiledAccessories[tool.id],
+            });
+            return (
+              updated || {
+                ...tool,
+                status: 'checked_out' as const,
+                currentAssignedWorker: workerName.trim(),
+                expectedReturnDate: resolvedReturnDate,
+                accessories: compiledAccessories[tool.id],
+              }
+            );
+          })
+        );
+        setIsSubmitting(false);
+        onBulkCheckoutComplete(
+          `נשמר במכשיר במצב לא מקוון ויסונכרן בהתחברות לרשת (${items.length} כלים נופקו)`,
+          updatedAssets
+        );
+        onClose();
+      } catch (innerErr: unknown) {
+        setIsSubmitting(false);
+        const msg = innerErr instanceof Error ? innerErr.message : 'שגיאה בביצוע הניפוק';
+        setFormError(msg);
+      }
     }
   };
 

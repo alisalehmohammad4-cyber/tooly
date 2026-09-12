@@ -3,6 +3,7 @@ import { Heebo } from "next/font/google";
 import "./globals.css";
 import { PwaInstallBanner } from "@/components/modules/PwaInstallBanner";
 import { AuthProvider } from "@/context/AuthContext";
+import { OfflineSyncProvider } from "@/context/OfflineSyncContext";
 import PinPadModal from "@/components/common/PinPadModal";
 
 const heebo = Heebo({
@@ -41,9 +42,11 @@ export default function RootLayout({
     <html lang="he" dir="rtl" className={`${heebo.variable} ${heebo.className} bg-white text-blue-950`} suppressHydrationWarning>
       <body className="min-h-screen bg-white text-blue-950 antialiased selection:bg-blue-600 selection:text-white font-sans" suppressHydrationWarning>
         <AuthProvider>
-          {children}
-          <PinPadModal />
-          <PwaInstallBanner />
+          <OfflineSyncProvider>
+            {children}
+            <PinPadModal />
+            <PwaInstallBanner />
+          </OfflineSyncProvider>
         </AuthProvider>
       </body>
     </html>

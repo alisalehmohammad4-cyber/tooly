@@ -36,6 +36,7 @@ import { useAuth } from '@/context/AuthContext';
 import { RoleHeader, RoleBottomNav } from '@/components/layout/AppLayout';
 import WorkerToolCard from '@/components/modules/WorkerToolCard';
 import { getCurrentGpsCoordinates } from '@/lib/geo';
+import { getCachedAssetByQr, cacheAsset } from '@/lib/offline/offlineDb';
 
 interface QuickOnboardViewProps {
   categories: Category[];
@@ -198,7 +199,22 @@ export default function QuickOnboardView({
       }
 
       try {
-        const existing = await getAssetDetailsByQr(cleanQr);
+        let existing: ScannedAssetDetails | null = null;
+
+        // Check IndexedDB cache first if offline, or attempt network fetch
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          existing = await getCachedAssetByQr(cleanQr);
+        } else {
+          try {
+            existing = await getAssetDetailsByQr(cleanQr);
+            if (existing) {
+              await cacheAsset(existing);
+            }
+          } catch (netErr) {
+            console.warn('Network call failed, checking local IndexedDB cache:', netErr);
+            existing = await getCachedAssetByQr(cleanQr);
+          }
+        }
 
         if (existing) {
           // RAPID CONTINUOUS DISPATCH MODE (Supervisor & Admin only):

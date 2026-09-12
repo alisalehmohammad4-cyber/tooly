@@ -18,6 +18,11 @@ import {
 import type { ScannedAssetDetails } from '@/app/actions/custody';
 import { reportAssetDamageAction } from '@/app/actions/custody';
 import { useAuth } from '@/context/AuthContext';
+import {
+  enqueueSyncAction,
+  updateCachedAsset,
+  cacheAsset,
+} from '@/lib/offline/offlineDb';
 
 interface WorkerToolCardProps {
   asset: ScannedAssetDetails;
@@ -67,13 +72,34 @@ export default function WorkerToolCard({
     setIsSubmitting(true);
     setReportError(null);
 
-    try {
-      const res = await reportAssetDamageAction({
-        assetId: asset.id,
-        reportedBy: user?.fullName || 'עובד שטח',
-        issueType: damageIssueType,
-        notes: damageNotes.trim() || undefined,
+    const damagePayload = {
+      assetId: asset.id,
+      reportedBy: user?.fullName || 'עובד שטח',
+      issueType: damageIssueType,
+      notes: damageNotes.trim() || undefined,
+    };
+
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOffline) {
+      await enqueueSyncAction('damage_report', damagePayload);
+      const updated = await updateCachedAsset(asset.id, {
+        status: 'maintenance',
+        condition: 'needs_repair',
       });
+      if (typeof window !== 'undefined' && 'vibrate' in navigator) {
+        try { navigator.vibrate([100, 50, 100]); } catch {}
+      }
+      setIsSubmitting(false);
+      setReportSuccessMessage('הדיווח נשמר במכשיר במצב לא מקוון ויסונכרן אוטומטית כשהחיבור לרשת יחזור.');
+      if (onDamageReported) {
+        onDamageReported(updated || { ...asset, status: 'maintenance', condition: 'needs_repair' });
+      }
+      return;
+    }
+
+    try {
+      const res = await reportAssetDamageAction(damagePayload);
 
       setIsSubmitting(false);
 
@@ -82,13 +108,22 @@ export default function WorkerToolCard({
         return;
       }
 
+      if (res.asset) await cacheAsset(res.asset);
       setReportSuccessMessage('הדיווח נשלח בהצלחה למחסנאי והכלי הועבר לבדיקה ותיקון.');
       if (onDamageReported && res.asset) {
         onDamageReported(res.asset);
       }
     } catch {
+      await enqueueSyncAction('damage_report', damagePayload);
+      const updated = await updateCachedAsset(asset.id, {
+        status: 'maintenance',
+        condition: 'needs_repair',
+      });
       setIsSubmitting(false);
-      setReportError('אירעה תקלה בעת שליחת הדיווח. נסה שנית.');
+      setReportSuccessMessage('הדיווח נשמר במכשיר במצב לא מקוון ויסונכרן אוטומטית כשהחיבור לרשת יחזור.');
+      if (onDamageReported) {
+        onDamageReported(updated || { ...asset, status: 'maintenance', condition: 'needs_repair' });
+      }
     }
   };
 

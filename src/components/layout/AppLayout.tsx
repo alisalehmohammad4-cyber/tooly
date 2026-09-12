@@ -17,6 +17,7 @@ import {
   ShoppingCart,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
+import NetworkSyncPill from '@/components/common/NetworkSyncPill';
 
 interface RoleHeaderProps {
   title?: string;
@@ -55,6 +56,7 @@ export function RoleHeader({
           </div>
 
           <div className="flex items-center gap-2">
+            <NetworkSyncPill />
             <button
               type="button"
               onClick={() => openPinModal()}
@@ -91,6 +93,8 @@ export function RoleHeader({
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2">
+            <NetworkSyncPill />
+
             {cartCount > 0 && onOpenCart && (
               <button
                 type="button"
@@ -148,6 +152,8 @@ export function RoleHeader({
         </div>
 
         <div className="flex items-center gap-1.5 sm:gap-2">
+          <NetworkSyncPill />
+
           <button
             type="button"
             onClick={() => openPinModal()}

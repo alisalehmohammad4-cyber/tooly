@@ -33,6 +33,11 @@ import {
 import { getCurrentGpsCoordinates } from '@/lib/geo';
 import { useAuth } from '@/context/AuthContext';
 import ToolPassportModal from '@/components/modules/ToolPassportModal';
+import {
+  enqueueSyncAction,
+  updateCachedAsset,
+  cacheAsset,
+} from '@/lib/offline/offlineDb';
 
 interface AssetActionModalProps {
   asset: ScannedAssetDetails | null;
@@ -126,24 +131,63 @@ export default function AssetActionModal({
     setActionError(null);
 
     const gps = await getCurrentGpsCoordinates();
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
 
-    const res = await checkoutAssetAction({
+    const checkoutPayload = {
       assetId: asset.id,
       workerName: workerName.trim(),
       workerPhone: workerPhone.trim() || undefined,
       notes: notes.trim() || undefined,
       gps,
-    });
+    };
 
-    setIsSubmitting(false);
-
-    if (!res.success) {
-      setActionError(res.error);
+    if (isOffline) {
+      await enqueueSyncAction('checkout', checkoutPayload);
+      const updated = await updateCachedAsset(asset.id, {
+        status: 'checked_out',
+        currentAssignedWorker: workerName.trim(),
+      });
+      const optimistic = updated || {
+        ...asset,
+        status: 'checked_out' as const,
+        currentAssignedWorker: workerName.trim(),
+      };
+      if (typeof window !== 'undefined' && 'vibrate' in navigator) {
+        try { navigator.vibrate([100, 50, 100]); } catch {}
+      }
+      setIsSubmitting(false);
+      onActionComplete('נשמר במכשיר במצב לא מקוון ויסונכרן בהתחברות לרשת (ניפוק כלי)', optimistic);
+      onClose();
       return;
     }
 
-    onActionComplete(res.message, res.asset);
-    onClose();
+    try {
+      const res = await checkoutAssetAction(checkoutPayload);
+      setIsSubmitting(false);
+
+      if (!res.success) {
+        setActionError(res.error);
+        return;
+      }
+
+      if (res.asset) await cacheAsset(res.asset);
+      onActionComplete(res.message, res.asset);
+      onClose();
+    } catch {
+      // Fallback on network disconnect
+      await enqueueSyncAction('checkout', checkoutPayload);
+      const updated = await updateCachedAsset(asset.id, {
+        status: 'checked_out',
+        currentAssignedWorker: workerName.trim(),
+      });
+      setIsSubmitting(false);
+      onActionComplete('נשמר במכשיר במצב לא מקוון ויסונכרן בהתחברות לרשת (ניפוק כלי)', updated || {
+        ...asset,
+        status: 'checked_out',
+        currentAssignedWorker: workerName.trim(),
+      });
+      onClose();
+    }
   };
 
   // Handle Check-in Action (Supervisor & Admin)
@@ -168,23 +212,67 @@ export default function AssetActionModal({
         }
       : undefined;
 
-    const res = await checkinAssetAction({
+    const checkinPayload = {
       assetId: asset.id,
       condition: checkinCondition,
       notes: notes.trim() || undefined,
       damageReport,
       gps,
-    });
+    };
 
-    setIsSubmitting(false);
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+    const newStatus = isDamagedOrRetired ? 'maintenance' : 'available';
 
-    if (!res.success) {
-      setActionError(res.error);
+    if (isOffline) {
+      await enqueueSyncAction('checkin', checkinPayload);
+      const updated = await updateCachedAsset(asset.id, {
+        status: newStatus,
+        condition: checkinCondition,
+        currentAssignedWorker: null,
+      });
+      const optimistic = updated || {
+        ...asset,
+        status: newStatus as ScannedAssetDetails['status'],
+        condition: checkinCondition,
+        currentAssignedWorker: null,
+      };
+      if (typeof window !== 'undefined' && 'vibrate' in navigator) {
+        try { navigator.vibrate([100, 50, 100]); } catch {}
+      }
+      setIsSubmitting(false);
+      onActionComplete('נשמר במכשיר במצב לא מקוון ויסונכרן בהתחברות לרשת (החזרת כלי)', optimistic);
+      onClose();
       return;
     }
 
-    onActionComplete(res.message, res.asset);
-    onClose();
+    try {
+      const res = await checkinAssetAction(checkinPayload);
+      setIsSubmitting(false);
+
+      if (!res.success) {
+        setActionError(res.error);
+        return;
+      }
+
+      if (res.asset) await cacheAsset(res.asset);
+      onActionComplete(res.message, res.asset);
+      onClose();
+    } catch {
+      await enqueueSyncAction('checkin', checkinPayload);
+      const updated = await updateCachedAsset(asset.id, {
+        status: newStatus,
+        condition: checkinCondition,
+        currentAssignedWorker: null,
+      });
+      setIsSubmitting(false);
+      onActionComplete('נשמר במכשיר במצב לא מקוון ויסונכרן בהתחברות לרשת (החזרת כלי)', updated || {
+        ...asset,
+        status: newStatus,
+        condition: checkinCondition,
+        currentAssignedWorker: null,
+      });
+      onClose();
+    }
   };
 
   // Handle Transfer Action (Supervisor & Admin)
@@ -199,23 +287,67 @@ export default function AssetActionModal({
     setActionError(null);
 
     const gps = await getCurrentGpsCoordinates();
+    const targetWhMeta = warehouses.find((w) => w.id === targetWarehouseId);
 
-    const res = await transferAssetAction({
+    const transferPayload = {
       assetId: asset.id,
       targetWarehouseId,
       notes: notes.trim() || undefined,
       gps,
-    });
+    };
 
-    setIsSubmitting(false);
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
 
-    if (!res.success) {
-      setActionError(res.error);
+    if (isOffline) {
+      await enqueueSyncAction('transfer', transferPayload);
+      const updated = await updateCachedAsset(asset.id, {
+        currentWarehouseId: targetWarehouseId,
+        warehouseName: targetWhMeta?.name || asset.warehouseName,
+        warehouseCode: targetWhMeta?.code || asset.warehouseCode,
+      });
+      const optimistic = updated || {
+        ...asset,
+        currentWarehouseId: targetWarehouseId,
+        warehouseName: targetWhMeta?.name || asset.warehouseName,
+        warehouseCode: targetWhMeta?.code || asset.warehouseCode,
+      };
+      if (typeof window !== 'undefined' && 'vibrate' in navigator) {
+        try { navigator.vibrate([100, 50, 100]); } catch {}
+      }
+      setIsSubmitting(false);
+      onActionComplete('נשמר במכשיר במצב לא מקוון ויסונכרן בהתחברות לרשת (העברת כלי)', optimistic);
+      onClose();
       return;
     }
 
-    onActionComplete(res.message, res.asset);
-    onClose();
+    try {
+      const res = await transferAssetAction(transferPayload);
+      setIsSubmitting(false);
+
+      if (!res.success) {
+        setActionError(res.error);
+        return;
+      }
+
+      if (res.asset) await cacheAsset(res.asset);
+      onActionComplete(res.message, res.asset);
+      onClose();
+    } catch {
+      await enqueueSyncAction('transfer', transferPayload);
+      const updated = await updateCachedAsset(asset.id, {
+        currentWarehouseId: targetWarehouseId,
+        warehouseName: targetWhMeta?.name || asset.warehouseName,
+        warehouseCode: targetWhMeta?.code || asset.warehouseCode,
+      });
+      setIsSubmitting(false);
+      onActionComplete('נשמר במכשיר במצב לא מקוון ויסונכרן בהתחברות לרשת (העברת כלי)', updated || {
+        ...asset,
+        currentWarehouseId: targetWarehouseId,
+        warehouseName: targetWhMeta?.name || asset.warehouseName,
+        warehouseCode: targetWhMeta?.code || asset.warehouseCode,
+      });
+      onClose();
+    }
   };
 
   // Handle Report Damage Action (Worker mode)
@@ -225,22 +357,57 @@ export default function AssetActionModal({
     setIsSubmitting(true);
     setActionError(null);
 
-    const res = await reportAssetDamageAction({
+    const damagePayload = {
       assetId: asset.id,
       reportedBy: user.fullName || 'עובד שטח',
       issueType: damageIssueType,
       notes: damageNotes.trim() || undefined,
-    });
+    };
 
-    setIsSubmitting(false);
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
 
-    if (!res.success) {
-      setActionError(res.error);
+    if (isOffline) {
+      await enqueueSyncAction('damage_report', damagePayload);
+      const updated = await updateCachedAsset(asset.id, {
+        status: 'maintenance',
+        condition: 'needs_repair',
+      });
+      setIsSubmitting(false);
+      onActionComplete('דיווח התקלה נשמר במכשיר באופליין ויסונכרן בהתחברות', updated || {
+        ...asset,
+        status: 'maintenance',
+        condition: 'needs_repair',
+      });
+      onClose();
       return;
     }
 
-    onActionComplete(res.message, res.asset);
-    onClose();
+    try {
+      const res = await reportAssetDamageAction(damagePayload);
+      setIsSubmitting(false);
+
+      if (!res.success) {
+        setActionError(res.error);
+        return;
+      }
+
+      if (res.asset) await cacheAsset(res.asset);
+      onActionComplete(res.message, res.asset);
+      onClose();
+    } catch {
+      await enqueueSyncAction('damage_report', damagePayload);
+      const updated = await updateCachedAsset(asset.id, {
+        status: 'maintenance',
+        condition: 'needs_repair',
+      });
+      setIsSubmitting(false);
+      onActionComplete('דיווח התקלה נשמר במכשיר באופליין ויסונכרן בהתחברות', updated || {
+        ...asset,
+        status: 'maintenance',
+        condition: 'needs_repair',
+      });
+      onClose();
+    }
   };
 
   // Handle Retire Asset Action (Admin mode)
