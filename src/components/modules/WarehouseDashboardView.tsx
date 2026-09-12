@@ -23,6 +23,8 @@ import type { StorekeeperOperationsPayload } from '@/app/actions/dashboard';
 import { getStorekeeperOperations } from '@/app/actions/dashboard';
 import AppLayout from '@/components/layout/AppLayout';
 import ToolPassportModal from '@/components/modules/ToolPassportModal';
+import { useAuth } from '@/context/AuthContext';
+import { Lock } from 'lucide-react';
 import {
   getAssetDetailsByQr,
   type ScannedAssetDetails,
@@ -35,13 +37,45 @@ interface WarehouseDashboardViewProps {
 export default function WarehouseDashboardView({
   initialData,
 }: WarehouseDashboardViewProps) {
+  const { role, assignedWarehouseId } = useAuth();
   const [data, setData] = useState<StorekeeperOperationsPayload>(initialData);
-  const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>(
-    initialData.warehouse.id
-  );
+  const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>(() => {
+    if (role === 'supervisor' && assignedWarehouseId) {
+      return assignedWarehouseId;
+    }
+    return initialData.warehouse.id;
+  });
   const [isLoadingWarehouse, setIsLoadingWarehouse] = useState<boolean>(false);
   const [passportAsset, setPassportAsset] = useState<ScannedAssetDetails | null>(null);
   const [isPassportOpen, setIsPassportOpen] = useState<boolean>(false);
+
+  // Switch active warehouse
+  const handleWarehouseChange = React.useCallback(async (newId: string) => {
+    setSelectedWarehouseId(newId);
+    setIsLoadingWarehouse(true);
+    try {
+      const updated = await getStorekeeperOperations(newId);
+      setData(updated);
+    } catch (err) {
+      console.warn('Error loading warehouse operations:', err);
+    } finally {
+      setIsLoadingWarehouse(false);
+    }
+  }, []);
+
+  // Sync warehouse for storekeeper if scoped
+  React.useEffect(() => {
+    if (
+      role === 'supervisor' &&
+      assignedWarehouseId &&
+      assignedWarehouseId !== selectedWarehouseId
+    ) {
+      const timer = setTimeout(() => {
+        void handleWarehouseChange(assignedWarehouseId);
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+  }, [role, assignedWarehouseId, selectedWarehouseId, handleWarehouseChange]);
 
   // Open tool passport modal by QR
   const handleOpenPassport = async (qrCode: string) => {
@@ -53,20 +87,6 @@ export default function WarehouseDashboardView({
       }
     } catch (err) {
       console.warn('Error fetching tool passport:', err);
-    }
-  };
-
-  // Switch active warehouse
-  const handleWarehouseChange = async (newId: string) => {
-    setSelectedWarehouseId(newId);
-    setIsLoadingWarehouse(true);
-    try {
-      const updated = await getStorekeeperOperations(newId);
-      setData(updated);
-    } catch (err) {
-      console.warn('Error loading warehouse operations:', err);
-    } finally {
-      setIsLoadingWarehouse(false);
     }
   };
 
@@ -111,8 +131,12 @@ export default function WarehouseDashboardView({
                 <select
                   value={selectedWarehouseId}
                   onChange={(e) => handleWarehouseChange(e.target.value)}
-                  disabled={isLoadingWarehouse}
-                  className="bg-blue-50 border-2 border-blue-200 text-blue-950 text-sm font-black rounded-xl pr-3 pl-8 py-1.5 focus:border-blue-600 focus:outline-none appearance-none cursor-pointer"
+                  disabled={isLoadingWarehouse || (role === 'supervisor' && !!assignedWarehouseId)}
+                  className={`bg-blue-50 border-2 border-blue-200 text-blue-950 text-sm font-black rounded-xl pr-3 pl-8 py-1.5 focus:border-blue-600 focus:outline-none appearance-none ${
+                    role === 'supervisor' && !!assignedWarehouseId
+                      ? 'cursor-not-allowed bg-slate-100 border-slate-300 text-slate-700 opacity-90'
+                      : 'cursor-pointer'
+                  }`}
                 >
                   {data.allWarehouses.map((wh) => (
                     <option key={wh.id} value={wh.id}>
@@ -120,7 +144,11 @@ export default function WarehouseDashboardView({
                     </option>
                   ))}
                 </select>
-                <ChevronDown className="w-4 h-4 text-blue-600 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                {role === 'supervisor' && !!assignedWarehouseId ? (
+                  <Lock className="w-4 h-4 text-amber-600 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                ) : (
+                  <ChevronDown className="w-4 h-4 text-blue-600 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                )}
               </div>
             </div>
           </div>

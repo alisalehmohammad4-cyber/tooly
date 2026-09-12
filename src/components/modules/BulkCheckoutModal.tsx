@@ -23,6 +23,7 @@ import { bulkCheckoutAssetAction } from '@/app/actions/custody';
 import type { AssetAccessories } from '@/core/assets/custody.schema';
 import SignaturePadModal from '@/components/common/SignaturePadModal';
 import { getCurrentGpsCoordinates } from '@/lib/geo';
+import { useAuth } from '@/context/AuthContext';
 import {
   enqueueSyncAction,
   updateCachedAsset,
@@ -133,6 +134,16 @@ export default function BulkCheckoutModal({
     );
   }, [items]);
 
+  const { role, assignedWarehouseId, assignedWarehouseName } = useAuth();
+
+  // Identify any tools in the cart that belong to a different warehouse
+  const foreignItems = useMemo(() => {
+    if (role !== 'supervisor' || !assignedWarehouseId) return [];
+    return items.filter(
+      (item) => item.currentWarehouseId && item.currentWarehouseId !== assignedWarehouseId
+    );
+  }, [role, assignedWarehouseId, items]);
+
   if (!isOpen) return null;
 
   // Accessory change handler
@@ -166,6 +177,13 @@ export default function BulkCheckoutModal({
     if (lockedItems.length > 0) {
       setFormError(
         `קיימים ${lockedItems.length} כלים בסל שנעולים מנהלתית או שפג תוקף בדיקת הבטיחות שלהם. יש להסירם מהסל כדי להמשיך בניפוק.`
+      );
+      return;
+    }
+
+    if (foreignItems.length > 0) {
+      setFormError(
+        `בסל קיימים ${foreignItems.length} כלים שאינם שייכים למחסן המשויך שלך (${assignedWarehouseName || 'מחסן נוכחי'}). יש להסירם לפני ביצוע הניפוק.`
       );
       return;
     }
@@ -348,6 +366,19 @@ export default function BulkCheckoutModal({
             onSubmit={handleSubmit}
             className="p-4 sm:p-6 flex-1 overflow-y-auto space-y-6 text-slate-800"
           >
+            {/* Foreign Warehouse Restriction Alert */}
+            {foreignItems.length > 0 && (
+              <div className="p-3.5 rounded-2xl bg-amber-50 border-2 border-amber-300 text-amber-950 text-xs flex items-start gap-2.5 shadow-sm">
+                <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-black text-amber-900">הגבלת סמכות מחסן בניפוק מרוכז</div>
+                  <div className="mt-0.5 font-medium">
+                    בסל קיימים {foreignItems.length} כלים שאינם שייכים למחסן המשויך שלך ({assignedWarehouseName || 'מחסן נוכחי'}). יש להסיר כלים אלו מסל הניפוק לפני אישור המסירה.
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* 1. SCANNED TOOLS & ACCESSORIES CHECKLIST */}
             <div>
               <div className="flex items-center justify-between mb-2">
@@ -642,9 +673,9 @@ export default function BulkCheckoutModal({
             {/* Submit Button */}
             <button
               type="submit"
-              disabled={isSubmitting || items.length === 0}
+              disabled={isSubmitting || items.length === 0 || foreignItems.length > 0}
               className={`w-full min-h-[60px] rounded-2xl font-black text-base uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl transition-all active:scale-[0.98] cursor-pointer ${
-                isSubmitting || items.length === 0
+                isSubmitting || items.length === 0 || foreignItems.length > 0
                   ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
                   : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/25'
               }`}

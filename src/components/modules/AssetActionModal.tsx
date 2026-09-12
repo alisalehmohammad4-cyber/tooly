@@ -109,9 +109,22 @@ export default function AssetActionModal({
       new Date(asset.safetyInspectionDue).getTime() < new Date().getTime()
   );
 
+  // Warehouse scoping check (Storekeeper cannot dispatch tools from other warehouses)
+  const isForeignWarehouse =
+    role === 'supervisor' &&
+    Boolean(user?.assignedWarehouseId) &&
+    asset.currentWarehouseId !== user.assignedWarehouseId;
+
   // Handle Checkout Action (Supervisor & Admin)
   const handleCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isForeignWarehouse) {
+      setActionError(
+        `כלי זה שייך ל-${asset.warehouseName}. בתור מחסנאי של ${user?.assignedWarehouseName || 'מחסן אחר'}, אינך מורשה לנפק כלי זה.`
+      );
+      return;
+    }
+
     if (!workerName.trim()) {
       setActionError('שם העובד נדרש לניפוק הכלי.');
       return;
@@ -278,6 +291,13 @@ export default function AssetActionModal({
   // Handle Transfer Action (Supervisor & Admin)
   const handleTransfer = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isForeignWarehouse) {
+      setActionError(
+        `כלי זה שייך ל-${asset.warehouseName}. אינך מורשה לבצע העברה עבור כלי ממחסן אחר.`
+      );
+      return;
+    }
+
     if (!targetWarehouseId) {
       setActionError('אנא בחר אתר יעד להעברה.');
       return;
@@ -747,7 +767,21 @@ export default function AssetActionModal({
                       </div>
                     )}
 
-                    {onAddToCart && isAvailable && !asset.isLocked && !isInspectionOverdue && (
+                    {/* Scoped Warehouse Restriction Banner */}
+                    {isForeignWarehouse && (
+                      <div className="p-3 bg-amber-500/10 border-2 border-amber-500/30 rounded-2xl text-amber-950 text-xs space-y-1">
+                        <div className="font-black flex items-center gap-1.5 text-amber-800">
+                          <AlertTriangle className="w-4 h-4 text-amber-600" />
+                          <span>הגבלת סמכות מחסן משויך</span>
+                        </div>
+                        <p>
+                          כלי זה שייך ל-<strong>{asset.warehouseName}</strong>. עמדתך מוגדרת עבור{' '}
+                          <strong>{user?.assignedWarehouseName || 'מחסן אחר'}</strong>. ניפוק הכלי חסום ללא הרשאת מנהל.
+                        </p>
+                      </div>
+                    )}
+
+                    {onAddToCart && isAvailable && !asset.isLocked && !isInspectionOverdue && !isForeignWarehouse && (
                       <div className="p-3 bg-blue-50/80 rounded-2xl border border-blue-200 flex items-center justify-between gap-2 shadow-sm">
                         <div>
                           <div className="text-xs font-black text-blue-950">
@@ -817,7 +851,7 @@ export default function AssetActionModal({
 
                     <button
                       type="submit"
-                      disabled={isSubmitting || asset.isLocked || isInspectionOverdue}
+                      disabled={isSubmitting || asset.isLocked || isInspectionOverdue || isForeignWarehouse}
                       className="w-full min-h-[60px] rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-base uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl shadow-blue-600/25 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {isSubmitting ? (
@@ -1027,6 +1061,20 @@ export default function AssetActionModal({
                 {/* TAB C: SITE TRANSFER FORM */}
                 {activeTab === 'transfer' && (
                   <form onSubmit={handleTransfer} className="space-y-4">
+                    {/* Scoped Warehouse Restriction Banner */}
+                    {isForeignWarehouse && (
+                      <div className="p-3 bg-amber-500/10 border-2 border-amber-500/30 rounded-2xl text-amber-950 text-xs space-y-1">
+                        <div className="font-black flex items-center gap-1.5 text-amber-800">
+                          <AlertTriangle className="w-4 h-4 text-amber-600" />
+                          <span>הגבלת סמכות מחסן משויך</span>
+                        </div>
+                        <p>
+                          כלי זה שייך ל-<strong>{asset.warehouseName}</strong>. עמדתך מוגדרת עבור{' '}
+                          <strong>{user?.assignedWarehouseName || 'מחסן אחר'}</strong>. העברת הכלי חסומה ללא הרשאת מנהל.
+                        </p>
+                      </div>
+                    )}
+
                     <div>
                       <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
                         אתר יעד להעברה <span className="text-blue-600">*</span>
@@ -1065,8 +1113,8 @@ export default function AssetActionModal({
 
                     <button
                       type="submit"
-                      disabled={isSubmitting}
-                      className="w-full min-h-[60px] rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-base uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl shadow-blue-600/25 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-60"
+                      disabled={isSubmitting || isForeignWarehouse}
+                      className="w-full min-h-[60px] rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-base uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl shadow-blue-600/25 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                       {isSubmitting ? (
                         <Loader2 className="w-6 h-6 animate-spin text-white" />

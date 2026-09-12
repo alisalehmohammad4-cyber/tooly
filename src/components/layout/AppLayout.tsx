@@ -83,8 +83,8 @@ export function RoleHeader({
               T
             </div>
             <div>
-              <div className="text-[10px] uppercase tracking-wider text-blue-600 font-extrabold">
-                {subtitle || 'עמדת מחסנאי פעיל'}
+              <div className="text-[10px] uppercase tracking-wider text-blue-600 font-extrabold truncate max-w-[200px]">
+                {subtitle || (user.assignedWarehouseName ? `משויך: ${user.assignedWarehouseName}` : 'עמדת מחסנאי פעיל')}
               </div>
               <h1 className="text-base font-black text-blue-950 leading-tight">
                 {title || 'Tooly - מחסן שטח'}
@@ -110,10 +110,12 @@ export function RoleHeader({
             <button
               type="button"
               onClick={() => openPinModal()}
-              className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white border border-blue-700 text-xs font-black shadow-sm transition-all active:scale-95 cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white border border-blue-700 text-xs font-black shadow-sm transition-all active:scale-95 cursor-pointer max-w-[180px] sm:max-w-none truncate"
               title={`${user.fullName} - לחץ להחלפת משתמש`}
             >
-              <span>🔑 עמדת מחסנאי (פעיל)</span>
+              <span className="truncate">
+                {user.assignedWarehouseName ? `🔑 ${user.assignedWarehouseName}` : '🔑 עמדת מחסנאי'}
+              </span>
             </button>
 
             <button

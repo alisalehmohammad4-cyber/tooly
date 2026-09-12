@@ -10,6 +10,7 @@ import React, {
   useSyncExternalStore,
 } from 'react';
 import type { AppUser, UserRole } from '@/types/domain';
+import { authenticateUserAction } from '@/app/actions/users';
 
 export const DEFAULT_WORKER_USER: AppUser = {
   id: 'usr-worker',
@@ -19,22 +20,34 @@ export const DEFAULT_WORKER_USER: AppUser = {
 
 export const PREDEFINED_USERS: Record<string, AppUser> = {
   '1111': {
-    id: 'usr-supervisor-01',
+    id: 'usr-sk-01',
     fullName: 'יוסי כהן (מחסנאי מורשה)',
+    username: 'yossi',
     role: 'supervisor',
     pinCode: '1111',
+    assignedWarehouseId: 'wh-main-01',
+    assignedWarehouseName: "מחסן מרכזי - אגף א'",
+    isActive: true,
   },
   '1234': {
-    id: 'usr-supervisor-01',
-    fullName: 'יוסי כהן (מחסנאי מורשה)',
+    id: 'usr-sk-02',
+    fullName: 'אבי לוי (מחסנאי שטח)',
+    username: 'avi',
     role: 'supervisor',
     pinCode: '1234',
+    assignedWarehouseId: 'wh-site-02',
+    assignedWarehouseName: "אתר בנייה - מכולה ב'",
+    isActive: true,
   },
   '9999': {
     id: 'usr-admin-01',
     fullName: 'דני לוי (מנהל מפעל ופרויקטים)',
+    username: 'dani',
     role: 'admin',
     pinCode: '9999',
+    assignedWarehouseId: undefined,
+    assignedWarehouseName: 'כל המחסנים (הנהלה)',
+    isActive: true,
   },
 };
 
@@ -43,7 +56,13 @@ interface AuthContextType {
   role: UserRole;
   isSupervisorOrAdmin: boolean;
   isAdmin: boolean;
+  assignedWarehouseId?: string;
+  assignedWarehouseName?: string;
   loginWithPin: (pin: string) => { success: boolean; error?: string };
+  loginWithCredentials: (
+    identifier: string,
+    secret?: string
+  ) => Promise<{ success: boolean; error?: string; user?: AppUser }>;
   switchToWorker: () => void;
   isPinModalOpen: boolean;
   pinDialogMessage?: string;
@@ -204,6 +223,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const matchedUser = PREDEFINED_USERS[cleanPin];
 
       if (matchedUser) {
+        if (matchedUser.isActive === false) {
+          return {
+            success: false,
+            error: 'משתמש זה הושבת על ידי הנהלת המפעל.',
+          };
+        }
         persistUserToStorage(matchedUser);
         notifyAuthSubscribers();
         setIsPinModalOpen(false);
@@ -220,8 +245,54 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       return {
         success: false,
-        error: 'קוד PIN שגוי. נסה שנית (עבודה: 1111 או 1234, פרויקט: 9999).',
+        error: 'קוד PIN שגוי. נסה שנית (מחסן ראשי: 1111 או 1234, הנהלה: 9999).',
       };
+    },
+    []
+  );
+
+  const loginWithCredentials = useCallback(
+    async (
+      identifier: string,
+      secret?: string
+    ): Promise<{ success: boolean; error?: string; user?: AppUser }> => {
+      try {
+        const result = await authenticateUserAction(identifier, secret);
+        if (result.success && result.user) {
+          persistUserToStorage(result.user);
+          notifyAuthSubscribers();
+          setIsPinModalOpen(false);
+
+          const pendingCallback = pinSuccessCallbackRef.current;
+          if (pendingCallback) {
+            pinSuccessCallbackRef.current = null;
+            pendingCallback(result.user);
+          }
+
+          return { success: true, user: result.user };
+        }
+        return { success: false, error: result.error || 'פרטי התחברות שגויים.' };
+      } catch (err) {
+        // Fallback to local offline predefined users
+        const cleanId = identifier.trim();
+        const matched = PREDEFINED_USERS[cleanId] || PREDEFINED_USERS[secret?.trim() || ''];
+        if (matched) {
+          if (matched.isActive === false) {
+            return {
+              success: false,
+              error: 'משתמש זה הושבת על ידי הנהלת המפעל.',
+            };
+          }
+          persistUserToStorage(matched);
+          notifyAuthSubscribers();
+          setIsPinModalOpen(false);
+          return { success: true, user: matched };
+        }
+        return {
+          success: false,
+          error: err instanceof Error ? err.message : 'שגיאת התחברות במערכת.',
+        };
+      }
     },
     []
   );
@@ -240,14 +311,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       role: user.role,
       isSupervisorOrAdmin: user.role === 'supervisor' || user.role === 'admin',
       isAdmin: user.role === 'admin',
+      assignedWarehouseId: user.assignedWarehouseId,
+      assignedWarehouseName: user.assignedWarehouseName,
       loginWithPin,
+      loginWithCredentials,
       switchToWorker,
       isPinModalOpen,
       pinDialogMessage,
       openPinModal,
       closePinModal,
     }),
-    [user, isPinModalOpen, pinDialogMessage, loginWithPin, switchToWorker, openPinModal, closePinModal]
+    [
+      user,
+      isPinModalOpen,
+      pinDialogMessage,
+      loginWithPin,
+      loginWithCredentials,
+      switchToWorker,
+      openPinModal,
+      closePinModal,
+    ]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -99,5 +99,10 @@ export interface AppUser {
   fullName: string;
   role: UserRole;
   pinCode?: string;
+  username?: string;
+  assignedWarehouseId?: string;
+  assignedWarehouseName?: string;
+  isActive?: boolean;
+  createdAt?: string;
 }
 

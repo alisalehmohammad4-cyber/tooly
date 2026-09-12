@@ -12,6 +12,7 @@ import {
   RotateCcw,
   Layers,
   ArrowLeft,
+  ArrowRight,
   ShieldAlert,
   Loader2,
   Scan,
@@ -41,6 +42,7 @@ import { getCachedAssetByQr, cacheAsset } from '@/lib/offline/offlineDb';
 interface QuickOnboardViewProps {
   categories: Category[];
   warehouses: Warehouse[];
+  onReturnToPortal?: () => void;
 }
 
 const COMMON_BRANDS = ['DeWalt', 'Milwaukee', 'Makita', 'Bosch', 'Hilti', 'Stihl'];
@@ -61,13 +63,27 @@ const getStatusLabel = (status: string) => {
 export default function QuickOnboardView({
   categories,
   warehouses,
+  onReturnToPortal,
 }: QuickOnboardViewProps) {
-  const { role, openPinModal } = useAuth();
+  const { role, assignedWarehouseId, openPinModal } = useAuth();
 
-  // Sticky Warehouse State (Retained across scans)
-  const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>(
-    warehouses[0]?.id || ''
-  );
+  // Sticky Warehouse State (Locked for supervisor to their assigned facility)
+  const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>(() => {
+    if (role === 'supervisor' && assignedWarehouseId) {
+      return assignedWarehouseId;
+    }
+    return warehouses[0]?.id || '';
+  });
+
+  // Sync when supervisor assignment changes or loads
+  useEffect(() => {
+    if (role === 'supervisor' && assignedWarehouseId) {
+      const timer = setTimeout(() => {
+        setSelectedWarehouseId(assignedWarehouseId);
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+  }, [role, assignedWarehouseId]);
 
   // Category State (Retained across scans)
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>(
@@ -508,15 +524,28 @@ export default function QuickOnboardView({
         {/* Sticky Warehouse Selection Dropdown (Only for Storekeeper & Executive) */}
         {role !== 'worker' && (
           <div className="mt-3 max-w-lg mx-auto">
-            <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1 flex items-center gap-1.5">
-              <Building2 className="w-3.5 h-3.5 text-blue-600" />
-              אתר / מחסן פעיל
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider flex items-center gap-1.5">
+                <Building2 className="w-3.5 h-3.5 text-blue-600" />
+                אתר / מחסן פעיל
+              </label>
+              {role === 'supervisor' && assignedWarehouseId && (
+                <span className="text-[11px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200 flex items-center gap-1">
+                  <Lock className="w-3 h-3 text-amber-600" />
+                  משויך למחסנאי (נעול)
+                </span>
+              )}
+            </div>
             <div className="relative">
               <select
                 value={selectedWarehouseId}
+                disabled={role === 'supervisor' && !!assignedWarehouseId}
                 onChange={(e) => setSelectedWarehouseId(e.target.value)}
-                className="w-full min-h-[56px] bg-white text-blue-950 font-bold text-base px-4 py-3 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none appearance-none cursor-pointer transition-colors shadow-sm"
+                className={`w-full min-h-[56px] bg-white text-blue-950 font-bold text-base px-4 py-3 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none appearance-none transition-colors shadow-sm ${
+                  role === 'supervisor' && !!assignedWarehouseId
+                    ? 'cursor-not-allowed bg-slate-100 text-slate-700 border-slate-300 opacity-90'
+                    : 'cursor-pointer'
+                }`}
               >
                 {warehouses.length > 0 ? (
                   warehouses.map((wh) => (
@@ -540,6 +569,17 @@ export default function QuickOnboardView({
       </RoleHeader>
 
       <main className="max-w-lg mx-auto px-4 py-4 space-y-5">
+        {/* Field Worker: Back to Portal button */}
+        {role === 'worker' && onReturnToPortal && (
+          <button
+            type="button"
+            onClick={onReturnToPortal}
+            className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-white hover:bg-slate-100 border-2 border-slate-200 rounded-xl text-xs font-bold text-slate-700 transition-all shadow-sm cursor-pointer active:scale-98"
+          >
+            <ArrowRight className="w-4 h-4 text-blue-600" />
+            <span>חזרה לשער הראשי / החלפת עמדה</span>
+          </button>
+        )}
         {/* CUSTODY ACTION SUCCESS TOAST BANNER */}
         {lastActionMessage && (
           <div className="p-4 rounded-xl bg-emerald-50 border-2 border-emerald-400 flex items-start gap-3 shadow-md animate-in fade-in slide-in-from-top-2 duration-300">
