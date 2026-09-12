@@ -268,7 +268,7 @@ export default function ToolPassportModal({
 
           <div className="flex items-center gap-2 mb-1">
             <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-full bg-blue-500/30 text-blue-200 border border-blue-400/40">
-              דרכון כלי דיגיטלי &bull; TOOL PASSPORT
+              כרטיס מכשיר מורחב &bull; דרכון כלי דיגיטלי
             </span>
           </div>
 
@@ -278,9 +278,13 @@ export default function ToolPassportModal({
 
           <div className="flex flex-wrap items-center gap-3 mt-2 text-xs text-blue-200">
             <span className="font-bold">{currentAsset.brand}</span>
-            {currentAsset.modelNumber && (
+            {currentAsset.modelNumber ? (
               <span className="font-mono bg-blue-950/40 px-2 py-0.5 rounded border border-blue-700/50" dir="ltr">
-                דגם: {currentAsset.modelNumber}
+                מספר סידורי / דגם: {currentAsset.modelNumber}
+              </span>
+            ) : (
+              <span className="font-mono bg-blue-950/40 px-2 py-0.5 rounded border border-blue-700/50" dir="ltr">
+                מספר סידורי: {currentAsset.qrCode}
               </span>
             )}
             <div className="flex items-center gap-1 font-mono text-amber-300" dir="ltr">
@@ -411,7 +415,7 @@ export default function ToolPassportModal({
                 ) : (
                   <>
                     <RotateCcw className="w-3.5 h-3.5 text-blue-600" />
-                    <span>אישור בדיקה תקופתית (הארכה ב-12 חודשים)</span>
+                    <span>חידוש בדיקת בטיחות</span>
                   </>
                 )}
               </button>
@@ -471,12 +475,12 @@ export default function ToolPassportModal({
                 ) : currentAsset.isLocked ? (
                   <>
                     <Unlock className="w-4 h-4" />
-                    <span>שחרר נעילה (החזר לפעילות תקינה)</span>
+                    <span>שחרר כלי לשימוש</span>
                   </>
                 ) : (
                   <>
                     <Lock className="w-4 h-4" />
-                    <span>{showLockInput ? 'אשר נעילה מנהלתית' : 'נעל כלי זה (מנע ניפוק)'}</span>
+                    <span>{showLockInput ? 'אשר נעילת כלי' : 'נעל כלי להוצאה מהמחסן'}</span>
                   </>
                 )}
               </button>
@@ -599,7 +603,7 @@ export default function ToolPassportModal({
                 onClick={() => setShowReserveForm(true)}
                 className="w-full py-2.5 rounded-xl bg-white hover:bg-amber-100/50 text-amber-900 border border-amber-300 text-xs font-bold transition-colors cursor-pointer"
               >
-                + שריין כלי זה לפרויקט עתידי
+                + הזמן מראש לפרויקט
               </button>
             ) : null}
           </div>

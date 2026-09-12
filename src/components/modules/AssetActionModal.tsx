@@ -113,12 +113,12 @@ export default function AssetActionModal({
     }
 
     if (asset.isLocked) {
-      setActionError(`כלי זה נעול מנהלתית: ${asset.lockReason || 'נדרש שחרור בדרכון הכלי'}`);
+      setActionError(`הכלי נעול מנהלית: ${asset.lockReason || 'נעול להוצאה מהמחסן'}`);
       return;
     }
 
     if (isInspectionOverdue) {
-      setActionError('חל איסור לנפק כלי זה - תוקף בדיקת הבטיחות פג!');
+      setActionError('⚠️ הכלי נעול לשימוש! פג תוקף בדיקת בטיחות תקופתית');
       return;
     }
 
@@ -673,7 +673,7 @@ export default function AssetActionModal({
                       <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-2">
                         בדיקת מצב הכלי בעת ההחזרה <span className="text-blue-600">*</span>
                       </label>
-                      <div className="grid grid-cols-3 gap-2">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                         <button
                           type="button"
                           onClick={() => setCheckinCondition('excellent')}
@@ -712,6 +712,19 @@ export default function AssetActionModal({
                           <AlertTriangle className="w-4 h-4 text-red-600" />
                           <span>דורש תיקון</span>
                         </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setCheckinCondition('retired')}
+                          className={`min-h-[54px] p-2 rounded-xl border-2 font-bold text-xs flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
+                            checkinCondition === 'retired'
+                              ? 'border-rose-700 bg-rose-100 text-rose-950 shadow-sm'
+                              : 'border-slate-200 bg-slate-50 text-slate-600'
+                          }`}
+                        >
+                          <Trash2 className="w-4 h-4 text-rose-600" />
+                          <span>מושבת / גריטה</span>
+                        </button>
                       </div>
                     </div>
 
@@ -720,23 +733,23 @@ export default function AssetActionModal({
                       <div className="p-4 rounded-2xl bg-red-50/70 border-2 border-red-200 space-y-3 animate-in fade-in">
                         <div className="flex items-center gap-2 text-red-900 font-black text-xs uppercase tracking-wider">
                           <AlertTriangle className="w-4 h-4 text-red-600" />
-                          <span>דוח אירוע נזק / תקלה (Damage Incident Report)</span>
+                          <span>דוח נזק ותקלה</span>
                         </div>
 
                         <div>
                           <label className="block text-xs font-bold text-red-950 mb-1">
-                            סיווג סוג הנזק <span className="text-red-600">*</span>
+                            סוג הנזק <span className="text-red-600">*</span>
                           </label>
                           <select
                             value={damageType}
                             onChange={(e) => setDamageType(e.target.value as DamageType)}
                             className="w-full min-h-[46px] bg-white text-slate-900 text-xs px-3 rounded-xl border border-red-300 font-bold focus:border-red-600 focus:outline-none"
                           >
-                            <option value="impact_drop">נפילה / שבר פיזי (Impact / Drop)</option>
-                            <option value="burned_motor">מנוע שרוף / עומס יתר (Burned Motor)</option>
-                            <option value="wear_tear">בלאי טבעי / שימוש ממושך (Wear & Tear)</option>
-                            <option value="misuse">שימוש לא נכון / חריג (Misuse)</option>
-                            <option value="other">אחר (Other)</option>
+                            <option value="impact_drop">נפילה / מכה קשה</option>
+                            <option value="misuse">שימוש לא נכון</option>
+                            <option value="burned_motor">מנוע שרוף</option>
+                            <option value="wear_tear">בלאי טבעי</option>
+                            <option value="other">אחר</option>
                           </select>
                         </div>
 
@@ -744,7 +757,7 @@ export default function AssetActionModal({
                           <div>
                             <label className="block text-xs font-bold text-red-950 mb-1 flex items-center gap-1">
                               <DollarSign className="w-3.5 h-3.5 text-emerald-600" />
-                              אומדן עלות תיקון (₪)
+                              עלות תיקון משוערת (₪)
                             </label>
                             <input
                               type="number"
@@ -758,7 +771,7 @@ export default function AssetActionModal({
 
                           <div>
                             <label className="block text-xs font-bold text-red-950 mb-1">
-                              גורם לחיוב
+                              גורם אחראי לחיוב
                             </label>
                             <div className="grid grid-cols-3 gap-1">
                               <button
@@ -770,7 +783,7 @@ export default function AssetActionModal({
                                     : 'bg-white text-slate-700 border-slate-300'
                                 }`}
                               >
-                                החברה
+                                בלאי חברה
                               </button>
                               <button
                                 type="button"
@@ -792,7 +805,7 @@ export default function AssetActionModal({
                                     : 'bg-white text-slate-700 border-slate-300'
                                 }`}
                               >
-                                קבלן
+                                קבלן משנה
                               </button>
                             </div>
                           </div>
@@ -800,7 +813,7 @@ export default function AssetActionModal({
 
                         <div>
                           <label className="block text-xs font-bold text-red-950 mb-1">
-                            פירוט נזק וממצאי בדיקה
+                            הערות נזק וממצאי בדיקה
                           </label>
                           <textarea
                             rows={2}

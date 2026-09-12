@@ -251,6 +251,14 @@ export async function getAuditHistory(
         id,
         action,
         performed_by,
+        target_worker,
+        worker_phone,
+        expected_return_date,
+        signature_data,
+        accessories_snapshot,
+        damage_report,
+        gps_lat,
+        gps_lng,
         notes,
         created_at,
         assets:asset_id (
@@ -287,6 +295,14 @@ export async function getAuditHistory(
       id: string;
       action: string;
       performed_by: string;
+      target_worker?: string | null;
+      worker_phone?: string | null;
+      expected_return_date?: string | null;
+      signature_data?: string | null;
+      accessories_snapshot?: AuditHistoryRecord['accessoriesSnapshot'];
+      damage_report?: DamageReport | null;
+      gps_lat?: number | null;
+      gps_lng?: number | null;
       notes: string | null;
       created_at: string;
       assets: {
@@ -314,6 +330,8 @@ export async function getAuditHistory(
         else if (row.action === 'TRANSFER_RECEIVE') normalizedAction = 'TRANSFER_RECEIVE';
         else if (row.action === 'MAINTENANCE_FLAG') normalizedAction = 'MAINTENANCE_FLAG';
         else if (row.action === 'ONBOARD') normalizedAction = 'ONBOARD';
+        else if (row.action === 'LOCK_STATUS') normalizedAction = 'LOCK_STATUS';
+        else if (row.action === 'SAFETY_INSPECTION') normalizedAction = 'SAFETY_INSPECTION';
 
         return {
           id: row.id,
@@ -324,14 +342,22 @@ export async function getAuditHistory(
           modelNumber: row.assets?.tool_models?.model_number || null,
           action: normalizedAction,
           performedBy: row.performed_by || 'System',
-          targetWorker: normalizedAction === 'CHECKOUT' ? row.performed_by : null,
-          workerPhone: null,
+          targetWorker: row.target_worker || (normalizedAction === 'CHECKOUT' ? row.performed_by : null),
+          workerPhone: row.worker_phone || null,
           condition: row.assets?.condition || 'good',
           warehouseId: row.assets?.current_warehouse_id || null,
           warehouseName: row.assets?.warehouses?.name || 'Central Facility',
           warehouseCode: row.assets?.warehouses?.code || 'FAC',
           notes: row.notes,
           createdAt: row.created_at,
+          expectedReturnDate: row.expected_return_date || null,
+          signatureData: row.signature_data || null,
+          accessoriesSnapshot: row.accessories_snapshot || null,
+          damageReport: row.damage_report || null,
+          gps:
+            row.gps_lat != null && row.gps_lng != null
+              ? { lat: row.gps_lat, lng: row.gps_lng }
+              : null,
         };
       }
     );
@@ -345,6 +371,10 @@ export async function getAuditHistory(
     console.error('getAuditHistory exception, returning fallback:', err);
     return filterFallbackHistory(filters);
   }
+}
+
+export async function appendAuditHistoryEntry(entry: AuditHistoryRecord): Promise<void> {
+  FALLBACK_HISTORY_ENTRIES.unshift(entry);
 }
 
 function filterFallbackHistory(filters?: AuditHistoryFilters): AuditHistoryPayload {

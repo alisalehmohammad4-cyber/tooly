@@ -8,6 +8,14 @@ export const QuickOnboardSchema = z.object({
   brand: z.string().trim().min(1, 'Brand is required'),
   modelNumber: z.string().trim().optional().or(z.literal('')),
   condition: z.enum(['excellent', 'good', 'needs_repair', 'retired']),
+  gps: z
+    .object({
+      lat: z.number(),
+      lng: z.number(),
+    })
+    .nullable()
+    .optional(),
 });
 
 export type QuickOnboardInput = z.infer<typeof QuickOnboardSchema>;
+

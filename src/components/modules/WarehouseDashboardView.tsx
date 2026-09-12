@@ -10,20 +10,23 @@ import {
   Clock,
   CheckCircle2,
   Calendar,
-  Layers,
-  Scan,
-  Printer,
-  History as HistoryIcon,
-  ArrowRight,
-  TrendingDown,
-  ExternalLink,
   ChevronDown,
   Loader2,
   Zap,
+  FileText,
+  Scan,
+  Printer,
+  Layers,
+  TrendingDown,
 } from 'lucide-react';
 import type { StorekeeperOperationsPayload } from '@/app/actions/dashboard';
 import { getStorekeeperOperations } from '@/app/actions/dashboard';
-import UserRoleHeaderPill from '@/components/common/UserRoleHeaderPill';
+import AppLayout from '@/components/layout/AppLayout';
+import ToolPassportModal from '@/components/modules/ToolPassportModal';
+import {
+  getAssetDetailsByQr,
+  type ScannedAssetDetails,
+} from '@/app/actions/custody';
 
 interface WarehouseDashboardViewProps {
   initialData: StorekeeperOperationsPayload;
@@ -37,6 +40,21 @@ export default function WarehouseDashboardView({
     initialData.warehouse.id
   );
   const [isLoadingWarehouse, setIsLoadingWarehouse] = useState<boolean>(false);
+  const [passportAsset, setPassportAsset] = useState<ScannedAssetDetails | null>(null);
+  const [isPassportOpen, setIsPassportOpen] = useState<boolean>(false);
+
+  // Open tool passport modal by QR
+  const handleOpenPassport = async (qrCode: string) => {
+    try {
+      const asset = await getAssetDetailsByQr(qrCode);
+      if (asset) {
+        setPassportAsset(asset);
+        setIsPassportOpen(true);
+      }
+    } catch (err) {
+      console.warn('Error fetching tool passport:', err);
+    }
+  };
 
   // Switch active warehouse
   const handleWarehouseChange = async (newId: string) => {
@@ -73,44 +91,12 @@ export default function WarehouseDashboardView({
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-blue-950 font-sans pb-28 selection:bg-blue-600 selection:text-white">
-      {/* 1. TOP OPERATIONAL HEADER */}
-      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-blue-100 px-4 py-3 shadow-sm">
-        <div className="max-w-5xl mx-auto flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <Link
-              href="/"
-              className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600 hover:bg-blue-100 transition-colors"
-              title="חזרה לסורק"
-            >
-              <ArrowRight className="w-5 h-5" />
-            </Link>
-            <div>
-              <div className="text-[11px] uppercase tracking-widest text-blue-600 font-extrabold flex items-center gap-1.5">
-                <span>עמדת מחסנאי</span>
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                <span>OPERATIONAL HUB</span>
-              </div>
-              <h1 className="text-base sm:text-lg font-black text-blue-950 leading-tight">
-                תפעול מלאי והחזרות שוטפות
-              </h1>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Link
-              href="/dashboard/manager"
-              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200 text-xs font-bold transition-all"
-            >
-              <Layers className="w-3.5 h-3.5 text-purple-600" />
-              <span>דוחות מנהל</span>
-            </Link>
-            <UserRoleHeaderPill />
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-5xl mx-auto px-4 py-5 space-y-6">
+    <AppLayout
+      title="Tooly - עמדת מחסנאי"
+      subtitle="תפעול מלאי והחזרות"
+      requiredRole="any_elevated"
+    >
+      <div className="max-w-5xl mx-auto px-4 py-5 space-y-6">
         {/* 2. FACILITY SELECTOR & WAREHOUSE STATUS BAR */}
         <div className="p-4 rounded-2xl bg-white border-2 border-blue-100 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -256,16 +242,16 @@ export default function WarehouseDashboardView({
                       </div>
                     </div>
 
-                    {/* Direct Contact Buttons: Phone + WhatsApp */}
+                    {/* Direct Contact & Passport Buttons */}
                     <div className="pt-2 border-t border-rose-200/80 flex items-center gap-2">
                       {tool.workerPhone ? (
                         <>
                           <a
                             href={`tel:${tool.workerPhone}`}
-                            className="flex-1 py-2 px-3 rounded-xl bg-white hover:bg-slate-50 text-blue-900 border border-slate-300 text-xs font-black flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all"
+                            className="flex-1 py-2 px-2.5 rounded-xl bg-white hover:bg-slate-50 text-blue-900 border border-slate-300 text-xs font-black flex items-center justify-center gap-1 shadow-sm active:scale-95 transition-all"
                           >
                             <Phone className="w-3.5 h-3.5 text-blue-600" />
-                            <span>חייג לעובד</span>
+                            <span>חייג</span>
                           </a>
 
                           {waLink && (
@@ -273,18 +259,28 @@ export default function WarehouseDashboardView({
                               href={waLink}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all"
+                              className="flex-1 py-2 px-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center justify-center gap-1 shadow-sm active:scale-95 transition-all"
                             >
                               <MessageCircle className="w-3.5 h-3.5" />
-                              <span>הודעת וואטסאפ</span>
+                              <span>וואטסאפ</span>
                             </a>
                           )}
                         </>
                       ) : (
-                        <span className="text-xs text-slate-400 italic">
-                          לא הוזן מספר טלפון בעת הניפוק
+                        <span className="text-xs text-slate-400 italic flex-1">
+                          ללא טלפון
                         </span>
                       )}
+
+                      <button
+                        type="button"
+                        onClick={() => handleOpenPassport(tool.qrCode)}
+                        className="py-2 px-3 rounded-xl bg-white hover:bg-blue-50 text-blue-900 border border-slate-300 text-xs font-bold flex items-center justify-center gap-1 shadow-sm active:scale-95 transition-all cursor-pointer"
+                        title="צפה בדרכון הכלי"
+                      >
+                        <FileText className="w-3.5 h-3.5 text-blue-600" />
+                        <span>דרכון</span>
+                      </button>
                     </div>
                   </div>
                 );
@@ -340,11 +336,21 @@ export default function WarehouseDashboardView({
                     <span className="text-slate-600">
                       אצל: <strong>{item.workerName}</strong>
                     </span>
-                    {item.accessoriesSummary && (
-                      <span className="text-[11px] text-slate-500 font-medium">
-                        {item.accessoriesSummary}
-                      </span>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {item.accessoriesSummary && (
+                        <span className="text-[11px] text-slate-500 font-medium">
+                          {item.accessoriesSummary}
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleOpenPassport(item.qrCode)}
+                        className="px-2 py-0.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-800 text-[11px] font-bold border border-blue-200 cursor-pointer"
+                        title="צפה בדרכון הכלי"
+                      >
+                        דרכון
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -398,47 +404,20 @@ export default function WarehouseDashboardView({
             ))}
           </div>
         </div>
-      </main>
+      </div>
 
-      {/* 7. UNIVERSAL BOTTOM NAVIGATION */}
-      <nav
-        aria-label="ניווט ראשי"
-        className="fixed bottom-0 left-0 right-0 z-50 bg-white/95 backdrop-blur-lg border-t border-blue-100 px-3 py-2 shadow-lg"
-      >
-        <div className="max-w-lg mx-auto grid grid-cols-4 gap-1 sm:gap-2">
-          <Link
-            href="/"
-            className="min-h-[54px] rounded-xl flex flex-col items-center justify-center text-slate-500 hover:text-blue-700 active:bg-blue-50/50 transition-colors"
-          >
-            <Scan className="w-5 h-5" />
-            <span className="text-[10px] sm:text-[11px] font-bold mt-1">סורק / ניפוק</span>
-          </Link>
-
-          <Link
-            href="/catalog"
-            className="min-h-[54px] rounded-xl flex flex-col items-center justify-center text-slate-500 hover:text-blue-700 active:bg-blue-50/50 transition-colors"
-          >
-            <Layers className="w-5 h-5" />
-            <span className="text-[10px] sm:text-[11px] font-bold mt-1">קטלוג ומלאי</span>
-          </Link>
-
-          <Link
-            href="/history"
-            className="min-h-[54px] rounded-xl flex flex-col items-center justify-center text-slate-500 hover:text-blue-700 active:bg-blue-50/50 transition-colors"
-          >
-            <HistoryIcon className="w-5 h-5" />
-            <span className="text-[10px] sm:text-[11px] font-bold mt-1">יומן תנועות</span>
-          </Link>
-
-          <Link
-            href="/dashboard/manager"
-            className="min-h-[54px] rounded-xl flex flex-col items-center justify-center text-slate-500 hover:text-blue-700 active:bg-blue-50/50 transition-colors"
-          >
-            <ExternalLink className="w-5 h-5" />
-            <span className="text-[10px] sm:text-[11px] font-bold mt-1">דוחות מנהל</span>
-          </Link>
-        </div>
-      </nav>
-    </div>
+      {/* DIGITAL TOOL PASSPORT MODAL */}
+      <ToolPassportModal
+        isOpen={isPassportOpen}
+        asset={passportAsset}
+        onClose={() => {
+          setIsPassportOpen(false);
+          setPassportAsset(null);
+        }}
+        onAssetUpdated={(updated) => {
+          setPassportAsset(updated);
+        }}
+      />
+    </AppLayout>
   );
 }

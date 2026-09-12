@@ -20,19 +20,19 @@ export const DEFAULT_WORKER_USER: AppUser = {
 export const PREDEFINED_USERS: Record<string, AppUser> = {
   '1111': {
     id: 'usr-supervisor-01',
-    fullName: 'יוסי כהן (מנהל עבודה)',
+    fullName: 'יוסי כהן (מחסנאי מורשה)',
     role: 'supervisor',
     pinCode: '1111',
   },
   '1234': {
     id: 'usr-supervisor-01',
-    fullName: 'יוסי כהן (מנהל עבודה)',
+    fullName: 'יוסי כהן (מחסנאי מורשה)',
     role: 'supervisor',
     pinCode: '1234',
   },
   '9999': {
     id: 'usr-admin-01',
-    fullName: 'דני לוי (מנהל פרויקט)',
+    fullName: 'דני לוי (מנהל מפעל ופרויקטים)',
     role: 'admin',
     pinCode: '9999',
   },

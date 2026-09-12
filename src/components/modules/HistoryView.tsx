@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
-import Link from 'next/link';
 import {
   UserCheck,
   CheckCircle2,
@@ -12,10 +11,6 @@ import {
   Building2,
   QrCode,
   Clock,
-  Printer,
-  Scan,
-  Layers,
-  History as HistoryIcon,
   Phone,
   FileText,
   Battery,
@@ -23,7 +18,7 @@ import {
   Briefcase,
   Calendar,
   PenTool,
-  HardHat,
+  History as HistoryIcon,
   MapPin,
 } from 'lucide-react';
 import type {
@@ -31,8 +26,7 @@ import type {
   AuditHistoryRecord,
   AuditActionType,
 } from '@/app/actions/history';
-import { useAuth } from '@/context/AuthContext';
-import UserRoleHeaderPill from '@/components/common/UserRoleHeaderPill';
+import AppLayout from '@/components/layout/AppLayout';
 
 interface HistoryViewProps {
   initialData: AuditHistoryPayload;
@@ -184,7 +178,6 @@ function renderActionBadge(action: AuditActionType) {
 }
 
 export default function HistoryView({ initialData }: HistoryViewProps) {
-  const { role } = useAuth();
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedAction, setSelectedAction] = useState<string>('all');
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>('all');
@@ -218,51 +211,14 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
   }, [initialData.records, selectedAction, selectedWarehouseId, searchQuery]);
 
   return (
-    <div className="min-h-screen bg-slate-50 text-blue-950 font-sans pb-28 selection:bg-blue-600 selection:text-white">
-      {/* 1. STICKY TOP HEADER */}
-      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-blue-100 px-4 py-3 shadow-sm shadow-blue-950/5">
-        <div className="max-w-lg mx-auto flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white font-black text-xl shadow-md shadow-blue-500/25">
-              T
-            </div>
-            <div>
-              <div className="text-xs uppercase tracking-wider text-blue-600 font-bold">
-                מעקב כרונולוגי שקוף
-              </div>
-              <h1 className="text-base font-black text-blue-950 leading-tight">
-                יומן תנועות וביקורת
-              </h1>
-            </div>
-          </div>
-
-          {/* Right Header Actions */}
-          <div className="flex items-center gap-2">
-            <UserRoleHeaderPill />
-
-            {/* Operation Counter Badge */}
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-50 border border-blue-200">
-              <Clock className="w-3.5 h-3.5 text-blue-600" />
-              <span className="text-xs font-black text-blue-700">
-                {filteredRecords.length}
-              </span>
-              <span className="text-xs font-bold text-slate-500">פעולות</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Worker Notice Banner */}
-        {role === 'worker' && (
-          <div className="mt-2.5 max-w-lg mx-auto p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-bold flex items-center justify-between">
-            <span className="flex items-center gap-1.5">
-              <HardHat className="w-4 h-4 text-amber-600 shrink-0" />
-              מצב עובד שטח: צפייה ביומן בלבד (פעולות ניהול חסומות)
-            </span>
-          </div>
-        )}
-
+    <AppLayout
+      title="Tooly - יומן תנועות ו-GPS"
+      subtitle="מעקב כרונולוגי וביקורת"
+      requiredRole="any_elevated"
+    >
+      <div className="max-w-lg mx-auto px-4 py-4 space-y-5">
         {/* Facility Dropdown Filter */}
-        <div className="mt-3 max-w-lg mx-auto">
+        <div>
           <div className="relative">
             <Building2 className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-600 pointer-events-none" />
             <select
@@ -285,10 +241,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
             </div>
           </div>
         </div>
-      </header>
 
-      {/* 2. MAIN CONTENT AREA */}
-      <main className="max-w-lg mx-auto px-4 py-4 space-y-4">
         {/* SEARCH INPUT */}
         <div className="relative">
           <Search className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-600 pointer-events-none" />
@@ -525,51 +478,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
             ))}
           </div>
         )}
-      </main>
-
-      {/* 3. UNIVERSAL 4-TAB BOTTOM NAVIGATION BAR */}
-      <nav
-        aria-label="ניווט ראשי"
-        className="fixed bottom-0 left-0 right-0 z-50 bg-white/95 backdrop-blur-lg border-t border-blue-100 px-3 py-2 shadow-lg shadow-blue-950/5"
-      >
-        <div className="max-w-lg mx-auto grid grid-cols-4 gap-1 sm:gap-2">
-          {/* 1. Scanner */}
-          <Link
-            href="/"
-            className="min-h-[54px] rounded-xl flex flex-col items-center justify-center text-slate-500 hover:text-blue-700 active:bg-blue-50/50 transition-colors group"
-          >
-            <Scan className="w-5 h-5 group-hover:text-blue-600 transition-colors" />
-            <span className="text-[10px] sm:text-[11px] font-bold mt-1">סורק מהיר / ניפוק</span>
-          </Link>
-
-          {/* 2. Catalog */}
-          <Link
-            href="/catalog"
-            className="min-h-[54px] rounded-xl flex flex-col items-center justify-center text-slate-500 hover:text-blue-700 active:bg-blue-50/50 transition-colors group"
-          >
-            <Layers className="w-5 h-5 group-hover:text-blue-600 transition-colors" />
-            <span className="text-[10px] sm:text-[11px] font-bold mt-1">קטלוג ומלאי</span>
-          </Link>
-
-          {/* 3. Audit History (ACTIVE) */}
-          <Link
-            href="/history"
-            className="min-h-[54px] rounded-xl bg-blue-50 border border-blue-200 flex flex-col items-center justify-center text-blue-700 font-black shadow-sm"
-          >
-            <HistoryIcon className="w-5 h-5 text-blue-600" />
-            <span className="text-[10px] sm:text-[11px] font-black mt-1">יומן תנועות</span>
-          </Link>
-
-          {/* 4. Print QR Tags */}
-          <Link
-            href="/print-tags"
-            className="min-h-[54px] rounded-xl flex flex-col items-center justify-center text-slate-500 hover:text-blue-700 active:bg-blue-50/50 transition-colors group"
-          >
-            <Printer className="w-5 h-5 group-hover:text-blue-600 transition-colors" />
-            <span className="text-[10px] sm:text-[11px] font-bold mt-1">הדפסת תגיות</span>
-          </Link>
-        </div>
-      </nav>
-    </div>
+      </div>
+    </AppLayout>
   );
 }

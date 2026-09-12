@@ -3,6 +3,7 @@
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { QuickOnboardSchema, type QuickOnboardInput } from '@/core/assets/onboard.schema';
 import type { AssetReservation } from '@/types/domain';
+import { appendAuditHistoryEntry } from '@/app/actions/history';
 
 export interface OnboardFormData {
   warehouses: Array<{
@@ -185,11 +186,33 @@ export async function onboardAsset(rawInput: QuickOnboardInput): Promise<Onboard
         action: 'CHECKIN',
         performed_by: 'Field Agent',
         notes: 'Initial field enrollment via Quick Onboard',
+        gps_lat: input.gps?.lat ?? null,
+        gps_lng: input.gps?.lng ?? null,
       });
 
     if (ledgerError) {
       console.warn('Custody ledger audit log insertion failed:', ledgerError.message);
     }
+
+    appendAuditHistoryEntry({
+      id: `aud-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      assetId: newAsset.id,
+      qrCode: input.qrCode,
+      toolName: input.toolName,
+      brand: input.brand,
+      modelNumber: input.modelNumber || null,
+      action: 'ONBOARD',
+      performedBy: 'רשם ציוד',
+      targetWorker: null,
+      workerPhone: null,
+      condition: input.condition,
+      warehouseId: input.warehouseId,
+      warehouseName: 'מחסן שיוך',
+      warehouseCode: 'WH',
+      notes: 'רישום כלי ראשוני במערכת',
+      createdAt: new Date().toISOString(),
+      gps: input.gps || null,
+    });
 
     return {
       success: true,

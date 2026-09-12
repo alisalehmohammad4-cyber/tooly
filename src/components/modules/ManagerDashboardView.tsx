@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
-import Link from 'next/link';
 import {
   DollarSign,
   TrendingUp,
@@ -13,15 +12,10 @@ import {
   FileSpreadsheet,
   Printer,
   Search,
-  ArrowRight,
-  Layers,
-  Scan,
-  History as HistoryIcon,
-  Warehouse as WarehouseIcon,
   AlertTriangle,
 } from 'lucide-react';
 import type { PlantManagerAnalyticsPayload } from '@/app/actions/dashboard';
-import UserRoleHeaderPill from '@/components/common/UserRoleHeaderPill';
+import AppLayout from '@/components/layout/AppLayout';
 
 interface ManagerDashboardViewProps {
   data: PlantManagerAnalyticsPayload;
@@ -99,42 +93,11 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-blue-950 font-sans pb-28 selection:bg-blue-600 selection:text-white">
-      {/* 1. TOP EXECUTIVE HEADER */}
-      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-blue-100 px-4 py-3 shadow-sm print:hidden">
-        <div className="max-w-6xl mx-auto flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <Link
-              href="/"
-              className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600 hover:bg-blue-100 transition-colors"
-              title="חזרה לסורק"
-            >
-              <ArrowRight className="w-5 h-5" />
-            </Link>
-            <div>
-              <div className="text-[11px] uppercase tracking-widest text-blue-600 font-extrabold flex items-center gap-1.5">
-                <span>מנהל מפעל ופרויקטים</span>
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />
-                <span>EXECUTIVE ANALYTICS</span>
-              </div>
-              <h1 className="text-base sm:text-lg font-black text-blue-950 leading-tight">
-                לוח בקרה ניהולי ובקרת ציוד
-              </h1>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Link
-              href="/dashboard/warehouse"
-              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-200 text-xs font-bold transition-all"
-            >
-              <WarehouseIcon className="w-3.5 h-3.5 text-blue-600" />
-              <span>עמדת מחסנאי</span>
-            </Link>
-            <UserRoleHeaderPill />
-          </div>
-        </div>
-      </header>
+    <AppLayout
+      title="Tooly - מנהל מפעל ופרויקטים"
+      subtitle="לוח בקרה ניהולי ובקרת ציוד"
+      requiredRole="admin"
+    >
 
       {/* PRINT-ONLY HEADER */}
       <div className="hidden print:block p-4 border-b border-slate-300 mb-4 text-center">
@@ -412,46 +375,6 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
           )}
         </div>
       </main>
-
-      {/* 5. UNIVERSAL BOTTOM NAVIGATION */}
-      <nav
-        aria-label="ניווט ראשי"
-        className="fixed bottom-0 left-0 right-0 z-50 bg-white/95 backdrop-blur-lg border-t border-blue-100 px-3 py-2 shadow-lg print:hidden"
-      >
-        <div className="max-w-lg mx-auto grid grid-cols-4 gap-1 sm:gap-2">
-          <Link
-            href="/"
-            className="min-h-[54px] rounded-xl flex flex-col items-center justify-center text-slate-500 hover:text-blue-700 active:bg-blue-50/50 transition-colors"
-          >
-            <Scan className="w-5 h-5" />
-            <span className="text-[10px] sm:text-[11px] font-bold mt-1">סורק / ניפוק</span>
-          </Link>
-
-          <Link
-            href="/catalog"
-            className="min-h-[54px] rounded-xl flex flex-col items-center justify-center text-slate-500 hover:text-blue-700 active:bg-blue-50/50 transition-colors"
-          >
-            <Layers className="w-5 h-5" />
-            <span className="text-[10px] sm:text-[11px] font-bold mt-1">קטלוג ומלאי</span>
-          </Link>
-
-          <Link
-            href="/history"
-            className="min-h-[54px] rounded-xl flex flex-col items-center justify-center text-slate-500 hover:text-blue-700 active:bg-blue-50/50 transition-colors"
-          >
-            <HistoryIcon className="w-5 h-5" />
-            <span className="text-[10px] sm:text-[11px] font-bold mt-1">יומן תנועות</span>
-          </Link>
-
-          <Link
-            href="/dashboard/warehouse"
-            className="min-h-[54px] rounded-xl flex flex-col items-center justify-center text-slate-500 hover:text-blue-700 active:bg-blue-50/50 transition-colors"
-          >
-            <WarehouseIcon className="w-5 h-5" />
-            <span className="text-[10px] sm:text-[11px] font-bold mt-1">עמדת מחסנאי</span>
-          </Link>
-        </div>
-      </nav>
-    </div>
+    </AppLayout>
   );
 }

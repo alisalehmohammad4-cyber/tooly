@@ -13,6 +13,7 @@ import {
   type AssetAccessories,
 } from '@/core/assets/custody.schema';
 import type { AssetReservation } from '@/types/domain';
+import { appendAuditHistoryEntry } from '@/app/actions/history';
 
 export interface ScannedAssetDetails {
   id: string;
@@ -216,10 +217,9 @@ function checkToolLockout(asset: ScannedAssetDetails): { allowed: boolean; error
   if (asset.safetyInspectionDue) {
     const dueTime = new Date(asset.safetyInspectionDue).getTime();
     if (!isNaN(dueTime) && dueTime < Date.now()) {
-      const formatted = new Date(asset.safetyInspectionDue).toLocaleDateString('he-IL');
       return {
         allowed: false,
-        error: `⚠️ הכלי נעול לשימוש! בדיקת בטיחות תקופתית פגת תוקף (${formatted})`,
+        error: '⚠️ הכלי נעול לשימוש! פג תוקף בדיקת בטיחות תקופתית',
       };
     }
   }
@@ -378,7 +378,7 @@ export async function bulkCheckoutAssetAction(
       if (!lockCheck.allowed) {
         return {
           success: false,
-          error: `${targetAsset.toolName} (${targetAsset.qrCode}): ${lockCheck.error}`,
+          error: assetIds.length === 1 ? lockCheck.error! : `${targetAsset.toolName} (${targetAsset.qrCode}): ${lockCheck.error}`,
         };
       }
     }
@@ -416,10 +416,9 @@ export async function bulkCheckoutAssetAction(
         if (item.safety_inspection_due) {
           const dueTime = new Date(item.safety_inspection_due).getTime();
           if (!isNaN(dueTime) && dueTime < Date.now()) {
-            const formatted = new Date(item.safety_inspection_due).toLocaleDateString('he-IL');
             return {
               success: false,
-              error: `⚠️ הכלי נעול לשימוש! בדיקת בטיחות תקופתית פגת תוקף (${formatted})`,
+              error: '⚠️ הכלי נעול לשימוש! פג תוקף בדיקת בטיחות תקופתית',
             };
           }
         }
@@ -527,6 +526,31 @@ export async function bulkCheckoutAssetAction(
     }
   }
 
+  for (const ast of updatedAssets) {
+    appendAuditHistoryEntry({
+      id: `aud-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      assetId: ast.id,
+      qrCode: ast.qrCode,
+      toolName: ast.toolName,
+      brand: ast.brand,
+      modelNumber: ast.modelNumber,
+      action: 'CHECKOUT',
+      performedBy: workerName,
+      targetWorker: workerName,
+      workerPhone: workerPhone || null,
+      condition: ast.condition,
+      warehouseId: ast.currentWarehouseId,
+      warehouseName: ast.warehouseName,
+      warehouseCode: ast.warehouseCode,
+      notes: notes || `ניפוק לעובד ${workerName}`,
+      createdAt: new Date().toISOString(),
+      expectedReturnDate,
+      signatureData,
+      accessoriesSnapshot: accessories[ast.id] || null,
+      gps: gps || null,
+    });
+  }
+
   return {
     success: true,
     message: `נופקו בהצלחה ${assetIds.length} כלים לעובד ${workerName}`,
@@ -608,7 +632,7 @@ export async function checkinAssetAction(
   
   // If damage is reported, enforce maintenance status
   const isDamaged = damageReport?.isDamaged || condition === 'needs_repair' || condition === 'retired';
-  const newStatus = isDamaged ? 'maintenance' : 'available';
+  const newStatus: ScannedAssetDetails['status'] = isDamaged ? 'maintenance' : 'available';
 
   if (isSupabaseConfigured()) {
     try {
@@ -661,34 +685,79 @@ export async function checkinAssetAction(
       FALLBACK_CUSTODY_ASSETS[key].currentAssignedWorker = null;
       FALLBACK_CUSTODY_ASSETS[key].condition = condition;
       FALLBACK_CUSTODY_ASSETS[key].version += 1;
+      const updatedAsset = { ...FALLBACK_CUSTODY_ASSETS[key] };
+      appendAuditHistoryEntry({
+        id: `aud-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        assetId: updatedAsset.id,
+        qrCode: updatedAsset.qrCode,
+        toolName: updatedAsset.toolName,
+        brand: updatedAsset.brand,
+        modelNumber: updatedAsset.modelNumber,
+        action: 'CHECKIN',
+        performedBy: 'מחסנאי',
+        targetWorker: null,
+        workerPhone: null,
+        condition,
+        warehouseId: updatedAsset.currentWarehouseId,
+        warehouseName: updatedAsset.warehouseName,
+        warehouseCode: updatedAsset.warehouseCode,
+        notes: notes || `החזרת כלי (מצב: ${condition})`,
+        createdAt: new Date().toISOString(),
+        damageReport: damageReport || null,
+        gps: gps || null,
+      });
+
       return {
         success: true,
         message:
           newStatus === 'maintenance'
             ? 'הכלי הוחזר והועבר ישירות לסטטוס בבדיקה / תיקון.'
             : 'הכלי הוחזר למחסן וסומן כזמין במלאי.',
-        asset: { ...FALLBACK_CUSTODY_ASSETS[key] },
+        asset: updatedAsset,
       };
     }
   }
 
+  const fallbackReturned = {
+    id: assetId,
+    qrCode: 'TOOL-CHECKIN',
+    status: newStatus,
+    condition,
+    currentAssignedWorker: null,
+    currentWarehouseId: 'wh-main-01',
+    warehouseName: "מחסן מרכזי - אגף א'",
+    warehouseCode: 'CDB-01',
+    toolName: 'כלי שהוחזר',
+    brand: 'Standard',
+    modelNumber: null,
+    version: 2,
+  };
+
+  appendAuditHistoryEntry({
+    id: `aud-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    assetId: fallbackReturned.id,
+    qrCode: fallbackReturned.qrCode,
+    toolName: fallbackReturned.toolName,
+    brand: fallbackReturned.brand,
+    modelNumber: fallbackReturned.modelNumber,
+    action: 'CHECKIN',
+    performedBy: 'מחסנאי',
+    targetWorker: null,
+    workerPhone: null,
+    condition,
+    warehouseId: fallbackReturned.currentWarehouseId,
+    warehouseName: fallbackReturned.warehouseName,
+    warehouseCode: fallbackReturned.warehouseCode,
+    notes: notes || `החזרת כלי (מצב: ${condition})`,
+    createdAt: new Date().toISOString(),
+    damageReport: damageReport || null,
+    gps: gps || null,
+  });
+
   return {
     success: true,
     message: 'הכלי הוחזר למחסן בהצלחה.',
-    asset: {
-      id: assetId,
-      qrCode: 'TOOL-CHECKIN',
-      status: newStatus,
-      condition,
-      currentAssignedWorker: null,
-      currentWarehouseId: 'wh-main-01',
-      warehouseName: "מחסן מרכזי - אגף א'",
-      warehouseCode: 'CDB-01',
-      toolName: 'כלי שהוחזר',
-      brand: 'Standard',
-      modelNumber: null,
-      version: 2,
-    },
+    asset: fallbackReturned,
   };
 }
 
@@ -823,6 +892,25 @@ export async function toggleAssetLockAction(
     if (FALLBACK_CUSTODY_ASSETS[key].id === assetId) {
       FALLBACK_CUSTODY_ASSETS[key].isLocked = isLocked;
       FALLBACK_CUSTODY_ASSETS[key].lockReason = isLocked ? lockReason || 'נעול מנהלית' : undefined;
+      const target = FALLBACK_CUSTODY_ASSETS[key];
+      appendAuditHistoryEntry({
+        id: `aud-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        assetId: target.id,
+        qrCode: target.qrCode,
+        toolName: target.toolName,
+        brand: target.brand,
+        modelNumber: target.modelNumber,
+        action: 'LOCK_STATUS',
+        performedBy: 'מנהל מערכת',
+        targetWorker: null,
+        workerPhone: null,
+        condition: target.condition,
+        warehouseId: target.currentWarehouseId,
+        warehouseName: target.warehouseName,
+        warehouseCode: target.warehouseCode,
+        notes: isLocked ? `נעילת כלי מנהלית: ${lockReason || 'ללא סיבה'}` : 'שחרור נעילת כלי',
+        createdAt: new Date().toISOString(),
+      });
       return {
         success: true,
         message: isLocked
@@ -868,6 +956,25 @@ export async function renewSafetyInspectionAction(
   for (const key of Object.keys(FALLBACK_CUSTODY_ASSETS)) {
     if (FALLBACK_CUSTODY_ASSETS[key].id === assetId) {
       FALLBACK_CUSTODY_ASSETS[key].safetyInspectionDue = nextDueDate;
+      const target = FALLBACK_CUSTODY_ASSETS[key];
+      appendAuditHistoryEntry({
+        id: `aud-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        assetId: target.id,
+        qrCode: target.qrCode,
+        toolName: target.toolName,
+        brand: target.brand,
+        modelNumber: target.modelNumber,
+        action: 'SAFETY_INSPECTION',
+        performedBy: inspectedBy || 'בודק בטיחות מוסמך',
+        targetWorker: null,
+        workerPhone: null,
+        condition: target.condition,
+        warehouseId: target.currentWarehouseId,
+        warehouseName: target.warehouseName,
+        warehouseCode: target.warehouseCode,
+        notes: `חידוש בדיקת בטיחות תקופתית עד ${new Date(nextDueDate).toLocaleDateString('he-IL')}`,
+        createdAt: new Date().toISOString(),
+      });
       return {
         success: true,
         message: `תוקף בדיקת הבטיחות חודש בהצלחה עד ${new Date(nextDueDate).toLocaleDateString('he-IL')}.`,
