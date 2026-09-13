@@ -4,18 +4,10 @@ import type { Category, Warehouse } from '@/types/domain';
 
 export const dynamic = 'force-dynamic';
 
-const FALLBACK_WAREHOUSES: Warehouse[] = [
-  { id: 'wh-main-01', name: "מחסן מרכזי - אגף א'", code: 'CDB-01', isActive: true },
-  { id: 'wh-site-02', name: "אתר בנייה - מכולה ב'", code: 'SCB-02', isActive: true },
-  { id: 'wh-van-03', name: 'רכב שירות נייד 05', code: 'MSV-05', isActive: true },
-];
+import { MOCK_WAREHOUSES, MOCK_CATEGORIES } from '@/lib/mockStore';
 
-const FALLBACK_CATEGORIES: Category[] = [
-  { id: 'cat-pow-01', name: 'כלי עבודה חשמליים', slug: 'power-tools', icon: 'zap', displayOrder: 1 },
-  { id: 'cat-han-02', name: 'כלי עבודה ידניים', slug: 'hand-tools', icon: 'wrench', displayOrder: 2 },
-  { id: 'cat-mea-03', name: 'מכשירי מדידה ולייזר', slug: 'measuring', icon: 'ruler', displayOrder: 3 },
-  { id: 'cat-saf-04', name: 'בטיחות וציוד מגן', slug: 'safety', icon: 'shield', displayOrder: 4 },
-];
+const FALLBACK_WAREHOUSES: Warehouse[] = MOCK_WAREHOUSES;
+const FALLBACK_CATEGORIES: Category[] = MOCK_CATEGORIES;
 
 export default async function HomePage() {
   let warehouses: Warehouse[] = [];

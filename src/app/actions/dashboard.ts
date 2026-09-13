@@ -1,6 +1,11 @@
 'use server';
 
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import {
+  getMockPlantManagerAnalytics,
+  getMockStorekeeperOperations,
+  MOCK_WAREHOUSES,
+} from '@/lib/mockStore';
 
 export interface FleetUtilization {
   totalAssets: number;
@@ -96,11 +101,7 @@ export interface StorekeeperOperationsPayload {
 }
 
 // Fallback dataset for instant preview and offline development
-const FALLBACK_WAREHOUSES = [
-  { id: 'wh-main-01', name: "מחסן מרכזי - אגף א'", code: 'CDB-01' },
-  { id: 'wh-site-02', name: "אתר בנייה - מכולה ב'", code: 'SCB-02' },
-  { id: 'wh-van-03', name: "רכב שירות נייד 05", code: 'MSV-05' },
-];
+const FALLBACK_WAREHOUSES = MOCK_WAREHOUSES;
 
 /**
  * Retrieves executive analytics and safety compliance data for Factory & Plant Managers.
@@ -247,97 +248,8 @@ export async function getPlantManagerAnalytics(): Promise<PlantManagerAnalyticsP
     }
   }
 
-  // Fallback demo dataset for instant rich presentation
-  return {
-    totalFleetValue: 98450,
-    utilization: {
-      totalAssets: 15,
-      inUse: 8,
-      inWarehouse: 5,
-      maintenance: 2,
-      utilizationRate: 53,
-    },
-    safetyCompliance: {
-      overdueCount: 1, // TOOL-CUT-020
-      upcomingInspectionCount: 2,
-      lockedCount: 1, // TOOL-MEA-040
-      complianceRate: 87,
-    },
-    monthlyDamageCost: 2450,
-    facilityDistribution: [
-      {
-        warehouseId: 'wh-main-01',
-        warehouseName: "מחסן מרכזי - אגף א'",
-        warehouseCode: 'CDB-01',
-        totalAssets: 8,
-        available: 3,
-        checkedOut: 4,
-        maintenance: 1,
-        utilizationRate: 50,
-      },
-      {
-        warehouseId: 'wh-site-02',
-        warehouseName: "אתר בנייה - מכולה ב'",
-        warehouseCode: 'SCB-02',
-        totalAssets: 4,
-        available: 1,
-        checkedOut: 2,
-        maintenance: 1,
-        utilizationRate: 50,
-      },
-      {
-        warehouseId: 'wh-van-03',
-        warehouseName: "רכב שירות נייד 05",
-        warehouseCode: 'MSV-05',
-        totalAssets: 3,
-        available: 1,
-        checkedOut: 2,
-        maintenance: 0,
-        utilizationRate: 67,
-      },
-    ],
-    highRiskOverdueAssets: [
-      {
-        assetId: 'ast-cut-02',
-        toolName: '20V MAX Deep Cut Cordless Band Saw',
-        brand: 'DeWalt',
-        modelNumber: 'DCS374B',
-        qrCode: 'TOOL-CUT-021',
-        workerName: 'סאמי אל-חסן',
-        workerPhone: '054-9876543',
-        warehouseName: "רכב שירות נייד 05",
-        expectedReturnDate: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-        daysOverdue: 3,
-        purchaseCost: 3200,
-      },
-      {
-        assetId: 'ast-drl-02',
-        toolName: 'M18 FUEL 1/2" Hammer Drill/Driver',
-        brand: 'Milwaukee',
-        modelNumber: '2904-20',
-        qrCode: 'TOOL-DRL-031',
-        workerName: 'טארק מנצור',
-        workerPhone: '052-3344556',
-        warehouseName: "אתר בנייה - מכולה ב'",
-        expectedReturnDate: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-        daysOverdue: 2,
-        purchaseCost: 1950,
-      },
-      {
-        assetId: 'ast-wld-02',
-        toolName: 'Power MIG 210 MP Multi-Process',
-        brand: 'Lincoln Electric',
-        modelNumber: 'K3963-1',
-        qrCode: 'TOOL-WLD-002',
-        workerName: 'קרלוס מנדס',
-        workerPhone: '050-1122334',
-        warehouseName: "אתר בנייה - מכולה ב'",
-        expectedReturnDate: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
-        daysOverdue: 1,
-        purchaseCost: 7400,
-      },
-    ],
-  };
+  // Fallback unified dataset for instant rich presentation and offline preview
+  return getMockPlantManagerAnalytics();
 }
 
 /**
@@ -440,97 +352,6 @@ export async function getStorekeeperOperations(
     }
   }
 
-  // Fallback operational data for storekeeper
-  return {
-    warehouse: currentWh,
-    allWarehouses: FALLBACK_WAREHOUSES,
-    returnsDueToday: [
-      {
-        assetId: 'ast-drl-03',
-        toolName: '60V MAX 1-7/8" SDS-MAX Rotary Hammer',
-        brand: 'DeWalt',
-        modelNumber: 'DCH733X2',
-        qrCode: 'TOOL-DRL-032',
-        workerName: 'דוד כהן',
-        workerPhone: '053-4455667',
-        expectedReturnDate: new Date(new Date().setHours(17, 0, 0, 0)).toISOString(),
-        accessoriesSummary: '2 סוללות + מטען מקורי + ארגז',
-      },
-      {
-        assetId: 'ast-lft-02',
-        toolName: 'LB Lever Puller Hoist 1.5-Ton',
-        brand: 'Harrington',
-        modelNumber: 'LB015',
-        qrCode: 'TOOL-LFT-011',
-        workerName: 'מרקוס ואנס',
-        workerPhone: '058-7766554',
-        expectedReturnDate: new Date(new Date().setHours(18, 0, 0, 0)).toISOString(),
-        accessoriesSummary: 'שרשרת עגינה',
-      },
-    ],
-    overdueAssets: [
-      {
-        assetId: 'ast-cut-02',
-        toolName: '20V MAX Deep Cut Cordless Band Saw',
-        brand: 'DeWalt',
-        modelNumber: 'DCS374B',
-        qrCode: 'TOOL-CUT-021',
-        workerName: 'סאמי אל-חסן',
-        workerPhone: '054-9876543',
-        warehouseName: currentWh.name,
-        expectedReturnDate: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-        daysOverdue: 3,
-      },
-      {
-        assetId: 'ast-drl-02',
-        toolName: 'M18 FUEL 1/2" Hammer Drill/Driver',
-        brand: 'Milwaukee',
-        modelNumber: '2904-20',
-        qrCode: 'TOOL-DRL-031',
-        workerName: 'טארק מנצור',
-        workerPhone: '052-3344556',
-        warehouseName: currentWh.name,
-        expectedReturnDate: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-        daysOverdue: 2,
-      },
-      {
-        assetId: 'ast-wld-02',
-        toolName: 'Power MIG 210 MP Multi-Process',
-        brand: 'Lincoln Electric',
-        modelNumber: 'K3963-1',
-        qrCode: 'TOOL-WLD-002',
-        workerName: 'קרלוס מנדס',
-        workerPhone: '050-1122334',
-        warehouseName: currentWh.name,
-        expectedReturnDate: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
-        daysOverdue: 1,
-      },
-    ],
-    lowStockAlerts: [
-      {
-        categoryId: 'cat-weld',
-        categoryName: 'ריתוך והלחמה',
-        availableCount: 1,
-        minStockThreshold: 2,
-        status: 'critical',
-      },
-      {
-        categoryId: 'cat-cut',
-        categoryName: 'חיתוך וניסור',
-        availableCount: 1,
-        minStockThreshold: 2,
-        status: 'critical',
-      },
-      {
-        categoryId: 'cat-lift',
-        categoryName: 'הרמה ושינוע',
-        availableCount: 2,
-        minStockThreshold: 3,
-        status: 'low',
-      },
-    ],
-    quarantinedCount: 2, // 1 maintenance + 1 locked
-    availableCount: 5,
-    checkedOutCount: 8,
-  };
+  // Fallback operational data for storekeeper derived strictly from unified store
+  return getMockStorekeeperOperations(selectedWhId);
 }

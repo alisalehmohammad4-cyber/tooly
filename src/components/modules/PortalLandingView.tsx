@@ -33,26 +33,6 @@ export default function PortalLandingView({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
 
-  // Quick preset login helper
-  const handleQuickPreset = async (presetPin: string) => {
-    setLoginError(null);
-    setIsSubmitting(true);
-    try {
-      const result = await loginWithCredentials(presetPin, presetPin);
-      if (result.success && result.user) {
-        if (result.user.role === 'admin') {
-          router.push('/dashboard/manager');
-        }
-      } else {
-        setLoginError(result.error || 'שגיאת כניסה מהירה');
-      }
-    } catch {
-      setLoginError('שגיאה בביצוע כניסה למערכת');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username.trim()) {
@@ -205,18 +185,19 @@ export default function PortalLandingView({
               )}
 
               {/* Form */}
-              <form onSubmit={handleFormSubmit} className="space-y-3.5 mb-5">
+              <form onSubmit={handleFormSubmit} className="space-y-3.5 mb-2">
                 <div>
                   <label className="block text-xs font-bold text-slate-300 mb-1">
-                    שם משתמש או קוד כניסה:
+                    שם משתמש או קוד מזהה:
                   </label>
                   <div className="relative">
                     <input
                       type="text"
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
-                      placeholder="לדוגמה: yossi או קוד PIN"
-                      autoComplete="username"
+                      placeholder="הזן שם משתמש (לדוגמה: yossi)"
+                      autoComplete="off"
+                      inputMode="text"
                       disabled={isSubmitting}
                       className="w-full bg-slate-950/80 border border-slate-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 outline-none transition-all pl-10"
                     />
@@ -233,10 +214,12 @@ export default function PortalLandingView({
                       type="password"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      placeholder="הזן קוד (לדוגמה: 1111)"
-                      autoComplete="current-password"
+                      placeholder="הזן קוד PIN מספרי"
+                      autoComplete="off"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
                       disabled={isSubmitting}
-                      className="w-full bg-slate-950/80 border border-slate-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 outline-none transition-all pl-10"
+                      className="w-full bg-slate-950/80 border border-slate-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 outline-none transition-all pl-10 tracking-widest"
                     />
                     <KeyRound className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                   </div>
@@ -245,7 +228,7 @@ export default function PortalLandingView({
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="w-full py-3.5 px-5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-50 text-white font-black text-sm shadow-md shadow-blue-500/20 transition-all flex items-center justify-center gap-2 active:scale-[0.98] cursor-pointer"
+                  className="w-full py-3.5 px-5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-50 text-white font-black text-sm shadow-md shadow-blue-500/20 transition-all flex items-center justify-center gap-2 active:scale-[0.98] cursor-pointer mt-4"
                 >
                   {isSubmitting ? (
                     <>
@@ -260,42 +243,6 @@ export default function PortalLandingView({
                   )}
                 </button>
               </form>
-            </div>
-
-            {/* Quick Presets for Rapid Operator Login */}
-            <div className="pt-4 border-t border-slate-800">
-              <div className="text-[11px] font-bold text-slate-400 mb-2">
-                כניסה מהירה (סביבת פיתוח והדגמה):
-              </div>
-              <div className="grid grid-cols-3 gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleQuickPreset('1111')}
-                  disabled={isSubmitting}
-                  className="px-2.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold transition-all text-center flex flex-col items-center gap-1 active:scale-95 cursor-pointer"
-                >
-                  <span className="text-[10px] text-blue-400 font-extrabold">1111</span>
-                  <span className="truncate w-full">מחסן ראשי</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleQuickPreset('1234')}
-                  disabled={isSubmitting}
-                  className="px-2.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold transition-all text-center flex flex-col items-center gap-1 active:scale-95 cursor-pointer"
-                >
-                  <span className="text-[10px] text-amber-400 font-extrabold">1234</span>
-                  <span className="truncate w-full">מחסן שטח</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleQuickPreset('9999')}
-                  disabled={isSubmitting}
-                  className="px-2.5 py-2 rounded-lg bg-purple-900/40 hover:bg-purple-900/60 border border-purple-500/30 text-purple-200 text-xs font-bold transition-all text-center flex flex-col items-center gap-1 active:scale-95 cursor-pointer"
-                >
-                  <span className="text-[10px] text-purple-300 font-extrabold">9999</span>
-                  <span className="truncate w-full">הנהלת מפעל</span>
-                </button>
-              </div>
             </div>
           </div>
 

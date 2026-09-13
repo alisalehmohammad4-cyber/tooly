@@ -134,7 +134,7 @@ export function PwaInstallBanner() {
                 </span>
               </div>
               <p className="text-xs text-slate-600 mt-0.5 font-medium leading-relaxed">
-                تثبيت تطبيق Tooly على هاتفك / Install App
+                התקן את אפליקציית Tooly לגישה מהירה בשטח
               </p>
             </div>
           </div>
@@ -142,7 +142,7 @@ export function PwaInstallBanner() {
           <button
             type="button"
             onClick={handleDismiss}
-            aria-label="إغلاق التنبيه / Dismiss banner"
+            aria-label="סגור הודעה"
             className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
@@ -158,7 +158,7 @@ export function PwaInstallBanner() {
               className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs tracking-wide shadow-md shadow-blue-600/20 active:scale-[0.98] transition-all cursor-pointer"
             >
               <Download className="w-4 h-4" />
-              <span>تثبيت الآن على الهاتف / Install App</span>
+              <span>התקן עכשיו במסך הבית</span>
             </button>
           )}
 
@@ -170,19 +170,19 @@ export function PwaInstallBanner() {
                 className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-bold text-xs tracking-wide transition-all cursor-pointer"
               >
                 <Share2 className="w-4 h-4" />
-                <span>طريقة التثبيت على iPhone (iOS)</span>
+                <span>הוראות התקנה ל-iPhone (iOS)</span>
               </button>
 
               {showIosGuide && (
                 <div className="p-3 bg-slate-50 rounded-xl border border-blue-100 text-[11px] text-blue-950 leading-relaxed space-y-1.5 animate-in fade-in">
                   <p className="flex items-center gap-1.5 font-semibold text-blue-600">
                     <Sparkles className="w-3.5 h-3.5" />
-                    خطوات التثبيت السريع:
+                    שלבי התקנה מהירים:
                   </p>
                   <ol className="list-decimal list-inside space-y-1 text-slate-700 pr-1">
-                    <li>اضغط على زر المشاركة <strong className="text-blue-600">(Share ⎋)</strong> أسفل شاشة Safari.</li>
-                    <li>مرر للأسفل واختر <strong className="text-blue-600">&quot;إضافة إلى الصفحة الرئيسية&quot; (Add to Home Screen)</strong>.</li>
-                    <li>اضغط على <strong className="text-blue-600">&quot;إضافة&quot; (Add)</strong> في أعلى الزاوية.</li>
+                    <li>לחץ על כפתור השיתוף <strong className="text-blue-600">(Share ⎋)</strong> בתחתית Safari.</li>
+                    <li>גלול ובחר <strong className="text-blue-600">&quot;הוסף למסך הבית&quot; (Add to Home Screen)</strong>.</li>
+                    <li>לחץ על <strong className="text-blue-600">&quot;הוסף&quot; (Add)</strong> בפינה העליונה.</li>
                   </ol>
                 </div>
               )}

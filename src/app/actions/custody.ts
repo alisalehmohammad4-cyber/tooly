@@ -54,148 +54,42 @@ export type BulkCustodyActionResult =
     }
   | { success: false; error: string };
 
-// In-memory fallback dataset enriched with Phase 13 fleet & lockout properties
-const FALLBACK_CUSTODY_ASSETS: Record<string, ScannedAssetDetails> = {
-  'TOOL-WLD-001': {
-    id: 'ast-wld-01',
-    qrCode: 'TOOL-WLD-001',
-    status: 'available',
-    condition: 'excellent',
-    currentAssignedWorker: null,
-    currentWarehouseId: 'wh-main-01',
-    warehouseName: "מחסן מרכזי - אגף א'",
-    warehouseCode: 'CDB-01',
-    toolName: 'רתכת משולבת Multimatic 220 AC/DC TIG/MIG',
-    brand: 'Miller',
-    modelNumber: '907757',
-    version: 1,
-    purchaseDate: '2024-01-15',
-    purchaseCost: 8450,
-    warrantyUntil: '2026-01-15',
-    safetyInspectionDue: '2026-12-31', // Valid
-    isLocked: false,
-  },
-  'TOOL-WLD-002': {
-    id: 'ast-wld-02',
-    qrCode: 'TOOL-WLD-002',
-    status: 'checked_out',
-    condition: 'good',
-    currentAssignedWorker: 'ישראל ישראלי',
-    currentWarehouseId: 'wh-site-02',
-    warehouseName: "אתר בנייה - מכולה ב'",
-    warehouseCode: 'SCB-02',
-    toolName: 'רתכת Power MIG 210 MP Multi-Process',
-    brand: 'Lincoln Electric',
-    modelNumber: 'K3963-1',
-    version: 2,
-    purchaseDate: '2023-05-10',
-    purchaseCost: 6200,
-    warrantyUntil: '2025-05-10',
-    safetyInspectionDue: '2026-11-20', // Valid
-    isLocked: false,
-  },
-  'TOOL-WLD-003': {
-    id: 'ast-wld-03',
-    qrCode: 'TOOL-WLD-003',
-    status: 'maintenance',
-    condition: 'needs_repair',
-    currentAssignedWorker: null,
-    currentWarehouseId: 'wh-main-01',
-    warehouseName: "מחסן מרכזי - אגף א'",
-    warehouseCode: 'CDB-01',
-    toolName: 'רתכת Rebel EMP 205ic Multi-Material',
-    brand: 'ESAB',
-    modelNumber: '0558102553',
-    version: 1,
-    purchaseDate: '2023-09-01',
-    purchaseCost: 9100,
-    warrantyUntil: '2025-09-01',
-    safetyInspectionDue: '2026-03-01',
-    isLocked: false,
-  },
-  'TOOL-CUT-020': {
-    id: 'ast-cut-01',
-    qrCode: 'TOOL-CUT-020',
-    status: 'available',
-    condition: 'excellent',
-    currentAssignedWorker: null,
-    currentWarehouseId: 'wh-main-01',
-    warehouseName: "מחסן מרכזי - אגף א'",
-    warehouseCode: 'CDB-01',
-    toolName: 'מסור שורף נייד 14 אינץ 15A',
-    brand: 'Makita',
-    modelNumber: 'LW1401',
-    version: 1,
-    purchaseDate: '2023-11-05',
-    purchaseCost: 2850,
-    warrantyUntil: '2025-11-05',
-    safetyInspectionDue: '2026-01-10', // EXPIRED! Demonstrates overdue inspection lockout
-    isLocked: false,
-  },
-  'TOOL-CUT-021': {
-    id: 'ast-cut-02',
-    qrCode: 'TOOL-CUT-021',
-    status: 'checked_out',
-    condition: 'good',
-    currentAssignedWorker: 'סמי אל-חסן',
-    currentWarehouseId: 'wh-van-03',
-    warehouseName: 'רכב שירות נייד 05',
-    warehouseCode: 'MSV-05',
-    toolName: 'מסור סרט נטען 20V MAX Deep Cut',
-    brand: 'DeWalt',
-    modelNumber: 'DCS374B',
-    version: 3,
-    purchaseDate: '2024-02-14',
-    purchaseCost: 3400,
-    warrantyUntil: '2027-02-14',
-    safetyInspectionDue: '2026-12-15',
-    isLocked: false,
-  },
-  'TOOL-DRL-030': {
-    id: 'ast-drl-01',
-    qrCode: 'TOOL-DRL-030',
-    status: 'available',
-    condition: 'excellent',
-    currentAssignedWorker: null,
-    currentWarehouseId: 'wh-main-01',
-    warehouseName: "מחסן מרכזי - אגף א'",
-    warehouseCode: 'CDB-01',
-    toolName: 'פטישון חציבה כבד TE 70-ATC/AVR SDS-Max',
-    brand: 'Hilti',
-    modelNumber: 'TE-70-ATC',
-    version: 1,
-    purchaseDate: '2024-04-10',
-    purchaseCost: 5600,
-    warrantyUntil: '2026-04-10',
-    safetyInspectionDue: '2026-10-01',
-    isLocked: false,
-    reservation: {
-      projectName: 'מגדל שלום - שלב ב׳',
-      reservedForDate: '2026-10-15',
-      reservedBy: 'יוסי כהן',
-    },
-  },
-  'TOOL-MEA-040': {
-    id: 'ast-mea-01',
-    qrCode: 'TOOL-MEA-040',
-    status: 'available',
-    condition: 'excellent',
-    currentAssignedWorker: null,
-    currentWarehouseId: 'wh-main-01',
-    warehouseName: "מחסן מרכזי - אגף א'",
-    warehouseCode: 'CDB-01',
-    toolName: 'מערכת פילוס לייזר רוטטיבי Rugby 610',
-    brand: 'Leica Geosystems',
-    modelNumber: '6005983',
-    version: 1,
-    purchaseDate: '2023-08-20',
-    purchaseCost: 7900,
-    warrantyUntil: '2025-08-20',
-    safetyInspectionDue: '2026-11-01',
-    isLocked: true, // LOCKED! Demonstrates administrative lockout
-    lockReason: 'נעול מנהלית - נדרש כיול לייזר שנתי במעבדה מוסמכת לפני חזרה לשימוש',
-  },
-};
+import {
+  getMockAssetByQr,
+  mutateMockAsset,
+  getMockAssets,
+} from '@/lib/mockStore';
+
+// In-memory fallback dataset synchronized with unified mockStore
+const FALLBACK_CUSTODY_ASSETS: Record<string, ScannedAssetDetails> = {};
+
+function initCustodyAssets() {
+  getMockAssets().forEach((a) => {
+    FALLBACK_CUSTODY_ASSETS[a.qrCode] = {
+      id: a.id,
+      qrCode: a.qrCode,
+      status: a.status,
+      condition: a.condition,
+      currentAssignedWorker: a.currentAssignedWorker,
+      currentWarehouseId: a.warehouseId,
+      warehouseName: a.warehouseName,
+      warehouseCode: a.warehouseCode,
+      toolName: a.toolName,
+      brand: a.brand,
+      modelNumber: a.modelNumber,
+      version: a.version,
+      purchaseDate: a.purchaseDate,
+      purchaseCost: a.purchaseCost,
+      warrantyUntil: a.warrantyUntil,
+      safetyInspectionDue: a.safetyInspectionDue,
+      isLocked: a.isLocked,
+      lockReason: a.lockReason,
+      expectedReturnDate: a.expectedReturnDate,
+      accessories: a.accessories,
+    };
+  });
+}
+initCustodyAssets();
 
 const WAREHOUSE_NAMES: Record<string, { name: string; code: string }> = {
   'wh-main-01': { name: "מחסן מרכזי - אגף א'", code: 'CDB-01' },
@@ -325,6 +219,12 @@ export async function getAssetDetailsByQr(
     } catch (err) {
       console.warn('Supabase query error in getAssetDetailsByQr, falling back to mock:', err);
     }
+  }
+
+  // Fallback lookup from unified mockStore
+  const mockItem = getMockAssetByQr(cleanQr);
+  if (mockItem) {
+    return mockItem;
   }
 
   // Fallback lookup by QR (case-insensitive)
@@ -496,6 +396,24 @@ export async function bulkCheckoutAssetAction(
           hasCase: false,
         };
         FALLBACK_CUSTODY_ASSETS[key].version += 1;
+        mutateMockAsset(
+          FALLBACK_CUSTODY_ASSETS[key].qrCode,
+          {
+            status: 'checked_out',
+            currentAssignedWorker: workerName,
+            workerPhone: workerPhone || null,
+            expectedReturnDate,
+            accessories: FALLBACK_CUSTODY_ASSETS[key].accessories,
+          },
+          {
+            action: 'CHECKOUT',
+            performedBy: 'מחסנאי',
+            targetWorker: workerName,
+            workerPhone: workerPhone || null,
+            signatureData,
+            notes: notes || 'ניפוק כלי עבודה לצוות שטח',
+          }
+        );
         updatedAssets.push({ ...FALLBACK_CUSTODY_ASSETS[key] });
         found = true;
         break;
@@ -683,8 +601,23 @@ export async function checkinAssetAction(
     if (FALLBACK_CUSTODY_ASSETS[key].id === assetId) {
       FALLBACK_CUSTODY_ASSETS[key].status = newStatus;
       FALLBACK_CUSTODY_ASSETS[key].currentAssignedWorker = null;
-      FALLBACK_CUSTODY_ASSETS[key].condition = condition;
       FALLBACK_CUSTODY_ASSETS[key].version += 1;
+      mutateMockAsset(
+        FALLBACK_CUSTODY_ASSETS[key].qrCode,
+        {
+          status: newStatus,
+          currentAssignedWorker: null,
+          workerPhone: null,
+          condition,
+          expectedReturnDate: null,
+        },
+        {
+          action: 'CHECKIN',
+          performedBy: 'מחסנאי',
+          notes: notes || `החזרת כלי (מצב: ${condition})`,
+          damageReport: damageReport || null,
+        }
+      );
       const updatedAsset = { ...FALLBACK_CUSTODY_ASSETS[key] };
       appendAuditHistoryEntry({
         id: `aud-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -830,6 +763,19 @@ export async function transferAssetAction(
       FALLBACK_CUSTODY_ASSETS[key].warehouseName = targetWhMeta.name;
       FALLBACK_CUSTODY_ASSETS[key].warehouseCode = targetWhMeta.code;
       FALLBACK_CUSTODY_ASSETS[key].version += 1;
+      mutateMockAsset(
+        FALLBACK_CUSTODY_ASSETS[key].qrCode,
+        {
+          warehouseId: targetWarehouseId,
+          warehouseName: targetWhMeta.name,
+          warehouseCode: targetWhMeta.code,
+        },
+        {
+          action: 'TRANSFER_RECEIVE',
+          performedBy: 'מחסנאי',
+          notes: `העברת כלי למחסן: ${targetWhMeta.name}`,
+        }
+      );
       return {
         success: true,
         message: `מיקום הכלי עודכן בהצלחה ל-${targetWhMeta.name}`,

@@ -23,6 +23,9 @@ import {
   FileText,
   Lock,
   BookmarkCheck,
+  Flashlight,
+  Barcode,
+  PackagePlus,
 } from 'lucide-react';
 import type { Category, Warehouse, AssetCondition } from '@/types/domain';
 import { checkQrCodeExists, onboardAsset } from '@/app/actions/assets';
@@ -99,6 +102,13 @@ export default function QuickOnboardView({
   const [isVerifyingQr, setIsVerifyingQr] = useState<boolean>(false);
   const [qrWarning, setQrWarning] = useState<string | null>(null);
 
+  // Storekeeper Streamlined View State (Hide onboarding form by default for high-velocity dispatch)
+  const [showOnboardForm, setShowOnboardForm] = useState<boolean>(false);
+
+  // Camera Hardware Controls (Torch & Barcode Mode)
+  const [isTorchOn, setIsTorchOn] = useState<boolean>(false);
+  const [scanMode, setScanMode] = useState<'qr' | 'barcode'>('qr');
+
   // Tool Form Details
   const [toolName, setToolName] = useState<string>('');
   const [brand, setBrand] = useState<string>('DeWalt');
@@ -145,10 +155,45 @@ export default function QuickOnboardView({
         console.warn('Error stopping html5-qrcode scanner:', err);
       } finally {
         isScanningRef.current = false;
+        setIsTorchOn(false);
         setScannerActive(false);
       }
     }
   }, []);
+
+  // Toggle Torch on active camera video stream
+  const toggleTorch = useCallback(async () => {
+    try {
+      const videoElem = document.querySelector('#qr-reader video') as HTMLVideoElement | null;
+      const stream = videoElem?.srcObject as MediaStream | null;
+      const track = stream?.getVideoTracks()[0];
+      if (track) {
+        const nextState = !isTorchOn;
+        await track.applyConstraints({
+          advanced: [{ torch: nextState } as MediaTrackConstraintSet & { torch?: boolean }],
+        });
+        setIsTorchOn(nextState);
+      }
+    } catch (err) {
+      console.warn('Torch toggle not supported or failed on this device:', err);
+    }
+  }, [isTorchOn]);
+
+  // Toggle between Standard QR (240x240) and Wide 1D Barcode (280x110)
+  const handleToggleScanMode = useCallback(async () => {
+    const nextMode = scanMode === 'qr' ? 'barcode' : 'qr';
+    if (scannerRef.current && isScanningRef.current) {
+      try {
+        await scannerRef.current.stop();
+      } catch (err) {
+        console.warn('Error stopping scanner during mode toggle:', err);
+      } finally {
+        isScanningRef.current = false;
+        setIsTorchOn(false);
+      }
+    }
+    setScanMode(nextMode);
+  }, [scanMode]);
 
   // Add asset to dispatch cart
   const handleAddToCart = useCallback((asset: ScannedAssetDetails) => {
@@ -186,6 +231,8 @@ export default function QuickOnboardView({
     setManualQrInput('');
     setQrWarning(null);
     setIsBulkModalOpen(false);
+    setShowOnboardForm(false);
+    setIsTorchOn(false);
     setScannerActive(true);
   };
 
@@ -293,6 +340,7 @@ export default function QuickOnboardView({
           setQrWarning(null);
         }
         setScannedRegisteredAsset(null);
+        setShowOnboardForm(true);
       } catch (err) {
         console.error('Error verifying QR code:', err);
       } finally {
@@ -318,12 +366,17 @@ export default function QuickOnboardView({
           }
 
           if (!isScanningRef.current) {
+            const qrbox =
+              scanMode === 'barcode'
+                ? { width: 280, height: 110 }
+                : { width: 240, height: 240 };
+
             scannerRef.current
               .start(
                 { facingMode: 'environment' },
                 {
                   fps: 10,
-                  qrbox: { width: 240, height: 240 },
+                  qrbox,
                   aspectRatio: 1.0,
                 },
                 handleScanSuccess,
@@ -367,7 +420,7 @@ export default function QuickOnboardView({
           .catch(() => {});
       }
     };
-  }, [qrCode, scannerActive, handleScanSuccess]);
+  }, [qrCode, scannerActive, handleScanSuccess, scanMode]);
 
   // Reset QR state and re-open scanner
   const handleReScan = async () => {
@@ -379,6 +432,8 @@ export default function QuickOnboardView({
     setScannedRegisteredAsset(null);
     setIsModalOpen(false);
     setShowManualInput(false);
+    setShowOnboardForm(false);
+    setIsTorchOn(false);
     setScannerActive(true);
   };
 
@@ -392,6 +447,8 @@ export default function QuickOnboardView({
     setQrWarning(null);
     setSubmitError(null);
     setIsModalOpen(false);
+    setShowOnboardForm(false);
+    setIsTorchOn(false);
     setScannerActive(true);
   };
 
@@ -502,6 +559,7 @@ export default function QuickOnboardView({
       setQrWarning(null);
       setSubmitError(null);
       setIsSubmitting(false);
+      setShowOnboardForm(false);
 
       // Re-activate scanner for the continuous field loop
       setScannerActive(true);
@@ -816,6 +874,51 @@ export default function QuickOnboardView({
               <div className="relative w-full aspect-square max-h-72 rounded-xl overflow-hidden bg-slate-900 border-2 border-blue-200 flex flex-col items-center justify-center shadow-inner">
                 <div id="qr-reader" className="w-full h-full" />
 
+                {/* FLOATING CAMERA HARDWARE CONTROLS (Torch & 1D/QR Switcher) */}
+                {scannerActive && !scannerError && (
+                  <div className="absolute top-3 inset-x-3 flex items-center justify-between pointer-events-none z-20">
+                    <button
+                      type="button"
+                      onClick={handleToggleScanMode}
+                      className="pointer-events-auto px-2.5 py-1.5 rounded-lg bg-slate-900/80 backdrop-blur-md text-white text-[11px] font-bold border border-white/20 flex items-center gap-1.5 shadow-lg active:scale-95 transition-all cursor-pointer hover:bg-slate-800"
+                      title="החלף בין סריקת ברקוד רחב (1D) לקוד QR"
+                    >
+                      {scanMode === 'barcode' ? (
+                        <>
+                          <Barcode className="w-3.5 h-3.5 text-blue-400" />
+                          <span>ברקוד רחב (1D)</span>
+                        </>
+                      ) : (
+                        <>
+                          <QrCode className="w-3.5 h-3.5 text-blue-400" />
+                          <span>קוד QR</span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={toggleTorch}
+                      className={`pointer-events-auto px-2.5 py-1.5 rounded-lg backdrop-blur-md border flex items-center gap-1.5 shadow-lg active:scale-95 transition-all cursor-pointer ${
+                        isTorchOn
+                          ? 'bg-amber-400 text-slate-950 border-amber-300 ring-2 ring-amber-400/50'
+                          : 'bg-slate-900/80 text-white border-white/20 hover:bg-slate-800'
+                      }`}
+                      title={isTorchOn ? 'כבה פנס' : 'הדלק פנס'}
+                    >
+                      <Flashlight className={`w-3.5 h-3.5 ${isTorchOn ? 'text-slate-950 fill-slate-950' : 'text-amber-400'}`} />
+                      <span className="text-[11px] font-bold">
+                        {isTorchOn ? 'פנס דולק' : 'פנס'}
+                      </span>
+                    </button>
+                  </div>
+                )}
+
+                {/* Laser Alignment Guide in Barcode Mode */}
+                {scanMode === 'barcode' && scannerActive && !scannerError && (
+                  <div className="absolute inset-x-6 top-1/2 -translate-y-1/2 h-0.5 bg-red-500/80 shadow-[0_0_8px_rgba(239,68,68,0.9)] pointer-events-none z-10 animate-pulse" />
+                )}
+
                 {scannerError && (
                   <div className="absolute inset-0 bg-white/95 p-6 flex flex-col items-center justify-center text-center space-y-3">
                     <CameraOff className="w-10 h-10 text-blue-600" />
@@ -954,13 +1057,81 @@ export default function QuickOnboardView({
               <span>כרטיס מכשיר מורחב (דרכון כלי, בדיקות בטיחות ונעילה)</span>
             </button>
           </div>
+        ) : !showOnboardForm ? (
+          /* DEDICATED HIGH-VELOCITY DISPATCH / CUSTODY SCANNER HUB */
+          <div className="rounded-2xl border-2 border-blue-100 bg-white p-5 shadow-sm shadow-blue-950/5 space-y-4 animate-in fade-in duration-200">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100 shrink-0">
+                  <Scan className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-black uppercase tracking-wider text-blue-950">
+                    עמדת סריקה וניפוק פעילה
+                  </h2>
+                  <p className="text-xs text-slate-500 font-medium">
+                    כוון את הסורק לברקוד או QR לפעולת ניפוק, החזרה או בדיקת סטטוס
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* High-Velocity Flow Highlights */}
+            <div className="grid grid-cols-3 gap-2 pt-1">
+              <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-center">
+                <div className="text-[10px] font-black uppercase text-blue-600">שלב 1</div>
+                <div className="text-xs font-bold text-slate-800 mt-0.5">סריקת כלי</div>
+                <div className="text-[10px] text-slate-500 mt-0.5">זיהוי מיידי</div>
+              </div>
+              <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-center">
+                <div className="text-[10px] font-black uppercase text-amber-600">שלב 2</div>
+                <div className="text-xs font-bold text-slate-800 mt-0.5">ניפוק / החזרה</div>
+                <div className="text-[10px] text-slate-500 mt-0.5">שיוך לעובד</div>
+              </div>
+              <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-center">
+                <div className="text-[10px] font-black uppercase text-emerald-600">שלב 3</div>
+                <div className="text-xs font-bold text-slate-800 mt-0.5">חתימה דיגיטלית</div>
+                <div className="text-[10px] text-slate-500 mt-0.5">תיעוד ביומן</div>
+              </div>
+            </div>
+
+            {/* Dedicated Action Button to reveal Onboarding Form */}
+            <div className="pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setShowOnboardForm(true)}
+                className="w-full min-h-[54px] rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-800 border-2 border-dashed border-blue-300 font-black text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98] cursor-pointer shadow-sm"
+              >
+                <PackagePlus className="w-5 h-5 text-blue-600" />
+                <span>+ הוסף כלי חדש למלאי (קליטת ציוד)</span>
+              </button>
+              <p className="text-[11px] text-center text-slate-500 mt-1.5 font-medium">
+                * סריקת ברקוד שאינו מוכר תפתח אוטומטית את טופס הקליטה
+              </p>
+            </div>
+          </div>
         ) : (
-          <div className="rounded-2xl border-2 border-blue-100 bg-white p-4 shadow-sm shadow-blue-950/5 space-y-5">
-            <div className="flex items-center gap-2">
-              <Wrench className="w-5 h-5 text-blue-600" />
-              <h2 className="text-sm font-black uppercase tracking-wider text-blue-950">
-                2. מפרט הכלי החדש
-              </h2>
+          <div className="rounded-2xl border-2 border-blue-100 bg-white p-4 shadow-sm shadow-blue-950/5 space-y-5 animate-in fade-in duration-200">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <Wrench className="w-5 h-5 text-blue-600" />
+                <h2 className="text-sm font-black uppercase tracking-wider text-blue-950">
+                  2. מפרט הכלי החדש (קליטת ציוד)
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowOnboardForm(false);
+                  setQrCode('');
+                  setManualQrInput('');
+                  setQrWarning(null);
+                  setScannerActive(true);
+                }}
+                className="text-xs font-bold text-slate-600 hover:text-blue-950 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+              >
+                ביטול וחזרה לסורק
+              </button>
             </div>
 
             {/* SINGLE-TAP CATEGORY SELECTOR */}
@@ -1144,7 +1315,7 @@ export default function QuickOnboardView({
                   <span className="text-[10px] bg-amber-400/20 px-1 py-0.5 rounded font-bold">({dispatchCart.length})</span>
                 </div>
                 <div className="text-xs font-bold text-white truncate">
-                  {dispatchCart.map((t) => t.toolName).join(' ، ')}
+                  {dispatchCart.map((t) => t.toolName).join(', ')}
                 </div>
               </div>
             </div>

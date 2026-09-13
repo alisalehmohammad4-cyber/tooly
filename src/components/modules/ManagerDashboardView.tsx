@@ -661,6 +661,9 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                         type="password"
                         required
                         maxLength={6}
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        autoComplete="off"
                         value={newPinCode}
                         onChange={(e) => setNewPinCode(e.target.value)}
                         placeholder="לדוגמה: 4321"
