@@ -195,7 +195,7 @@ export default function PortalLandingView({
                       type="text"
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
-                      placeholder="הזן שם משתמש (לדוגמה: Zatout01 או yossi)"
+                      placeholder="הזן שם משתמש"
                       autoComplete="off"
                       inputMode="text"
                       disabled={isSubmitting}
@@ -207,14 +207,14 @@ export default function PortalLandingView({
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    סיסמה / קוד PIN:
+                    סיסמה:
                   </label>
                   <div className="relative">
                     <input
                       type="password"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      placeholder="הזן סיסמה או קוד מספרי"
+                      placeholder="הזן סיסמה"
                       autoComplete="off"
                       inputMode="numeric"
                       pattern="[0-9]*"

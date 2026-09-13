@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
-import { KeyRound, X, Delete, ShieldAlert, CheckCircle2, UserCheck, ShieldCheck } from 'lucide-react';
+import { KeyRound, X, Delete, ShieldAlert, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 
 export default function PinPadModal() {
@@ -52,21 +52,6 @@ function PinPadDialog() {
     setPin('');
     setErrorMessage(null);
   }, []);
-
-  const handlePresetSelect = (code: string) => {
-    setPin(code);
-    setErrorMessage(null);
-    const result = loginWithPin(code);
-    if (result.success) {
-      setIsSuccess(true);
-      setTimeout(() => {
-        setIsSuccess(false);
-        setPin('');
-      }, 400);
-    } else {
-      setErrorMessage(result.error || 'קוד שגוי');
-    }
-  };
 
   return (
     <div
@@ -150,7 +135,7 @@ function PinPadDialog() {
               </div>
             ) : (
               <span className="text-xs text-slate-500">
-                הקש 4 ספרות או בחר מתג מנהל
+                הקש 4 ספרות קוד אישי
               </span>
             )}
           </div>
@@ -191,41 +176,18 @@ function PinPadDialog() {
             </button>
           </div>
 
-          {/* Quick Demo Shortcuts & Role Presets */}
-          <div className="w-full mt-4 pt-3 border-t border-slate-200 space-y-2">
-            <div className="text-[11px] font-bold text-slate-500 text-center">
-              כניסה מהירה לשטח (הדגמה):
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => handlePresetSelect('1111')}
-                className="px-2.5 py-2 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-200 text-xs font-black flex items-center justify-center gap-1 cursor-pointer transition-all active:scale-95"
-              >
-                <UserCheck className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                <span>מחסנאי (1111)</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handlePresetSelect('1952')}
-                className="px-2.5 py-2 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200 text-xs font-black flex items-center justify-center gap-1 cursor-pointer transition-all active:scale-95"
-              >
-                <ShieldCheck className="w-3.5 h-3.5 text-purple-600 shrink-0" />
-                <span>מנהל ראשי (1952)</span>
-              </button>
-            </div>
-
-            {/* Switch to Worker Button if elevated */}
-            {role !== 'worker' && (
+          {/* Switch to Worker Button if elevated */}
+          {role !== 'worker' && (
+            <div className="w-full mt-4 pt-3 border-t border-slate-200">
               <button
                 type="button"
                 onClick={switchToWorker}
-                className="w-full mt-2 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                className="w-full py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
               >
-                <span>🔒 חזרה למצב עובד שטח (ללא הרשאות)</span>
+                <span>🔒 חזרה למצב עובד שטח (נעילת עמדה)</span>
               </button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -275,7 +275,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       return {
         success: false,
-        error: 'קוד PIN שגוי. נסה שנית (מחסן: 1111 או 1234, הנהלה: 1952).',
+        error: 'קוד PIN שגוי. נסה שנית.',
       };
     },
     []
