@@ -308,7 +308,7 @@ export default function AppLayout({
           </h2>
           <p className="text-sm text-slate-600 mb-6 max-w-xs leading-relaxed">
             עמוד זה מיועד למחסנאי או למנהל מפעל. כדי לצפות בתוכן זה או לבצע פעולות,
-            יש להזין קוד PIN מורשה (מחסנאי: 1111, מנהל: 9999).
+            יש להזין קוד PIN מורשה (מחסנאי: 1111, מנהל: 1952).
           </p>
 
           <div className="w-full space-y-3">

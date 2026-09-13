@@ -19,6 +19,36 @@ export const DEFAULT_WORKER_USER: AppUser = {
 };
 
 export const PREDEFINED_USERS: Record<string, AppUser> = {
+  '1952': {
+    id: 'usr-admin-01',
+    fullName: 'מנהל מפעל ראשי',
+    username: 'Zatout01',
+    role: 'admin',
+    pinCode: '1952',
+    assignedWarehouseId: undefined,
+    assignedWarehouseName: 'כל המחסנים (הנהלה)',
+    isActive: true,
+  },
+  'zatout01': {
+    id: 'usr-admin-01',
+    fullName: 'מנהל מפעל ראשי',
+    username: 'Zatout01',
+    role: 'admin',
+    pinCode: '1952',
+    assignedWarehouseId: undefined,
+    assignedWarehouseName: 'כל המחסנים (הנהלה)',
+    isActive: true,
+  },
+  'Zatout01': {
+    id: 'usr-admin-01',
+    fullName: 'מנהל מפעל ראשי',
+    username: 'Zatout01',
+    role: 'admin',
+    pinCode: '1952',
+    assignedWarehouseId: undefined,
+    assignedWarehouseName: 'כל המחסנים (הנהלה)',
+    isActive: true,
+  },
   '1111': {
     id: 'usr-sk-01',
     fullName: 'יוסי כהן (מחסנאי מורשה)',
@@ -40,9 +70,9 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
     isActive: true,
   },
   '9999': {
-    id: 'usr-admin-01',
-    fullName: 'דני לוי (מנהל מפעל ופרויקטים)',
-    username: 'dani',
+    id: 'usr-admin-legacy',
+    fullName: 'הנהלת מפעל (גיבוי)',
+    username: 'admin',
     role: 'admin',
     pinCode: '9999',
     assignedWarehouseId: undefined,
@@ -245,7 +275,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       return {
         success: false,
-        error: 'קוד PIN שגוי. נסה שנית (מחסן ראשי: 1111 או 1234, הנהלה: 9999).',
+        error: 'קוד PIN שגוי. נסה שנית (מחסן: 1111 או 1234, הנהלה: 1952).',
       };
     },
     []

@@ -1,4 +1,4 @@
-import type { Category, Warehouse, AssetCondition } from '@/types/domain';
+import type { Category, Warehouse, AssetCondition, AppUser } from '@/types/domain';
 import type {
   PlantManagerAnalyticsPayload,
   StorekeeperOperationsPayload,
@@ -1122,4 +1122,76 @@ export function getMockAuditHistory(filters?: AuditHistoryFilters): AuditHistory
     totalCount: items.length,
     warehouses: MOCK_WAREHOUSES,
   };
+}
+
+// 5. Authoritative System Users (Admin & Storekeepers)
+export const MOCK_USERS: AppUser[] = [
+  {
+    id: 'usr-admin-01',
+    fullName: 'מנהל מפעל ראשי',
+    username: 'Zatout01',
+    role: 'admin',
+    pinCode: '1952',
+    assignedWarehouseId: undefined,
+    assignedWarehouseName: 'כל המחסנים (הנהלה)',
+    isActive: true,
+    createdAt: '2023-11-01T10:00:00.000Z',
+  },
+  {
+    id: 'usr-sk-01',
+    fullName: 'יוסי כהן (מחסנאי מורשה)',
+    username: 'yossi',
+    role: 'supervisor',
+    pinCode: '1111',
+    assignedWarehouseId: 'wh-main-01',
+    assignedWarehouseName: "מחסן מרכזי - אגף א'",
+    isActive: true,
+    createdAt: '2024-01-01T08:00:00.000Z',
+  },
+  {
+    id: 'usr-sk-02',
+    fullName: 'אבי לוי (מחסנאי שטח)',
+    username: 'avi',
+    role: 'supervisor',
+    pinCode: '1234',
+    assignedWarehouseId: 'wh-site-02',
+    assignedWarehouseName: "אתר בנייה - מכולה ב'",
+    isActive: true,
+    createdAt: '2024-02-15T09:30:00.000Z',
+  },
+];
+
+export function getMockUsers(): AppUser[] {
+  return [...MOCK_USERS];
+}
+
+export function getMockUserByCredentials(identifier: string, secret?: string): AppUser | null {
+  const cleanId = identifier.trim().toLowerCase();
+  const cleanSecret = (secret || '').trim();
+
+  // 1. Direct PIN
+  if (!cleanSecret && cleanId.length >= 4) {
+    const byPin = MOCK_USERS.find((u) => u.pinCode === cleanId);
+    if (byPin) return byPin;
+  }
+
+  // 2. Username / Name / PIN match
+  const user = MOCK_USERS.find(
+    (u) =>
+      u.username?.toLowerCase() === cleanId ||
+      u.fullName.toLowerCase() === cleanId ||
+      u.pinCode === cleanId
+  );
+
+  if (!user) return null;
+
+  if (
+    user.pinCode === cleanSecret ||
+    user.pinCode === cleanId ||
+    (user.username?.toLowerCase() === 'zatout01' && (cleanSecret === '1952' || cleanId === '1952'))
+  ) {
+    return user;
+  }
+
+  return null;
 }

@@ -207,11 +207,11 @@ function PinPadDialog() {
               </button>
               <button
                 type="button"
-                onClick={() => handlePresetSelect('9999')}
+                onClick={() => handlePresetSelect('1952')}
                 className="px-2.5 py-2 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200 text-xs font-black flex items-center justify-center gap-1 cursor-pointer transition-all active:scale-95"
               >
                 <ShieldCheck className="w-3.5 h-3.5 text-purple-600 shrink-0" />
-                <span>מנהל מפעל (9999)</span>
+                <span>מנהל ראשי (1952)</span>
               </button>
             </div>
 
