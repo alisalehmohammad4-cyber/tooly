@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -15,6 +15,10 @@ import {
   ShieldAlert,
   ArrowRight,
   ShoppingCart,
+  User,
+  KeyRound,
+  Loader2,
+  AlertTriangle,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import NetworkSyncPill from '@/components/common/NetworkSyncPill';
@@ -276,6 +280,144 @@ interface AppLayoutProps {
   requiredRole?: 'supervisor' | 'admin' | 'any_elevated';
 }
 
+interface AuthGateLoginFormProps {
+  requiredRole?: 'supervisor' | 'admin' | 'any_elevated';
+}
+
+function AuthGateLoginForm({ requiredRole }: AuthGateLoginFormProps) {
+  const { loginWithCredentials } = useAuth();
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!username.trim()) {
+      setLoginError('נא להזין שם משתמש');
+      return;
+    }
+
+    setIsSubmitting(true);
+    setLoginError(null);
+
+    try {
+      const result = await loginWithCredentials(
+        username.trim(),
+        password.trim() || undefined
+      );
+
+      if (!result.success) {
+        setLoginError(result.error || 'פרטי התחברות שגויים');
+      } else if (result.user) {
+        const userRole = result.user.role;
+        const stillUnauthorized =
+          (requiredRole === 'supervisor' && userRole !== 'supervisor' && userRole !== 'admin') ||
+          (requiredRole === 'admin' && userRole !== 'admin') ||
+          (requiredRole === 'any_elevated' && userRole === 'worker');
+
+        if (stillUnauthorized) {
+          setLoginError('החשבון אומת בהצלחה, אך אינו בעל הרשאות גישה לעמוד זה.');
+        }
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'שגיאת התחברות במערכת';
+      setLoginError(msg);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="w-full max-w-md bg-white border border-slate-200 shadow-lg rounded-2xl p-6 sm:p-8 text-right" dir="rtl">
+      <div className="flex flex-col items-center text-center mb-6">
+        <div className="w-14 h-14 rounded-2xl bg-blue-50 border border-blue-200 text-blue-600 flex items-center justify-center mb-4 shadow-xs">
+          <ShieldAlert className="w-7 h-7" />
+        </div>
+
+        <h2 className="text-2xl font-black text-slate-900 mb-2">
+          אזור מורשה בלבד
+        </h2>
+        <p className="text-sm text-slate-600 max-w-xs leading-relaxed">
+          עמוד זה מיועד לצוותי ניהול ומחסנאים מורשים. יש להזין פרטי התחברות כדי לגשת לנתונים.
+        </p>
+      </div>
+
+      {loginError && (
+        <div className="mb-4 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-bold flex items-start gap-2 animate-in fade-in">
+          <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+          <span>{loginError}</span>
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} className="space-y-3.5">
+        <div>
+          <label className="block text-xs font-bold text-slate-700 mb-1">
+            שם משתמש:
+          </label>
+          <div className="relative">
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="הזן שם משתמש"
+              autoComplete="off"
+              inputMode="text"
+              disabled={isSubmitting}
+              className="w-full bg-slate-50 border border-slate-300 text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20 rounded-xl px-4 py-2.5 text-sm outline-none transition-all pl-10"
+            />
+            <User className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-xs font-bold text-slate-700 mb-1">
+            סיסמה:
+          </label>
+          <div className="relative">
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="הזן סיסמה"
+              autoComplete="off"
+              disabled={isSubmitting}
+              className="w-full bg-slate-50 border border-slate-300 text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20 rounded-xl px-4 py-2.5 text-sm outline-none transition-all pl-10 tracking-widest"
+            />
+            <KeyRound className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          </div>
+        </div>
+
+        <button
+          type="submit"
+          disabled={isSubmitting}
+          className="w-full py-3.5 px-5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-black text-sm shadow-md shadow-blue-600/20 transition-all flex items-center justify-center gap-2 active:scale-[0.98] cursor-pointer mt-4"
+        >
+          {isSubmitting ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span>מאמת נתונים...</span>
+            </>
+          ) : (
+            <>
+              <Lock className="w-4 h-4" />
+              <span>התחבר למערכת</span>
+            </>
+          )}
+        </button>
+
+        <Link
+          href="/"
+          className="w-full py-3 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 font-bold text-sm flex items-center justify-center gap-2 shadow-xs transition-all mt-3 cursor-pointer text-center"
+        >
+          <ArrowRight className="w-4 h-4" />
+          <span>חזרה לסורק פועל שטח</span>
+        </Link>
+      </form>
+    </div>
+  );
+}
+
 export default function AppLayout({
   children,
   title,
@@ -285,7 +427,7 @@ export default function AppLayout({
   extraHeader,
   requiredRole,
 }: AppLayoutProps) {
-  const { role, openPinModal } = useAuth();
+  const { role } = useAuth();
 
   // Role Protection check:
   const isUnauthorized =
@@ -295,40 +437,11 @@ export default function AppLayout({
 
   if (isUnauthorized) {
     return (
-      <div className="min-h-screen bg-slate-50 text-blue-950 flex flex-col">
+      <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col justify-between" dir="rtl">
         <RoleHeader title={title} subtitle={subtitle} />
 
-        <main className="flex-1 max-w-md mx-auto px-4 py-16 flex flex-col items-center justify-center text-center">
-          <div className="w-16 h-16 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center mb-4 shadow-sm">
-            <ShieldAlert className="w-8 h-8" />
-          </div>
-
-          <h2 className="text-xl font-black text-blue-950 mb-2">
-            אזור מורשה בלבד
-          </h2>
-          <p className="text-sm text-slate-600 mb-6 max-w-xs leading-relaxed">
-            עמוד זה מיועד למחסנאי או למנהל מפעל. כדי לצפות בתוכן זה או לבצע פעולות,
-            יש להזין קוד PIN מורשה (מחסנאי: 1111, מנהל: 1952).
-          </p>
-
-          <div className="w-full space-y-3">
-            <button
-              type="button"
-              onClick={() => openPinModal()}
-              className="w-full min-h-[50px] rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-sm flex items-center justify-center gap-2 shadow-md shadow-blue-500/25 cursor-pointer active:scale-98 transition-all"
-            >
-              <Lock className="w-4 h-4" />
-              <span>הזנת קוד PIN להתחברות מורשית</span>
-            </button>
-
-            <Link
-              href="/"
-              className="w-full min-h-[46px] rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-bold text-sm flex items-center justify-center gap-2 shadow-sm transition-all"
-            >
-              <ArrowRight className="w-4 h-4" />
-              <span>חזרה לסורק עובד שטח</span>
-            </Link>
-          </div>
+        <main className="flex-1 max-w-md mx-auto px-4 py-12 sm:py-16 flex flex-col items-center justify-center w-full">
+          <AuthGateLoginForm requiredRole={requiredRole} />
         </main>
       </div>
     );
