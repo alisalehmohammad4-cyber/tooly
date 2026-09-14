@@ -4,9 +4,8 @@ import type { Category, Warehouse } from '@/types/domain';
 
 export const dynamic = 'force-dynamic';
 
-import { MOCK_WAREHOUSES, MOCK_CATEGORIES } from '@/lib/mockStore';
+import { getMockWarehouses, MOCK_CATEGORIES } from '@/lib/mockStore';
 
-const FALLBACK_WAREHOUSES: Warehouse[] = MOCK_WAREHOUSES;
 const FALLBACK_CATEGORIES: Category[] = MOCK_CATEGORIES;
 
 export default async function HomePage() {
@@ -22,7 +21,7 @@ export default async function HomePage() {
   }
 
   if (!warehouses || warehouses.length === 0 || !categories || categories.length === 0) {
-    if (!warehouses || warehouses.length === 0) warehouses = FALLBACK_WAREHOUSES;
+    if (!warehouses || warehouses.length === 0) warehouses = getMockWarehouses();
     if (!categories || categories.length === 0) categories = FALLBACK_CATEGORIES;
   }
 

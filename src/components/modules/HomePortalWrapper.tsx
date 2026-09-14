@@ -28,6 +28,19 @@ export default function HomePortalWrapper({
     }
   }, [role]);
 
+  // Listen for NFC deep-links: if arriving via ?nfc=... or ?tool=..., immediately open scanner view
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('nfc') || params.get('tool')) {
+        const timer = setTimeout(() => {
+          setIsFieldScannerOpen(true);
+        }, 0);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, []);
+
   // If the user is authenticated as supervisor or admin, always render the operational scanner
   if (role === 'supervisor' || role === 'admin') {
     return (

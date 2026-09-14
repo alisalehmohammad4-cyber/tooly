@@ -1,4 +1,4 @@
-import type { Category, Warehouse, AssetCondition, AppUser } from '@/types/domain';
+import type { Category, Warehouse, WarehouseType, AssetCondition, AppUser } from '@/types/domain';
 import type {
   PlantManagerAnalyticsPayload,
   StorekeeperOperationsPayload,
@@ -18,12 +18,134 @@ import type {
 } from '@/app/actions/history';
 import type { ScannedAssetDetails } from '@/app/actions/custody';
 
+export interface WarehouseAdminItem {
+  id: string;
+  name: string;
+  code: string;
+  type: WarehouseType;
+  address?: string | null;
+  isActive: boolean;
+  toolCount: number;
+  availableCount: number;
+  inUseCount: number;
+  maintenanceCount: number;
+}
+
 // 1. Authoritative Standardized Warehouses (100% Hebrew)
 export const MOCK_WAREHOUSES: Warehouse[] = [
-  { id: 'wh-main-01', name: "מחסן מרכזי - אגף א'", code: 'CDB-01', isActive: true },
-  { id: 'wh-site-02', name: "אתר בנייה - מכולה ב'", code: 'SCB-02', isActive: true },
-  { id: 'wh-van-03', name: 'רכב שירות נייד 05', code: 'MSV-05', isActive: true },
+  {
+    id: 'wh-main-01',
+    name: "מחסן מרכזי - אגף א'",
+    code: 'CDB-01',
+    type: 'central_warehouse',
+    address: 'חיפה - מתחם תעשייה צפון',
+    isActive: true,
+  },
+  {
+    id: 'wh-site-02',
+    name: "אתר בנייה - מכולה ב'",
+    code: 'SCB-02',
+    type: 'site_container',
+    address: 'תל אביב - מגדל שלום',
+    isActive: true,
+  },
+  {
+    id: 'wh-van-03',
+    name: 'רכב שירות נייד 05',
+    code: 'MSV-05',
+    type: 'service_van',
+    address: 'פריסה ארצית - ניידת 05',
+    isActive: true,
+  },
 ];
+
+const warehousesStore: Warehouse[] = MOCK_WAREHOUSES;
+
+export function getMockWarehouses(includeInactive = false): Warehouse[] {
+  if (includeInactive) return [...warehousesStore];
+  return warehousesStore.filter((w) => w.isActive !== false);
+}
+
+export function getMockWarehousesAdmin(): WarehouseAdminItem[] {
+  return warehousesStore.map((wh) => {
+    const whAssets = assetsStore.filter((a) => a.warehouseId === wh.id);
+    const availableCount = whAssets.filter((a) => a.status === 'available').length;
+    const inUseCount = whAssets.filter((a) => a.status === 'checked_out').length;
+    const maintenanceCount = whAssets.filter((a) => a.status === 'maintenance').length;
+    return {
+      id: wh.id,
+      name: wh.name,
+      code: wh.code,
+      type: wh.type || 'central_warehouse',
+      address: wh.address || null,
+      isActive: wh.isActive ?? true,
+      toolCount: whAssets.length,
+      availableCount,
+      inUseCount,
+      maintenanceCount,
+    };
+  });
+}
+
+export function addMockWarehouse(input: {
+  name: string;
+  code: string;
+  type: WarehouseType;
+  address?: string | null;
+}): Warehouse {
+  const newWh: Warehouse = {
+    id: `wh-${input.code.toLowerCase().replace(/[^a-z0-9]/g, '-') || Date.now().toString(36)}`,
+    name: input.name.trim(),
+    code: input.code.trim().toUpperCase(),
+    type: input.type,
+    address: input.address?.trim() || null,
+    isActive: true,
+  };
+  warehousesStore.push(newWh);
+  return newWh;
+}
+
+export function updateMockWarehouse(
+  id: string,
+  patch: Partial<Warehouse>
+): Warehouse | null {
+  const wh = warehousesStore.find((w) => w.id === id);
+  if (!wh) return null;
+  if (patch.name !== undefined) wh.name = patch.name.trim();
+  if (patch.code !== undefined) wh.code = patch.code.trim().toUpperCase();
+  if (patch.type !== undefined) wh.type = patch.type;
+  if (patch.address !== undefined) wh.address = patch.address?.trim() || null;
+  if (patch.isActive !== undefined) wh.isActive = patch.isActive;
+
+  if (patch.name || patch.code) {
+    assetsStore.forEach((a) => {
+      if (a.warehouseId === id) {
+        if (patch.name) a.warehouseName = patch.name.trim();
+        if (patch.code) a.warehouseCode = patch.code.trim().toUpperCase();
+      }
+    });
+  }
+
+  return wh;
+}
+
+export function deleteMockWarehouse(id: string): { success: boolean; error?: string } {
+  const toolsInWarehouse = assetsStore.filter((a) => a.warehouseId === id);
+  if (toolsInWarehouse.length > 0) {
+    return {
+      success: false,
+      error: 'לא ניתן למחוק מתקן המכיל כלי עבודה פעילים. יש להעביר את הכלים תחילה',
+    };
+  }
+
+  const idx = warehousesStore.findIndex((w) => w.id === id);
+  if (idx === -1) {
+    return { success: false, error: 'המתקן לא נמצא במערכת.' };
+  }
+
+  warehousesStore.splice(idx, 1);
+  return { success: true };
+}
 
 // 2. Authoritative Standardized Categories (100% Hebrew matching catalog)
 export const MOCK_CATEGORIES: Category[] = [
@@ -47,6 +169,7 @@ const todayAtHour = (hour: number) => {
 export interface UnifiedAssetItem {
   id: string;
   qrCode: string;
+  nfcUid?: string;
   toolName: string;
   brand: string;
   modelNumber: string | null;
@@ -677,13 +800,17 @@ export function getMockAssets(): UnifiedAssetItem[] {
 export function getMockAssetByQr(qrCode: string): ScannedAssetDetails | null {
   const clean = qrCode.trim().toUpperCase();
   const asset = assetsStore.find(
-    (a) => a.qrCode.toUpperCase() === clean || a.id.toUpperCase() === clean
+    (a) =>
+      a.qrCode.toUpperCase() === clean ||
+      a.id.toUpperCase() === clean ||
+      (a.nfcUid && a.nfcUid.toUpperCase() === clean)
   );
   if (!asset) return null;
 
   return {
     id: asset.id,
     qrCode: asset.qrCode,
+    nfcUid: asset.nfcUid,
     status: asset.status,
     condition: asset.condition,
     currentAssignedWorker: asset.currentAssignedWorker,
@@ -771,6 +898,7 @@ export function addMockAsset(newAsset: {
   warehouseId: string;
   categoryId: string;
   qrCode: string;
+  nfcUid?: string;
   toolName: string;
   brand: string;
   modelNumber?: string;
@@ -783,6 +911,7 @@ export function addMockAsset(newAsset: {
   const asset: UnifiedAssetItem = {
     id: `ast-${Date.now()}`,
     qrCode: newAsset.qrCode.trim(),
+    nfcUid: newAsset.nfcUid?.trim() || undefined,
     toolName: newAsset.toolName.trim(),
     brand: newAsset.brand.trim(),
     modelNumber: newAsset.modelNumber?.trim() || null,
@@ -1034,7 +1163,7 @@ export function getMockStorekeeperOperations(
 
   return {
     warehouse: currentWh,
-    allWarehouses: MOCK_WAREHOUSES,
+    allWarehouses: getMockWarehouses(),
     returnsDueToday,
     overdueAssets: overdueAssets.sort((a, b) => b.daysOverdue - a.daysOverdue),
     lowStockAlerts,
@@ -1085,7 +1214,7 @@ export function getMockCatalogData(warehouseId?: string): CatalogDataPayload {
   return {
     categories,
     assets: catalogAssets,
-    warehouses: MOCK_WAREHOUSES,
+    warehouses: getMockWarehouses(),
     selectedWarehouseId: warehouseId || 'all',
   };
 }
@@ -1120,7 +1249,7 @@ export function getMockAuditHistory(filters?: AuditHistoryFilters): AuditHistory
   return {
     records: items,
     totalCount: items.length,
-    warehouses: MOCK_WAREHOUSES,
+    warehouses: getMockWarehouses(),
   };
 }
 

@@ -18,7 +18,7 @@ export interface SyncQueueItem<T = unknown> {
 }
 
 const DB_NAME = 'tooly_offline_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 const STORE_CACHED_ASSETS = 'cached_assets';
 const STORE_SYNC_QUEUE = 'sync_queue';
@@ -42,13 +42,20 @@ export function getOfflineDb(): Promise<IDBDatabase> {
         const db = (event.target as IDBOpenDBRequest).result;
 
         // 1. Cached Assets Store
+        let assetStore: IDBObjectStore;
         if (!db.objectStoreNames.contains(STORE_CACHED_ASSETS)) {
-          const assetStore = db.createObjectStore(STORE_CACHED_ASSETS, {
+          assetStore = db.createObjectStore(STORE_CACHED_ASSETS, {
             keyPath: 'id',
           });
           assetStore.createIndex('qrCode', 'qrCode', { unique: false });
           assetStore.createIndex('toolName', 'toolName', { unique: false });
           assetStore.createIndex('status', 'status', { unique: false });
+          assetStore.createIndex('nfcUid', 'nfcUid', { unique: false });
+        } else {
+          assetStore = (event.target as IDBOpenDBRequest).transaction!.objectStore(STORE_CACHED_ASSETS);
+          if (!assetStore.indexNames.contains('nfcUid')) {
+            assetStore.createIndex('nfcUid', 'nfcUid', { unique: false });
+          }
         }
 
         // 2. Offline Sync Queue Store
@@ -126,43 +133,65 @@ export async function cacheAssets(assets: ScannedAssetDetails[]): Promise<void> 
 }
 
 /**
- * Finds an asset by QR code from IndexedDB.
+ * Finds an asset by QR code or NFC UID from IndexedDB.
  */
 export async function getCachedAssetByQr(
   qrCode: string
 ): Promise<ScannedAssetDetails | null> {
   if (typeof window === 'undefined') return null;
-  const cleanQr = qrCode.trim().toUpperCase();
-  if (!cleanQr) return null;
+  const cleanCode = qrCode.trim().toUpperCase();
+  if (!cleanCode) return null;
 
   try {
     const db = await getOfflineDb();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_CACHED_ASSETS, 'readonly');
       const store = tx.objectStore(STORE_CACHED_ASSETS);
-      const index = store.index('qrCode');
-      const req = index.get(cleanQr);
+      const qrIndex = store.index('qrCode');
+      const req = qrIndex.get(cleanCode);
 
       req.onsuccess = () => {
         if (req.result) {
           resolve(req.result as ScannedAssetDetails);
         } else {
-          // Fallback scan in case of case-insensitivity match
-          const cursorReq = store.openCursor();
-          cursorReq.onsuccess = (e) => {
-            const cursor = (e.target as IDBRequest<IDBCursorWithValue>).result;
-            if (cursor) {
-              const val = cursor.value as ScannedAssetDetails;
-              if (val.qrCode?.trim().toUpperCase() === cleanQr) {
-                resolve(val);
+          // Check nfcUid index if available
+          if (store.indexNames.contains('nfcUid')) {
+            const nfcIndex = store.index('nfcUid');
+            const nfcReq = nfcIndex.get(cleanCode);
+            nfcReq.onsuccess = () => {
+              if (nfcReq.result) {
+                resolve(nfcReq.result as ScannedAssetDetails);
                 return;
               }
-              cursor.continue();
-            } else {
-              resolve(null);
-            }
-          };
-          cursorReq.onerror = () => reject(cursorReq.error);
+              // Full scan fallback
+              scanCursorFallback();
+            };
+            nfcReq.onerror = () => scanCursorFallback();
+          } else {
+            scanCursorFallback();
+          }
+
+          function scanCursorFallback() {
+            const cursorReq = store.openCursor();
+            cursorReq.onsuccess = (e) => {
+              const cursor = (e.target as IDBRequest<IDBCursorWithValue>).result;
+              if (cursor) {
+                const val = cursor.value as ScannedAssetDetails;
+                if (
+                  val.qrCode?.trim().toUpperCase() === cleanCode ||
+                  val.nfcUid?.trim().toUpperCase() === cleanCode ||
+                  val.id?.trim().toUpperCase() === cleanCode
+                ) {
+                  resolve(val);
+                  return;
+                }
+                cursor.continue();
+              } else {
+                resolve(null);
+              }
+            };
+            cursorReq.onerror = () => reject(cursorReq.error);
+          }
         }
       };
 
@@ -172,6 +201,15 @@ export async function getCachedAssetByQr(
     console.warn('Error reading cached asset from IndexedDB:', err);
     return null;
   }
+}
+
+/**
+ * Finds an asset by NFC UID specifically from IndexedDB.
+ */
+export async function getCachedAssetByNfc(
+  nfcUid: string
+): Promise<ScannedAssetDetails | null> {
+  return getCachedAssetByQr(nfcUid);
 }
 
 /**

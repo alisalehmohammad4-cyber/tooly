@@ -26,6 +26,8 @@ import {
   Flashlight,
   Barcode,
   PackagePlus,
+  Radio,
+  Smartphone,
 } from 'lucide-react';
 import type { Category, Warehouse, AssetCondition } from '@/types/domain';
 import { checkQrCodeExists, onboardAsset } from '@/app/actions/assets';
@@ -41,6 +43,7 @@ import { RoleHeader, RoleBottomNav } from '@/components/layout/AppLayout';
 import WorkerToolCard from '@/components/modules/WorkerToolCard';
 import { getCurrentGpsCoordinates } from '@/lib/geo';
 import { getCachedAssetByQr, cacheAsset } from '@/lib/offline/offlineDb';
+import { useWebNfc } from '@/lib/nfc/useWebNfc';
 
 interface QuickOnboardViewProps {
   categories: Category[];
@@ -108,6 +111,16 @@ export default function QuickOnboardView({
   // Camera Hardware Controls (Torch & Barcode Mode)
   const [isTorchOn, setIsTorchOn] = useState<boolean>(false);
   const [scanMode, setScanMode] = useState<'qr' | 'barcode'>('qr');
+
+  // Web NFC Hook (Android Chrome direct reading/writing & iPhone deep-link support)
+  const {
+    isSupported: isNfcSupported,
+    startScan: startNfcScan,
+    stopScan: stopNfcScan,
+  } = useWebNfc();
+  const [nfcUid, setNfcUid] = useState<string>('');
+  const [isReadingNfcForForm, setIsReadingNfcForForm] = useState<boolean>(false);
+  const [nfcFormNotice, setNfcFormNotice] = useState<string | null>(null);
 
   // Tool Form Details
   const [toolName, setToolName] = useState<string>('');
@@ -350,6 +363,46 @@ export default function QuickOnboardView({
     [isRapidDispatchMode, stopScanner, handleAddToCart, role]
   );
 
+  // 1. Universal iOS Background NFC Resolver & URL Deep-Link listener (?nfc=... or ?tool=...)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const deepCode = params.get('nfc') || params.get('tool');
+    if (deepCode && deepCode.trim()) {
+      const clean = deepCode.trim();
+      // Clean up URL query parameters without reloading so refresh doesn't re-trigger
+      const cleanUrl = window.location.pathname;
+      window.history.replaceState({}, document.title, cleanUrl);
+      // Immediately resolve asset safely outside render cycle
+      const timer = setTimeout(() => {
+        handleScanSuccess(clean);
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+  }, [handleScanSuccess]);
+
+  // 2. Android Web NFC Background Auto-Scan when scanner is active
+  useEffect(() => {
+    if (isNfcSupported && scannerActive && !showOnboardForm && !isReadingNfcForForm) {
+      startNfcScan((resolvedCode) => {
+        handleScanSuccess(resolvedCode);
+      });
+    }
+    return () => {
+      if (!isReadingNfcForForm) {
+        stopNfcScan();
+      }
+    };
+  }, [
+    isNfcSupported,
+    scannerActive,
+    showOnboardForm,
+    isReadingNfcForForm,
+    startNfcScan,
+    stopNfcScan,
+    handleScanSuccess,
+  ]);
+
   // Synchronize Scanner lifecycle without synchronous effect setState
   useEffect(() => {
     let isCancelled = false;
@@ -531,6 +584,7 @@ export default function QuickOnboardView({
         warehouseId: selectedWarehouseId,
         categoryId: selectedCategoryId,
         qrCode: qrCode.trim(),
+        nfcUid: nfcUid.trim() || undefined,
         toolName: toolName.trim(),
         brand: brand.trim(),
         modelNumber: modelNumber.trim() || undefined,
@@ -555,6 +609,8 @@ export default function QuickOnboardView({
       setToolName('');
       setModelNumber('');
       setQrCode('');
+      setNfcUid('');
+      setNfcFormNotice(null);
       setManualQrInput('');
       setQrWarning(null);
       setSubmitError(null);
@@ -871,6 +927,21 @@ export default function QuickOnboardView({
           ) : (
             /* CAMERA VIEWFINDER & SCAN BOX */
             <div className="space-y-3">
+              {/* Cross-Platform NFC Status Badge */}
+              <div className="flex justify-center">
+                {isNfcSupported ? (
+                  <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-blue-50 border border-blue-200 text-blue-800 text-xs font-bold shadow-xs animate-in fade-in">
+                    <Radio className="w-3.5 h-3.5 text-blue-600 animate-pulse shrink-0" />
+                    <span>📡 סריקת NFC פעילה (הצמד כלי לגב המכשיר)</span>
+                  </div>
+                ) : (
+                  <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-100 border border-slate-200 text-slate-700 text-xs font-semibold shadow-xs">
+                    <Smartphone className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                    <span>💡 במכשירי iPhone: הצמד את חלקו העליון של המכשיר לתגית ה-NFC לפתיחה מיידית</span>
+                  </div>
+                )}
+              </div>
+
               <div className="relative w-full aspect-square max-h-72 rounded-xl overflow-hidden bg-slate-900 border-2 border-blue-200 flex flex-col items-center justify-center shadow-inner">
                 <div id="qr-reader" className="w-full h-full" />
 
@@ -1252,6 +1323,53 @@ export default function QuickOnboardView({
                   );
                 })}
               </div>
+            </div>
+
+            {/* NFC TAG BINDING FIELD (OPTIONAL) */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider">
+                  תגית NFC (UID) <span className="text-slate-400 font-normal">(אופציונלי)</span>
+                </label>
+                {isNfcSupported && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setIsReadingNfcForForm(true);
+                      setNfcFormNotice('הצמד את תגית ה-NFC לגב המכשיר כעת...');
+                      const ok = await startNfcScan((code, rawUid) => {
+                        setNfcUid(rawUid || code);
+                        setNfcFormNotice('תגית נקראה בהצלחה!');
+                        setIsReadingNfcForForm(false);
+                        stopNfcScan();
+                      });
+                      if (!ok) {
+                        setIsReadingNfcForForm(false);
+                        setNfcFormNotice('לא ניתן היה להפעיל קריאת NFC');
+                      }
+                    }}
+                    disabled={isReadingNfcForForm}
+                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-bold transition-all cursor-pointer"
+                  >
+                    <Radio className={`w-3.5 h-3.5 text-blue-600 ${isReadingNfcForForm ? 'animate-pulse' : ''}`} />
+                    <span>{isReadingNfcForForm ? 'ממתין להצמדה...' : '📡 קרא תגית מהמכשיר'}</span>
+                  </button>
+                )}
+              </div>
+
+              <input
+                type="text"
+                value={nfcUid}
+                onChange={(e) => setNfcUid(e.target.value)}
+                placeholder="לדוגמה: 04:5A:72:B1:C3:40:80 (או לחץ קרא מהמכשיר)"
+                className="w-full min-h-[56px] bg-white text-blue-950 font-mono text-sm px-4 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none transition-colors placeholder:text-slate-400 shadow-sm"
+                dir="ltr"
+              />
+              {nfcFormNotice && (
+                <p className="text-[11px] text-blue-600 font-bold mt-1">
+                  {nfcFormNotice}
+                </p>
+              )}
             </div>
 
             {/* SUBMIT ERROR BANNER */}

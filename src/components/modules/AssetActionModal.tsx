@@ -20,6 +20,7 @@ import {
   FileText,
   Lock,
   DollarSign,
+  Radio,
 } from 'lucide-react';
 import type { Warehouse, AssetCondition, DamageType, ChargeParty } from '@/types/domain';
 import {
@@ -38,6 +39,7 @@ import {
   updateCachedAsset,
   cacheAsset,
 } from '@/lib/offline/offlineDb';
+import { useWebNfc } from '@/lib/nfc/useWebNfc';
 
 interface AssetActionModalProps {
   asset: ScannedAssetDetails | null;
@@ -96,6 +98,22 @@ export default function AssetActionModal({
   // Status & loading
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  // Web NFC Tag Writer
+  const { isWriting: isNfcWriting, writeNfcTag } = useWebNfc();
+  const [nfcWriteNotice, setNfcWriteNotice] = useState<string | null>(null);
+
+  const handleWriteNfc = async () => {
+    if (!asset) return;
+    setNfcWriteNotice('ממתין להצמדת תגית NFC לגב המכשיר...');
+    const ok = await writeNfcTag(asset.qrCode);
+    if (ok) {
+      setNfcWriteNotice('תגית ה-NFC נצרבה בהצלחה! תומכת באייפון ובאנדרואיד.');
+      setTimeout(() => setNfcWriteNotice(null), 4000);
+    } else {
+      setNfcWriteNotice('שגיאה בצריבת תגית ה-NFC. וודא שהתגית תקינה ונסה שוב.');
+    }
+  };
 
   if (!isOpen || !asset) return null;
 
@@ -464,12 +482,26 @@ export default function AssetActionModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="asset-modal-title"
-        className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200"
+        className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200"
       >
-        <div className="w-full max-w-lg bg-white border-2 border-blue-200 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col animate-in slide-in-from-bottom-4 duration-200 text-blue-950">
+        <div className="w-full max-w-lg bg-white border-2 border-blue-200 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden max-h-[88vh] flex flex-col animate-in slide-in-from-bottom-4 duration-200 text-blue-950">
           {/* TOP TOOL BANNER */}
           <div className="bg-blue-50/80 border-b border-blue-100 p-4 relative">
             <div className="absolute top-4 left-4 flex items-center gap-1.5">
+              {role !== 'worker' && (
+                <button
+                  type="button"
+                  onClick={handleWriteNfc}
+                  disabled={isNfcWriting}
+                  className="px-2.5 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 text-xs font-bold flex items-center gap-1 shadow-xs transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+                  title="צרוב תגית NFC לכלי זה (אוניברסלי לאייפון ואנדרואיד)"
+                >
+                  <Radio className={`w-3.5 h-3.5 text-blue-600 ${isNfcWriting ? 'animate-pulse' : ''}`} />
+                  <span className="hidden sm:inline">{isNfcWriting ? 'קרב מדבקה...' : 'צרוב NFC'}</span>
+                  <span className="sm:hidden">NFC</span>
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() => setIsPassportOpen(true)}
@@ -498,6 +530,11 @@ export default function AssetActionModal({
                 <QrCode className="w-3.5 h-3.5 text-blue-600" />
                 <span className="font-bold">{asset.qrCode}</span>
               </div>
+              {asset.nfcUid && (
+                <span className="text-[10px] font-mono font-bold bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded border border-blue-200" dir="ltr">
+                  NFC: {asset.nfcUid}
+                </span>
+              )}
               {role === 'worker' && (
                 <span className="text-[10px] font-extrabold px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300">
                   כרטיס כלי (עובד שטח)
@@ -507,7 +544,7 @@ export default function AssetActionModal({
 
             <h2
               id="asset-modal-title"
-              className="text-lg font-black text-blue-950 leading-tight pl-24"
+              className="text-lg font-black text-blue-950 leading-tight pl-32"
             >
               {asset.toolName}
             </h2>
@@ -515,6 +552,13 @@ export default function AssetActionModal({
             {asset.modelNumber && (
               <div className="text-xs font-mono text-slate-500 mt-0.5" dir="ltr">
                 דגם: {asset.modelNumber}
+              </div>
+            )}
+
+            {nfcWriteNotice && (
+              <div className="mt-2.5 p-2 rounded-xl bg-blue-100/90 border border-blue-300 text-blue-900 text-xs font-bold flex items-center gap-2 animate-in fade-in">
+                <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0" />
+                <span>{nfcWriteNotice}</span>
               </div>
             )}
 
@@ -568,7 +612,7 @@ export default function AssetActionModal({
 
           {/* WORKER VIEW: SAFETY NOTES & DAMAGE REPORT (NO TABS) */}
           {role === 'worker' ? (
-            <div className="p-4 overflow-y-auto flex-1 space-y-5">
+            <div className="p-4 pb-14 sm:pb-8 overflow-y-auto overscroll-contain flex-1 space-y-5">
               {/* Safety Guidelines Card */}
               <div className="p-3.5 rounded-2xl bg-amber-50/70 border border-amber-200 space-y-2">
                 <div className="flex items-center gap-2 text-amber-900 font-black text-xs">
@@ -736,7 +780,7 @@ export default function AssetActionModal({
               </div>
 
               {/* TAB CONTENTS & FORMS */}
-              <div className="p-4 overflow-y-auto flex-1">
+              <div className="p-4 pb-14 sm:pb-8 overflow-y-auto overscroll-contain flex-1">
                 {actionError && (
                   <div className="mb-4 p-3 rounded-xl bg-red-50 border border-red-300 text-red-800 text-xs font-bold flex items-center gap-2">
                     <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />

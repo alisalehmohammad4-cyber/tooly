@@ -4,7 +4,7 @@ import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import {
   getMockPlantManagerAnalytics,
   getMockStorekeeperOperations,
-  MOCK_WAREHOUSES,
+  getMockWarehouses,
 } from '@/lib/mockStore';
 
 export interface FleetUtilization {
@@ -101,7 +101,7 @@ export interface StorekeeperOperationsPayload {
 }
 
 // Fallback dataset for instant preview and offline development
-const FALLBACK_WAREHOUSES = MOCK_WAREHOUSES;
+const getFallbackWarehouses = () => getMockWarehouses();
 
 /**
  * Retrieves executive analytics and safety compliance data for Factory & Plant Managers.
@@ -258,9 +258,10 @@ export async function getPlantManagerAnalytics(): Promise<PlantManagerAnalyticsP
 export async function getStorekeeperOperations(
   warehouseId?: string
 ): Promise<StorekeeperOperationsPayload> {
-  const selectedWhId = warehouseId || FALLBACK_WAREHOUSES[0].id;
+  const fallbackWarehouses = getFallbackWarehouses();
+  const selectedWhId = warehouseId || fallbackWarehouses[0]?.id || 'wh-main-01';
   const currentWh =
-    FALLBACK_WAREHOUSES.find((w) => w.id === selectedWhId) || FALLBACK_WAREHOUSES[0];
+    fallbackWarehouses.find((w) => w.id === selectedWhId) || fallbackWarehouses[0];
 
   // If Supabase is connected, attempt dynamic query
   if (isSupabaseConfigured()) {
@@ -323,7 +324,7 @@ export async function getStorekeeperOperations(
 
         return {
           warehouse: currentWh,
-          allWarehouses: FALLBACK_WAREHOUSES,
+          allWarehouses: fallbackWarehouses,
           returnsDueToday,
           overdueAssets: overdueAssets.sort((a, b) => b.daysOverdue - a.daysOverdue),
           lowStockAlerts: [

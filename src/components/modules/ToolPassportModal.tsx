@@ -15,6 +15,7 @@ import {
   Loader2,
   BookmarkCheck,
   RotateCcw,
+  Radio,
 } from 'lucide-react';
 import type { ScannedAssetDetails } from '@/app/actions/custody';
 import {
@@ -23,6 +24,7 @@ import {
   reserveAssetAction,
 } from '@/app/actions/custody';
 import { useAuth } from '@/context/AuthContext';
+import { useWebNfc } from '@/lib/nfc/useWebNfc';
 
 interface ToolPassportModalProps {
   asset: ScannedAssetDetails | null;
@@ -38,6 +40,8 @@ export default function ToolPassportModal({
   onAssetUpdated,
 }: ToolPassportModalProps) {
   const { role, user, openPinModal } = useAuth();
+  const { isWriting: isNfcWriting, writeNfcTag } = useWebNfc();
+  const [nfcWriteStatus, setNfcWriteStatus] = useState<string | null>(null);
 
   // Optimistic updates state (React-compliant without useEffect setState)
   const [updatedAsset, setUpdatedAsset] = useState<ScannedAssetDetails | null>(null);
@@ -247,14 +251,27 @@ export default function ToolPassportModal({
     }
   };
 
+  // Handle Write NFC Tag
+  const handleWriteNfc = async () => {
+    if (!currentAsset) return;
+    setNfcWriteStatus('ממתין להצמדת תגית NFC לגב המכשיר...');
+    const ok = await writeNfcTag(currentAsset.qrCode);
+    if (ok) {
+      setNfcWriteStatus('תגית ה-NFC נצרבה בהצלחה! תומכת כעת ב-iPhone וב-Android.');
+      setTimeout(() => setNfcWriteStatus(null), 4000);
+    } else {
+      setNfcWriteStatus('שגיאה בצריבת תגית ה-NFC. וודא שהתגית תקינה ונסה שוב.');
+    }
+  };
+
   return (
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="tool-passport-title"
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200"
+      className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200"
     >
-      <div className="w-full max-w-lg bg-white border-2 border-blue-200 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col animate-in slide-in-from-bottom-4 duration-200 text-blue-950">
+      <div className="w-full max-w-lg bg-white border-2 border-blue-200 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden max-h-[88vh] flex flex-col animate-in slide-in-from-bottom-4 duration-200 text-blue-950">
         {/* TOP HEADER */}
         <div className="bg-gradient-to-r from-blue-900 via-blue-800 to-indigo-900 p-4 text-white relative">
           <button
@@ -322,7 +339,56 @@ export default function ToolPassportModal({
         )}
 
         {/* SCROLLABLE BODY */}
-        <div className="p-4 overflow-y-auto flex-1 space-y-4 text-sm">
+        <div className="p-4 pb-14 sm:pb-8 overflow-y-auto overscroll-contain flex-1 space-y-4 text-sm">
+          {/* NFC TAG BINDING & PROGRAMMING */}
+          <div className="p-3.5 rounded-2xl bg-blue-50/70 border border-blue-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+                <Radio className={`w-4 h-4 ${isNfcWriting ? 'animate-pulse' : ''}`} />
+              </div>
+              <div>
+                <div className="text-xs font-black text-blue-950 flex items-center gap-2">
+                  <span>תגית NFC אוניברסלית (iPhone & Android)</span>
+                  {currentAsset.nfcUid && (
+                    <span className="text-[10px] font-mono font-bold bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded border border-blue-200" dir="ltr">
+                      UID: {currentAsset.nfcUid}
+                    </span>
+                  )}
+                </div>
+                <div className="text-[11px] text-slate-600 font-medium">
+                  צריבת תגית NDEF URL לפתיחה ישירה בהצמדה ברקע
+                </div>
+              </div>
+            </div>
+
+            {isSupervisorOrAdmin && (
+              <button
+                type="button"
+                onClick={handleWriteNfc}
+                disabled={isNfcWriting}
+                className="w-full sm:w-auto px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm transition-all active:scale-95 cursor-pointer shrink-0"
+              >
+                {isNfcWriting ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>קרב מדבקת NFC...</span>
+                  </>
+                ) : (
+                  <>
+                    <Radio className="w-3.5 h-3.5" />
+                    <span>📡 צרוב תגית NFC לכלי זה</span>
+                  </>
+                )}
+              </button>
+            )}
+          </div>
+          {nfcWriteStatus && (
+            <div className="p-2.5 rounded-xl bg-blue-50 border border-blue-300 text-blue-900 text-xs font-bold flex items-center gap-2 animate-in fade-in">
+              <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0" />
+              <span>{nfcWriteStatus}</span>
+            </div>
+          )}
+
           {/* ADMINISTRATIVE LOCKOUT BANNER */}
           {currentAsset.isLocked && (
             <div className="p-4 rounded-2xl bg-red-50 border-2 border-red-300 space-y-2 animate-in fade-in">

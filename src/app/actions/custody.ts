@@ -18,6 +18,7 @@ import { appendAuditHistoryEntry } from '@/app/actions/history';
 export interface ScannedAssetDetails {
   id: string;
   qrCode: string;
+  nfcUid?: string;
   status: 'available' | 'checked_out' | 'in_transit' | 'maintenance' | 'lost';
   condition: 'excellent' | 'good' | 'needs_repair' | 'retired';
   currentAssignedWorker: string | null;
@@ -137,6 +138,7 @@ export async function getAssetDetailsByQr(
         .select(`
           id,
           qr_code,
+          nfc_uid,
           status,
           condition,
           current_assigned_worker,
@@ -161,13 +163,14 @@ export async function getAssetDetailsByQr(
             code
           )
         `)
-        .eq('qr_code', cleanQr)
+        .or(`qr_code.eq.${cleanQr},nfc_uid.eq.${cleanQr},id.eq.${cleanQr}`)
         .maybeSingle();
 
       if (!error && data) {
         interface JoinedData {
           id: string;
           qr_code: string;
+          nfc_uid?: string | null;
           status: ScannedAssetDetails['status'];
           condition: ScannedAssetDetails['condition'];
           current_assigned_worker: string | null;
@@ -197,6 +200,7 @@ export async function getAssetDetailsByQr(
         return {
           id: row.id,
           qrCode: row.qr_code,
+          nfcUid: row.nfc_uid || undefined,
           status: row.status,
           condition: row.condition,
           currentAssignedWorker: row.current_assigned_worker,

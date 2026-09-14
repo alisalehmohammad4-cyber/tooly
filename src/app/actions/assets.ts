@@ -5,7 +5,7 @@ import { QuickOnboardSchema, type QuickOnboardInput } from '@/core/assets/onboar
 import type { AssetReservation } from '@/types/domain';
 import { appendAuditHistoryEntry } from '@/app/actions/history';
 import {
-  MOCK_WAREHOUSES,
+  getMockWarehouses,
   MOCK_CATEGORIES,
   getMockAssetByQr,
   addMockAsset,
@@ -13,17 +13,8 @@ import {
 } from '@/lib/mockStore';
 
 export interface OnboardFormData {
-  warehouses: Array<{
-    id: string;
-    name: string;
-    code: string;
-  }>;
-  categories: Array<{
-    id: string;
-    name: string;
-    slug: string;
-    icon: string | null;
-  }>;
+  warehouses: Array<{ id: string; name: string; code: string }>;
+  categories: Array<{ id: string; name: string; slug: string; icon: string | null }>;
 }
 
 export type OnboardAssetResult =
@@ -36,7 +27,7 @@ export type OnboardAssetResult =
 export async function getOnboardFormData(): Promise<OnboardFormData> {
   if (!isSupabaseConfigured()) {
     return {
-      warehouses: MOCK_WAREHOUSES.map((w) => ({ id: w.id, name: w.name, code: w.code })),
+      warehouses: getMockWarehouses().map((w) => ({ id: w.id, name: w.name, code: w.code })),
       categories: MOCK_CATEGORIES.map((c) => ({ id: c.id, name: c.name, slug: c.slug, icon: c.icon ?? null })),
     };
   }
@@ -121,6 +112,7 @@ export async function onboardAsset(rawInput: QuickOnboardInput): Promise<Onboard
       warehouseId: input.warehouseId,
       categoryId: input.categoryId,
       qrCode: input.qrCode,
+      nfcUid: input.nfcUid || undefined,
       toolName: input.toolName,
       brand: input.brand,
       modelNumber: input.modelNumber || undefined,
@@ -190,6 +182,7 @@ export async function onboardAsset(rawInput: QuickOnboardInput): Promise<Onboard
       .insert({
         tool_model_id: toolModelId,
         qr_code: input.qrCode,
+        nfc_uid: input.nfcUid || null,
         current_warehouse_id: input.warehouseId,
         status: 'available',
         condition: input.condition,

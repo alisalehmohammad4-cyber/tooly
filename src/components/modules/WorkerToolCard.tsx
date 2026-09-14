@@ -135,8 +135,12 @@ export default function WorkerToolCard({
   ];
 
   return (
-    <div className="w-full max-w-lg mx-auto p-4 animate-in fade-in slide-in-from-bottom-3 duration-200">
-      <div className="bg-white rounded-3xl border-2 border-blue-200 shadow-xl overflow-hidden">
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200"
+    >
+      <div className="w-full max-w-lg bg-white rounded-t-3xl sm:rounded-3xl border-2 border-blue-200 shadow-2xl overflow-hidden max-h-[88vh] flex flex-col animate-in slide-in-from-bottom-4 duration-200">
         {/* TOP BANNER */}
         <div className="bg-gradient-to-l from-blue-50 via-slate-50 to-amber-50/50 p-5 border-b border-blue-100 relative">
           <button
@@ -219,7 +223,7 @@ export default function WorkerToolCard({
         </div>
 
         {/* BODY CONTENT */}
-        <div className="p-5 space-y-5">
+        <div className="p-5 pb-14 sm:pb-8 overflow-y-auto overscroll-contain flex-1 space-y-5">
           {/* 1. SAFETY CHECKLIST */}
           <div className="rounded-2xl bg-amber-50/60 border-2 border-amber-200 p-4 space-y-3">
             <div className="flex items-center justify-between">

@@ -71,6 +71,7 @@ export interface Asset {
   id: string;
   toolModelId: string;
   qrCode: string;
+  nfcUid?: string;
   currentWarehouseId: string;
   currentAssignedWorker: string | null;
   status: AssetStatus;

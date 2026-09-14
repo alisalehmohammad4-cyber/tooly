@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 export const QuickOnboardSchema = z.object({
   qrCode: z.string().trim().min(1, 'QR code is required'),
+  nfcUid: z.string().trim().optional().or(z.literal('')),
   warehouseId: z.string().trim().min(1, 'Warehouse ID is required'),
   categoryId: z.string().trim().min(1, 'Category ID is required'),
   toolName: z.string().trim().min(1, 'Tool name is required'),

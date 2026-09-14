@@ -58,7 +58,7 @@ function PinPadDialog() {
       role="dialog"
       aria-modal="true"
       aria-labelledby="pin-modal-title"
-      className="fixed inset-0 z-[60] flex items-center justify-center p-3 sm:p-4 bg-slate-950/70 backdrop-blur-md animate-in fade-in duration-200"
+      className="fixed inset-0 z-[80] flex items-center justify-center p-3 sm:p-4 bg-slate-950/70 backdrop-blur-md animate-in fade-in duration-200"
     >
       <div className="w-full max-w-sm bg-white rounded-3xl shadow-2xl border-2 border-blue-200 overflow-hidden flex flex-col text-slate-900 animate-in zoom-in-95 duration-200">
         {/* Header */}

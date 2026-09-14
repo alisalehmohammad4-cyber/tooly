@@ -3,16 +3,15 @@
 import type { AppUser } from '@/types/domain';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 
-import { MOCK_USERS } from '@/lib/mockStore';
+import { MOCK_USERS, getMockWarehouses } from '@/lib/mockStore';
 
 // Persistent in-memory user registry initialized with authoritative users
 const USERS_STORE: AppUser[] = [...MOCK_USERS];
 
-const WAREHOUSE_DIRECTORY: Record<string, string> = {
-  'wh-main-01': "מחסן מרכזי - אגף א'",
-  'wh-site-02': "אתר בנייה - מכולה ב'",
-  'wh-van-03': 'רכב שירות נייד 05',
-};
+function getWarehouseNameById(warehouseId: string): string {
+  const wh = getMockWarehouses().find((w) => w.id === warehouseId);
+  return wh ? wh.name : 'מחסן שטח פעיל';
+}
 
 export interface AuthActionResult {
   success: boolean;
@@ -80,7 +79,7 @@ export async function authenticateUserAction(
               assignedWarehouseName:
                 dbUserByPin.assigned_warehouse_name ||
                 (dbUserByPin.assigned_warehouse_id
-                  ? WAREHOUSE_DIRECTORY[dbUserByPin.assigned_warehouse_id]
+                  ? getWarehouseNameById(dbUserByPin.assigned_warehouse_id)
                   : undefined),
               isActive: dbUserByPin.is_active !== false,
             },
@@ -127,7 +126,7 @@ export async function authenticateUserAction(
             assignedWarehouseName:
               dbUserByName.assigned_warehouse_name ||
               (dbUserByName.assigned_warehouse_id
-                ? WAREHOUSE_DIRECTORY[dbUserByName.assigned_warehouse_id]
+                ? getWarehouseNameById(dbUserByName.assigned_warehouse_id)
                 : undefined),
             isActive: dbUserByName.is_active !== false,
           },
@@ -243,8 +242,7 @@ export async function createStorekeeperAction(
     };
   }
 
-  const warehouseName =
-    WAREHOUSE_DIRECTORY[assignedWarehouseId] || 'מחסן שטח פעיל';
+  const warehouseName = getWarehouseNameById(assignedWarehouseId);
 
   const newUser: AppUser = {
     id: `usr-sk-${Date.now().toString(36)}`,
@@ -294,8 +292,7 @@ export async function updateStorekeeperWarehouseAction(
     return { success: false, error: 'המחסנאי לא נמצא במערכת.' };
   }
 
-  const warehouseName =
-    WAREHOUSE_DIRECTORY[assignedWarehouseId] || 'מחסן שטח פעיל';
+  const warehouseName = getWarehouseNameById(assignedWarehouseId);
 
   user.assignedWarehouseId = assignedWarehouseId;
   user.assignedWarehouseName = warehouseName;

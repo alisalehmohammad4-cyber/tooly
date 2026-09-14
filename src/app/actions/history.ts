@@ -2,7 +2,7 @@
 
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import type { DamageReport, GpsCoordinates } from '@/types/domain';
-import { getMockAuditHistory, MOCK_WAREHOUSES } from '@/lib/mockStore';
+import { getMockAuditHistory, getMockWarehouses } from '@/lib/mockStore';
 
 export type AuditActionType =
   | 'CHECKOUT'
@@ -53,7 +53,7 @@ export interface AuditHistoryPayload {
   warehouses: Array<{ id: string; name: string; code: string }>;
 }
 
-const FALLBACK_WAREHOUSES = MOCK_WAREHOUSES;
+const getFallbackWarehouses = () => getMockWarehouses();
 
 /**
  * Retrieves chronological audit ledger entries.
@@ -186,7 +186,7 @@ export async function getAuditHistory(
     return {
       records,
       totalCount: records.length,
-      warehouses: FALLBACK_WAREHOUSES,
+      warehouses: getFallbackWarehouses(),
     };
   } catch (err) {
     console.error('getAuditHistory exception, returning fallback:', err);

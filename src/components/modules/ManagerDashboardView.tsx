@@ -21,15 +21,27 @@ import {
   Loader2,
   ShieldCheck,
   UserCheck,
+  Container,
+  Truck,
+  MapPin,
+  Pencil,
+  Trash2,
+  Plus,
 } from 'lucide-react';
 import type { PlantManagerAnalyticsPayload } from '@/app/actions/dashboard';
 import type { AppUser } from '@/types/domain';
+import type { WarehouseAdminItem } from '@/lib/mockStore';
 import {
   getStorekeepersListAction,
   createStorekeeperAction,
   updateStorekeeperWarehouseAction,
   toggleUserActiveAction,
 } from '@/app/actions/users';
+import {
+  getWarehousesAdminAction,
+  deleteWarehouseAction,
+} from '@/app/actions/warehouses';
+import WarehouseFormModal from '@/components/modules/WarehouseFormModal';
 import AppLayout from '@/components/layout/AppLayout';
 
 interface ManagerDashboardViewProps {
@@ -37,11 +49,18 @@ interface ManagerDashboardViewProps {
 }
 
 export default function ManagerDashboardView({ data }: ManagerDashboardViewProps) {
-  // Main Tab Navigation: Analytics vs User Management
-  const [activeTab, setActiveTab] = useState<'analytics' | 'users'>('analytics');
+  // Main Tab Navigation: Analytics vs User Management vs Facilities
+  const [activeTab, setActiveTab] = useState<'analytics' | 'users' | 'warehouses'>('analytics');
 
   // Analytics Search Query
   const [searchQuery, setSearchQuery] = useState<string>('');
+
+  // Facilities / Warehouse Management State
+  const [warehousesList, setWarehousesList] = useState<WarehouseAdminItem[]>([]);
+  const [isLoadingWarehouses, setIsLoadingWarehouses] = useState<boolean>(false);
+  const [isWarehouseModalOpen, setIsWarehouseModalOpen] = useState<boolean>(false);
+  const [editingWarehouse, setEditingWarehouse] = useState<WarehouseAdminItem | null>(null);
+  const [deletingWarehouseId, setDeletingWarehouseId] = useState<string | null>(null);
 
   // Storekeepers Management State
   const [storekeepers, setStorekeepers] = useState<AppUser[]>([]);
@@ -62,6 +81,18 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
   const [isSavingUser, setIsSavingUser] = useState<boolean>(false);
   const [formError, setFormError] = useState<string | null>(null);
 
+  // Synchronized facilities list for dropdowns
+  const availableFacilities = useMemo(() => {
+    if (warehousesList.length > 0) {
+      return warehousesList.map((w) => ({
+        warehouseId: w.id,
+        warehouseName: w.name,
+        warehouseCode: w.code,
+      }));
+    }
+    return data.facilityDistribution;
+  }, [warehousesList, data.facilityDistribution]);
+
   // Load storekeepers list
   const loadStorekeepers = useCallback(async () => {
     setIsLoadingStorekeepers(true);
@@ -75,15 +106,77 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
     }
   }, []);
 
-  // Fetch storekeepers whenever User tab is opened
+  // Load warehouses list
+  const loadWarehouses = useCallback(async () => {
+    setIsLoadingWarehouses(true);
+    try {
+      const list = await getWarehousesAdminAction();
+      setWarehousesList(list);
+    } catch (err) {
+      console.warn('Error loading warehouses:', err);
+    } finally {
+      setIsLoadingWarehouses(false);
+    }
+  }, []);
+
+  // Fetch data whenever tabs change
   useEffect(() => {
     if (activeTab === 'users') {
       const timer = setTimeout(() => {
         void loadStorekeepers();
+        void loadWarehouses();
+      }, 0);
+      return () => clearTimeout(timer);
+    } else if (activeTab === 'warehouses') {
+      const timer = setTimeout(() => {
+        void loadWarehouses();
       }, 0);
       return () => clearTimeout(timer);
     }
-  }, [activeTab, loadStorekeepers]);
+  }, [activeTab, loadStorekeepers, loadWarehouses]);
+
+  // Handle warehouse deletion with strict safety check
+  const handleDeleteWarehouse = async (wh: WarehouseAdminItem) => {
+    if (wh.toolCount > 0) {
+      setFeedbackMessage({
+        text: 'לא ניתן למחוק מתקן המכיל כלי עבודה פעילים. יש להעביר את הכלים תחילה',
+        type: 'error',
+      });
+      return;
+    }
+
+    if (
+      !confirm(
+        `האם אתה בטוח שברצונך למחוק את המתקן "${wh.name}" (${wh.code})? פעולה זו אינה ניתנת לביטול.`
+      )
+    ) {
+      return;
+    }
+
+    setDeletingWarehouseId(wh.id);
+    try {
+      const res = await deleteWarehouseAction(wh.id);
+      if (res.success) {
+        setFeedbackMessage({
+          text: res.message || 'המתקן הוסר בהצלחה מהמערכת.',
+          type: 'success',
+        });
+        await loadWarehouses();
+      } else {
+        setFeedbackMessage({
+          text: res.error || 'שגיאה במחיקת המתקן',
+          type: 'error',
+        });
+      }
+    } catch {
+      setFeedbackMessage({
+        text: 'שגיאת רשת במחיקת המתקן',
+        type: 'error',
+      });
+    } finally {
+      setDeletingWarehouseId(null);
+    }
+  };
 
   // Handle warehouse reassignment
   const handleWarehouseReassign = async (userId: string, newWarehouseId: string) => {
@@ -271,7 +364,20 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
             }`}
           >
             <Users className="w-4 h-4 text-purple-600" />
-            <span>👥 ניהול משתמשים ומחסנאים (Storekeeper Access Control)</span>
+            <span>👥 ניהול משתמשים ומחסנאים</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('warehouses')}
+            className={`flex-1 py-2.5 px-4 rounded-xl text-xs sm:text-sm font-black flex items-center justify-center gap-2 transition-all cursor-pointer ${
+              activeTab === 'warehouses'
+                ? 'bg-white text-purple-950 shadow-sm border border-purple-200'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Building2 className="w-4 h-4 text-purple-600" />
+            <span>🏢 ניהול אתרים ומחסנים</span>
           </button>
         </div>
 
@@ -681,7 +787,7 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                         onChange={(e) => setNewAssignedWarehouseId(e.target.value)}
                         className="w-full bg-white border border-purple-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-bold focus:border-purple-600 focus:outline-none"
                       >
-                        {data.facilityDistribution.map((fac) => (
+                        {availableFacilities.map((fac) => (
                           <option key={fac.warehouseId} value={fac.warehouseId}>
                             {fac.warehouseName} [{fac.warehouseCode}]
                           </option>
@@ -789,7 +895,7 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                                   }
                                   className="bg-white border border-slate-300 text-slate-900 text-xs font-bold rounded-lg px-2.5 py-1.5 focus:border-purple-600 focus:outline-none cursor-pointer"
                                 >
-                                  {data.facilityDistribution.map((fac) => (
+                                  {availableFacilities.map((fac) => (
                                     <option key={fac.warehouseId} value={fac.warehouseId}>
                                       {fac.warehouseName} [{fac.warehouseCode}]
                                     </option>
@@ -837,7 +943,211 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
             </div>
           </div>
         )}
+
+        {/* ============================================================ */}
+        {/* TAB 3: FACILITIES & WAREHOUSES MANAGEMENT                    */}
+        {/* ============================================================ */}
+        {activeTab === 'warehouses' && (
+          <div className="space-y-6 animate-in fade-in duration-200">
+            {/* Section Header & Add Button */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 bg-white border border-slate-200 rounded-3xl shadow-sm">
+              <div>
+                <div className="flex items-center gap-2">
+                  <div className="w-9 h-9 rounded-xl bg-purple-100 text-purple-950 flex items-center justify-center font-black">
+                    <Building2 className="w-5 h-5 text-purple-600" />
+                  </div>
+                  <h2 className="text-lg font-black text-slate-900">
+                    ניהול אתרים, מפעלים ומחסנים
+                  </h2>
+                </div>
+                <p className="text-xs text-slate-500 mt-1">
+                  הגדרה וסנכרון של מחסנים מרכזיים, מכולות שטח באתרי בנייה ורכבי שירות ניידים
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingWarehouse(null);
+                  setIsWarehouseModalOpen(true);
+                }}
+                className="px-4 py-2.5 rounded-xl bg-purple-700 hover:bg-purple-800 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-md shadow-purple-900/20 transition-all cursor-pointer active:scale-95"
+              >
+                <Plus className="w-4 h-4 stroke-[3]" />
+                <span>הוסף אתר / מחסן חדש</span>
+              </button>
+            </div>
+
+            {/* Facilities Cards Grid */}
+            {isLoadingWarehouses ? (
+              <div className="p-12 text-center bg-white rounded-3xl border border-slate-200">
+                <Loader2 className="w-8 h-8 animate-spin text-purple-600 mx-auto mb-2" />
+                <p className="text-xs text-slate-500 font-bold">טוען רשימת מתקנים ומחסנים...</p>
+              </div>
+            ) : warehousesList.length === 0 ? (
+              <div className="p-12 text-center bg-white rounded-3xl border border-slate-200">
+                <Building2 className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                <p className="text-sm font-bold text-slate-700">לא נמצאו מתקנים במערכת</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingWarehouse(null);
+                    setIsWarehouseModalOpen(true);
+                  }}
+                  className="mt-3 text-xs font-black text-purple-600 hover:underline cursor-pointer"
+                >
+                  לחץ כאן להוספת המתקן הראשון
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {warehousesList.map((wh) => (
+                  <div
+                    key={wh.id}
+                    className="bg-white border-2 border-slate-200/80 hover:border-purple-200 rounded-3xl p-5 shadow-sm hover:shadow-md transition-all flex flex-col justify-between"
+                  >
+                    {/* Top Card Info */}
+                    <div className="space-y-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2.5">
+                          <div
+                            className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 border ${
+                              wh.type === 'site_container'
+                                ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                : wh.type === 'service_van'
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                : 'bg-blue-50 text-blue-700 border-blue-200'
+                            }`}
+                          >
+                            {wh.type === 'site_container' && <Container className="w-5 h-5" />}
+                            {wh.type === 'service_van' && <Truck className="w-5 h-5" />}
+                            {(!wh.type || wh.type === 'central_warehouse') && (
+                              <Building2 className="w-5 h-5" />
+                            )}
+                          </div>
+                          <div>
+                            <h3 className="font-black text-slate-900 text-base leading-tight">
+                              {wh.name}
+                            </h3>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span
+                                className="font-mono text-xs font-bold text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-200"
+                                dir="ltr"
+                              >
+                                {wh.code}
+                              </span>
+                              <span
+                                className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full border ${
+                                  wh.type === 'site_container'
+                                    ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                    : wh.type === 'service_van'
+                                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                    : 'bg-blue-50 text-blue-800 border-blue-200'
+                                }`}
+                              >
+                                {wh.type === 'site_container'
+                                  ? 'מכולת אתר'
+                                  : wh.type === 'service_van'
+                                  ? 'רכב שירות'
+                                  : 'מחסן מרכזי'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <span
+                          className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
+                            wh.isActive
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : 'bg-slate-100 text-slate-500 border-slate-300'
+                          }`}
+                        >
+                          {wh.isActive ? 'פעיל' : 'מושבת'}
+                        </span>
+                      </div>
+
+                      {/* Physical Address */}
+                      {wh.address && (
+                        <div className="flex items-center gap-1.5 text-xs text-slate-600 font-medium">
+                          <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                          <span className="truncate">{wh.address}</span>
+                        </div>
+                      )}
+
+                      {/* Live Inventory Stats Pill */}
+                      <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-1.5">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-bold text-slate-700">סה&quot;כ כלים במתקן:</span>
+                          <span className="font-black text-slate-900 bg-white px-2 py-0.5 rounded-lg border border-slate-200">
+                            {wh.toolCount} כלים
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-1 text-[11px] pt-1 border-t border-slate-200/60 text-center font-bold">
+                          <div className="text-emerald-700 bg-emerald-50/80 py-1 rounded">
+                            {wh.availableCount} זמינים
+                          </div>
+                          <div className="text-amber-700 bg-amber-50/80 py-1 rounded">
+                            {wh.inUseCount} בשימוש
+                          </div>
+                          <div className="text-rose-700 bg-rose-50/80 py-1 rounded">
+                            {wh.maintenanceCount} בתיקון
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Actions Bar */}
+                    <div className="pt-4 mt-3 border-t border-slate-100 flex items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingWarehouse(wh);
+                          setIsWarehouseModalOpen(true);
+                        }}
+                        className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                      >
+                        <Pencil className="w-3.5 h-3.5 text-slate-600" />
+                        <span>עריכה</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteWarehouse(wh)}
+                        disabled={deletingWarehouseId === wh.id}
+                        className="px-3 py-1.5 rounded-xl text-xs font-bold bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+                      >
+                        {deletingWarehouseId === wh.id ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Trash2 className="w-3.5 h-3.5" />
+                        )}
+                        <span>מחיקה</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </main>
+
+      {/* Warehouse Create / Edit Modal */}
+      <WarehouseFormModal
+        isOpen={isWarehouseModalOpen}
+        onClose={() => {
+          setIsWarehouseModalOpen(false);
+          setEditingWarehouse(null);
+        }}
+        onSaved={async (savedWh) => {
+          setFeedbackMessage({
+            text: `המתקן "${savedWh.name}" נשמר בהצלחה.`,
+            type: 'success',
+          });
+          await loadWarehouses();
+        }}
+        initialData={editingWarehouse}
+      />
     </AppLayout>
   );
 }

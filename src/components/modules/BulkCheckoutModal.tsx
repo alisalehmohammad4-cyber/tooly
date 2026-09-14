@@ -332,9 +332,9 @@ export default function BulkCheckoutModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="bulk-checkout-title"
-        className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/70 backdrop-blur-md animate-in fade-in duration-200"
+        className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/70 backdrop-blur-md animate-in fade-in duration-200"
       >
-        <div className="w-full max-w-2xl bg-white rounded-3xl shadow-2xl border-2 border-blue-200 overflow-hidden flex flex-col max-h-[94vh]">
+        <div className="w-full max-w-2xl bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl border-2 border-blue-200 overflow-hidden flex flex-col max-h-[88vh]">
           {/* Header */}
           <div className="p-4 sm:p-5 bg-gradient-to-r from-blue-900 to-blue-950 text-white flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -364,7 +364,7 @@ export default function BulkCheckoutModal({
           {/* Form Body */}
           <form
             onSubmit={handleSubmit}
-            className="p-4 sm:p-6 flex-1 overflow-y-auto space-y-6 text-slate-800"
+            className="p-4 sm:p-6 pb-14 sm:pb-8 flex-1 overflow-y-auto overscroll-contain space-y-6 text-slate-800"
           >
             {/* Foreign Warehouse Restriction Alert */}
             {foreignItems.length > 0 && (
