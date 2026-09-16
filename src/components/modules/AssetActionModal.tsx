@@ -128,8 +128,9 @@ export default function AssetActionModal({
   );
 
   // Warehouse scoping check (Storekeeper cannot dispatch tools from other warehouses)
+  const isStorekeeper = role === 'storekeeper' || role === 'supervisor';
   const isForeignWarehouse =
-    role === 'supervisor' &&
+    isStorekeeper &&
     Boolean(user?.assignedWarehouseId) &&
     asset.currentWarehouseId !== user.assignedWarehouseId;
 

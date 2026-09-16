@@ -138,7 +138,7 @@ export function deleteMockWarehouse(id: string): { success: boolean; error?: str
   if (toolsInWarehouse.length > 0) {
     return {
       success: false,
-      error: 'לא ניתן למחוק מתקן המכיל כלי עבודה פעילים. יש להעביר את הכלים תחילה',
+      error: 'לא ניתן למחוק מחסן המכיל כלי עבודה פעילים. יש להעביר את הכלים תחילה',
     };
   }
 
@@ -1091,17 +1091,58 @@ export function getMockPlantManagerAnalytics(): PlantManagerAnalyticsPayload {
       ? Math.max(0, Math.round(((totalAssets - overdueInspections - lockedCount) / totalAssets) * 100))
       : 100;
 
+  // Depreciation calculation: Straight-line based on asset age (assumed 5-year useful life, 20%/yr)
+  let accumulatedDepreciation = 0;
+  assetsStore.forEach((asset) => {
+    const ageInYears = asset.purchaseDate
+      ? Math.max(0.2, (now - new Date(asset.purchaseDate).getTime()) / (365.25 * 86400 * 1000))
+      : 1.5;
+    const itemDeprec = Math.round(asset.purchaseCost * Math.min(0.85, ageInYears * 0.2));
+    accumulatedDepreciation += itemDeprec;
+  });
+
+  const currentBookValue = Math.max(0, totalFleetValue - accumulatedDepreciation);
+  const depreciationRatePct =
+    totalFleetValue > 0 ? Math.round((accumulatedDepreciation / totalFleetValue) * 100) : 0;
+
   // Monthly damage from damage reports in history
+  let workerTotal = 0;
+  let subcontractorTotal = 0;
+  let companyTotal = 0;
   let monthlyDamageCost = 0;
+  let damageIncidentCount = 0;
+
   historyStore.forEach((log) => {
     if (log.damageReport?.estimatedCost) {
-      monthlyDamageCost += log.damageReport.estimatedCost;
+      const cost = log.damageReport.estimatedCost;
+      monthlyDamageCost += cost;
+      damageIncidentCount++;
+      if (log.damageReport.chargeParty === 'worker') {
+        workerTotal += cost;
+      } else if (log.damageReport.chargeParty === 'subcontractor') {
+        subcontractorTotal += cost;
+      } else {
+        companyTotal += cost;
+      }
     }
   });
-  if (monthlyDamageCost === 0) monthlyDamageCost = 650;
+
+  if (monthlyDamageCost === 0) {
+    monthlyDamageCost = 3150;
+    companyTotal = 1650;
+    workerTotal = 650;
+    subcontractorTotal = 850;
+    damageIncidentCount = 4;
+  }
 
   return {
     totalFleetValue,
+    depreciation: {
+      totalAcquisitionCost: totalFleetValue,
+      accumulatedDepreciation,
+      currentBookValue,
+      depreciationRatePct,
+    },
     utilization: {
       totalAssets,
       inUse,
@@ -1116,6 +1157,13 @@ export function getMockPlantManagerAnalytics(): PlantManagerAnalyticsPayload {
       complianceRate,
     },
     monthlyDamageCost,
+    damageAttribution: {
+      workerTotal,
+      subcontractorTotal,
+      companyTotal,
+      totalDamageCost: monthlyDamageCost,
+      monthlyIncidentCount: damageIncidentCount,
+    },
     facilityDistribution,
     highRiskOverdueAssets: overdueList.sort((a, b) => b.daysOverdue - a.daysOverdue),
   };
@@ -1128,9 +1176,10 @@ export function getMockPlantManagerAnalytics(): PlantManagerAnalyticsPayload {
 export function getMockStorekeeperOperations(
   warehouseId?: string
 ): StorekeeperOperationsPayload {
-  const selectedWhId = warehouseId || MOCK_WAREHOUSES[0].id;
-  const currentWh =
-    MOCK_WAREHOUSES.find((w) => w.id === selectedWhId) || MOCK_WAREHOUSES[0];
+  const isAll = !warehouseId || warehouseId === 'all' || warehouseId.toLowerCase() === 'all';
+  const currentWh = isAll
+    ? { id: 'all', name: 'כלל המחסנים (All Depots)', code: 'ALL' }
+    : (MOCK_WAREHOUSES.find((w) => w.id === warehouseId) || MOCK_WAREHOUSES[0]);
 
   const now = Date.now();
   const startOfToday = new Date();
@@ -1145,7 +1194,7 @@ export function getMockStorekeeperOperations(
   let quarantinedCount = 0;
 
   // Filter tools belonging to this facility
-  const whAssets = assetsStore.filter((a) => a.warehouseId === currentWh.id);
+  const whAssets = isAll ? assetsStore : assetsStore.filter((a) => a.warehouseId === currentWh.id);
 
   whAssets.forEach((asset) => {
     if (asset.status === 'available') availableCount++;
@@ -1292,24 +1341,35 @@ export function getMockAuditHistory(filters?: AuditHistoryFilters): AuditHistory
   };
 }
 
-// 5. Authoritative System Users (Admin & Storekeepers)
+// 5. Authoritative System Users (3-Tier Enterprise Management Hierarchy)
 export const MOCK_USERS: AppUser[] = [
   {
-    id: 'usr-admin-01',
-    fullName: 'מנהל מפעל ראשי',
+    id: 'usr-gm-01',
+    fullName: 'מנהל כללי (מנכ"ל והנהלה)',
     username: 'Zatout01',
-    role: 'admin',
+    role: 'general_manager',
     pinCode: '1952',
     assignedWarehouseId: undefined,
-    assignedWarehouseName: 'כל המחסנים (הנהלה)',
+    assignedWarehouseName: 'כלל המפעל והפרויקטים',
     isActive: true,
     createdAt: '2023-11-01T10:00:00.000Z',
   },
   {
+    id: 'usr-co-01',
+    fullName: 'דן רוזן (אחראי תפעול ראשי)',
+    username: 'dan',
+    role: 'chief_operations',
+    pinCode: '2026',
+    assignedWarehouseId: undefined,
+    assignedWarehouseName: 'כלל המחסנים (All Depots)',
+    isActive: true,
+    createdAt: '2023-12-15T08:00:00.000Z',
+  },
+  {
     id: 'usr-sk-01',
-    fullName: 'יוסי כהן (מחסנאי מורשה)',
+    fullName: 'יוסי כהן (מחסנאי ראשי חיפה)',
     username: 'yossi',
-    role: 'supervisor',
+    role: 'storekeeper',
     pinCode: '1111',
     assignedWarehouseId: 'wh-main-01',
     assignedWarehouseName: "מחסן מרכזי - אגף א'",
@@ -1318,9 +1378,9 @@ export const MOCK_USERS: AppUser[] = [
   },
   {
     id: 'usr-sk-02',
-    fullName: 'אבי לוי (מחסנאי שטח)',
+    fullName: 'אבי לוי (מחסנאי אתר מגדל שלום)',
     username: 'avi',
-    role: 'supervisor',
+    role: 'storekeeper',
     pinCode: '1234',
     assignedWarehouseId: 'wh-site-02',
     assignedWarehouseName: "אתר בנייה - מכולה ב'",
@@ -1331,6 +1391,48 @@ export const MOCK_USERS: AppUser[] = [
 
 export function getMockUsers(): AppUser[] {
   return [...MOCK_USERS];
+}
+
+export function addMockUser(user: AppUser): AppUser {
+  const existingIdx = MOCK_USERS.findIndex(
+    (u) => u.id === user.id || (user.username && u.username?.toLowerCase() === user.username.toLowerCase())
+  );
+  if (existingIdx !== -1) {
+    MOCK_USERS[existingIdx] = { ...user };
+  } else {
+    MOCK_USERS.push({ ...user });
+  }
+  return user;
+}
+
+export function deleteMockUser(userId: string): { success: boolean; error?: string } {
+  if (userId === 'usr-gm-01' || userId.toLowerCase() === 'zatout01') {
+    return { success: false, error: 'לא ניתן למחוק את משתמש מנהל המערכת הראשי' };
+  }
+  const idx = MOCK_USERS.findIndex(
+    (u) => u.id === userId || u.username?.toLowerCase() === userId.toLowerCase()
+  );
+  if (idx === -1) {
+    return { success: false, error: 'המשתמש לא נמצא במערכת' };
+  }
+  MOCK_USERS.splice(idx, 1);
+  return { success: true };
+}
+
+export function updateMockUserWarehouse(
+  userId: string,
+  newWarehouseId: string
+): { success: boolean; error?: string; user?: AppUser } {
+  const user = MOCK_USERS.find(
+    (u) => u.id === userId || u.username?.toLowerCase() === userId.toLowerCase()
+  );
+  if (!user) {
+    return { success: false, error: 'המשתמש לא נמצא במערכת' };
+  }
+  const wh = getMockWarehouses().find((w) => w.id === newWarehouseId);
+  user.assignedWarehouseId = newWarehouseId;
+  user.assignedWarehouseName = wh ? wh.name : 'מחסן שטח פעיל';
+  return { success: true, user };
 }
 
 export function getMockUserByCredentials(identifier: string, secret?: string): AppUser | null {

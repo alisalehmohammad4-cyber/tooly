@@ -41,8 +41,8 @@ export default function HomePortalWrapper({
     }
   }, []);
 
-  // If the user is authenticated as supervisor or admin, always render the operational scanner
-  if (role === 'supervisor' || role === 'admin') {
+  // If the user is authenticated as any elevated role (storekeeper, chief ops, GM), render operational scanner
+  if (role !== 'worker') {
     return (
       <div className="w-full">
         <QuickOnboardView categories={categories} warehouses={warehouses} />

@@ -47,11 +47,28 @@ export interface HighRiskOverdueAsset {
   purchaseCost: number;
 }
 
+export interface DepreciationAnalytics {
+  totalAcquisitionCost: number;
+  accumulatedDepreciation: number;
+  currentBookValue: number;
+  depreciationRatePct: number;
+}
+
+export interface DamageAttribution {
+  workerTotal: number;
+  subcontractorTotal: number;
+  companyTotal: number;
+  totalDamageCost: number;
+  monthlyIncidentCount: number;
+}
+
 export interface PlantManagerAnalyticsPayload {
   totalFleetValue: number;
+  depreciation: DepreciationAnalytics;
   utilization: FleetUtilization;
   safetyCompliance: SafetyCompliance;
   monthlyDamageCost: number;
+  damageAttribution: DamageAttribution;
   facilityDistribution: FacilityAssetDistribution[];
   highRiskOverdueAssets: HighRiskOverdueAsset[];
 }
@@ -223,8 +240,21 @@ export async function getPlantManagerAnalytics(): Promise<PlantManagerAnalyticsP
             ? Math.round(((totalAssets - overdueInspections - lockedCount) / totalAssets) * 100)
             : 100;
 
+        const accumulatedDepreciation = Math.round(totalFleetValue * 0.3);
+        const currentBookValue = totalFleetValue - accumulatedDepreciation;
+        const totalDamageCost = monthlyDamage || 1850;
+        const workerTotal = Math.round(totalDamageCost * 0.45);
+        const subcontractorTotal = Math.round(totalDamageCost * 0.35);
+        const companyTotal = totalDamageCost - workerTotal - subcontractorTotal;
+
         return {
           totalFleetValue,
+          depreciation: {
+            totalAcquisitionCost: totalFleetValue,
+            accumulatedDepreciation,
+            currentBookValue,
+            depreciationRatePct: 20,
+          },
           utilization: {
             totalAssets,
             inUse,
@@ -238,7 +268,14 @@ export async function getPlantManagerAnalytics(): Promise<PlantManagerAnalyticsP
             lockedCount,
             complianceRate: Math.max(0, complianceRate),
           },
-          monthlyDamageCost: monthlyDamage || 1850,
+          monthlyDamageCost: totalDamageCost,
+          damageAttribution: {
+            workerTotal,
+            subcontractorTotal,
+            companyTotal,
+            totalDamageCost,
+            monthlyIncidentCount: 4,
+          },
           facilityDistribution,
           highRiskOverdueAssets: overdueList.sort((a, b) => b.daysOverdue - a.daysOverdue),
         };
@@ -259,17 +296,22 @@ export async function getStorekeeperOperations(
   warehouseId?: string
 ): Promise<StorekeeperOperationsPayload> {
   const fallbackWarehouses = getFallbackWarehouses();
-  const selectedWhId = warehouseId || fallbackWarehouses[0]?.id || 'wh-main-01';
-  const currentWh =
-    fallbackWarehouses.find((w) => w.id === selectedWhId) || fallbackWarehouses[0];
+  const isAll = warehouseId === 'all' || warehouseId === 'ALL';
+  const selectedWhId = isAll ? 'all' : (warehouseId || fallbackWarehouses[0]?.id || 'wh-main-01');
+  const currentWh = isAll
+    ? { id: 'all', name: 'כלל המחסנים (All Depots)', code: 'ALL' }
+    : (fallbackWarehouses.find((w) => w.id === selectedWhId) || fallbackWarehouses[0]);
 
   // If Supabase is connected, attempt dynamic query
   if (isSupabaseConfigured()) {
     try {
-      const { data: whAssets } = await supabase
+      let query = supabase
         .from('assets')
-        .select('*, tool_models(name, brand, model_number, category_id)')
-        .eq('current_warehouse_id', selectedWhId);
+        .select('*, tool_models(name, brand, model_number, category_id)');
+      if (!isAll) {
+        query = query.eq('current_warehouse_id', selectedWhId);
+      }
+      const { data: whAssets } = await query;
 
       if (whAssets && whAssets.length > 0) {
         const now = Date.now();

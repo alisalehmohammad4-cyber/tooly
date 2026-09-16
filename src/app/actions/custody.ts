@@ -63,6 +63,7 @@ import {
   getMockAssetByQr,
   mutateMockAsset,
   getMockAssets,
+  getMockWarehouses,
 } from '@/lib/mockStore';
 
 // In-memory fallback dataset synchronized with unified mockStore
@@ -96,11 +97,13 @@ function initCustodyAssets() {
 }
 initCustodyAssets();
 
-const WAREHOUSE_NAMES: Record<string, { name: string; code: string }> = {
-  'wh-main-01': { name: "מחסן מרכזי - אגף א'", code: 'CDB-01' },
-  'wh-site-02': { name: "אתר בנייה - מכולה ב'", code: 'SCB-02' },
-  'wh-van-03': { name: "רכב שירות נייד 05", code: 'MSV-05' },
-};
+function getWarehouseMeta(warehouseId: string): { name: string; code: string } {
+  const wh = getMockWarehouses().find((w) => w.id === warehouseId);
+  if (wh) {
+    return { name: wh.name, code: wh.code };
+  }
+  return { name: 'מחסן שטח פעיל', code: 'WH' };
+}
 
 /**
  * Checks whether an asset is restricted by administrative lock or overdue safety inspection.
@@ -820,10 +823,7 @@ export async function transferAssetAction(
     }
   }
 
-  const targetWhMeta = WAREHOUSE_NAMES[targetWarehouseId] || {
-    name: 'Selected Facility',
-    code: 'FAC',
-  };
+  const targetWhMeta = getWarehouseMeta(targetWarehouseId);
 
   // Update fallback in-memory asset if present
   for (const key of Object.keys(FALLBACK_CUSTODY_ASSETS)) {

@@ -44,6 +44,17 @@ export default function PrintTagsView() {
   const [quantity, setQuantity] = useState<number>(24);
   const [customQtyInput, setCustomQtyInput] = useState<string>('24');
   const [facilityText, setFacilityText] = useState<string>('מחסן מרכזי - ציוד קבוע');
+  const [companyName, setCompanyName] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        return localStorage.getItem('tooly_company_name') || 'TOOLY';
+      } catch (err) {
+        console.warn('Error reading tooly_company_name from localStorage:', err);
+        return 'TOOLY';
+      }
+    }
+    return 'TOOLY';
+  });
 
   // Tab B: Reprint Damaged Label State
   const [reprintSearchInput, setReprintSearchInput] = useState<string>('');
@@ -55,6 +66,18 @@ export default function PrintTagsView() {
   // Generated printable tags state
   const [tags, setTags] = useState<TagItem[]>([]);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
+
+  // Persist company name edits to localStorage
+  const handleCompanyNameChange = useCallback((value: string) => {
+    setCompanyName(value);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('tooly_company_name', value);
+      } catch (err) {
+        console.warn('Error saving tooly_company_name to localStorage:', err);
+      }
+    }
+  }, []);
 
   // 1. Auto-population: fetch highest existing serial from database and mockStore on mount / prefix change
   useEffect(() => {
@@ -464,7 +487,42 @@ export default function PrintTagsView() {
               </div>
             )}
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+            {/* Tag Identity & Branding Configuration */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Company / Contractor Name */}
+              <div>
+                <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
+                  שם החברה / הקבלן (יופיע בראש המדבקה)
+                </label>
+                <div className="relative">
+                  <Building2 className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={companyName}
+                    onChange={(e) => handleCompanyNameChange(e.target.value)}
+                    placeholder="לדוגמה: סאלח הנדסה ובנייה"
+                    className="w-full min-h-[48px] bg-white text-blue-950 font-bold text-sm pr-10 pl-3.5 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none shadow-sm"
+                  />
+                </div>
+              </div>
+
+              {/* Facility / Warehouse Label */}
+              <div>
+                <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
+                  שם האתר / מחסן על התגית
+                </label>
+                <input
+                  type="text"
+                  value={facilityText}
+                  onChange={(e) => setFacilityText(e.target.value)}
+                  placeholder="מחסן ראשי"
+                  className="w-full min-h-[48px] bg-white text-blue-950 font-bold text-sm px-3.5 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none shadow-sm"
+                />
+              </div>
+            </div>
+
+            {/* Serial Numbering & Batch Quantity */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
               {/* Prefix */}
               <div>
                 <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
@@ -495,22 +553,8 @@ export default function PrintTagsView() {
                 />
               </div>
 
-              {/* Facility / Warehouse Label */}
-              <div>
-                <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
-                  שם האתר / מחסן על התגית
-                </label>
-                <input
-                  type="text"
-                  value={facilityText}
-                  onChange={(e) => setFacilityText(e.target.value)}
-                  placeholder="מחסן ראשי"
-                  className="w-full min-h-[48px] bg-white text-blue-950 font-bold text-sm px-3.5 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none shadow-sm"
-                />
-              </div>
-
               {/* Tag Quantity Presets (1 to 200) */}
-              <div>
+              <div className="sm:col-span-2 md:col-span-1">
                 <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
                   כמות תגיות (1 עד 200)
                 </label>
@@ -735,13 +779,26 @@ export default function PrintTagsView() {
                 {/* Information Column (RTL: Right side) */}
                 <div className="flex-1 flex flex-col justify-between h-full min-w-0 text-right pr-0.5">
                   {/* Brand & Badge Header */}
-                  <div className="flex items-center justify-between gap-1 border-b border-slate-900 pb-0.5 mb-1 print:border-black">
-                    <div className="flex items-center gap-1 font-black text-xs text-slate-950 tracking-wider">
+                  <div className="flex items-center justify-between gap-1 border-b border-slate-900 pb-0.5 mb-1 print:border-black overflow-hidden">
+                    <div className="flex items-center gap-1 font-black text-slate-950 min-w-0 flex-1">
                       <Wrench className="w-3.5 h-3.5 text-blue-600 print:text-black shrink-0" />
-                      <span>TOOLY</span>
+                      <span
+                        className={`truncate leading-none ${
+                          (companyName || 'TOOLY').length > 18
+                            ? 'text-[8.5px] print:text-[7.5px]'
+                            : (companyName || 'TOOLY').length > 12
+                            ? 'text-[10px] print:text-[8.5px]'
+                            : (companyName || 'TOOLY').length > 7
+                            ? 'text-xs print:text-[9.5px]'
+                            : 'text-xs print:text-[10.5px] tracking-wider'
+                        }`}
+                        title={companyName || 'TOOLY'}
+                      >
+                        {companyName || 'TOOLY'}
+                      </span>
                     </div>
                     <span
-                      className={`text-[8.5px] font-black uppercase px-1 py-0.5 rounded border leading-none ${
+                      className={`shrink-0 text-[8.5px] print:text-[8px] font-black uppercase px-1 py-0.5 rounded border leading-none ${
                         tag.isReprint
                           ? 'bg-amber-100 text-amber-900 border-amber-300 print:border-black'
                           : 'bg-slate-100 text-slate-800 border-slate-300 print:border-black'
@@ -798,13 +855,24 @@ export default function PrintTagsView() {
                 className="industrial-tag bg-white border-2 border-slate-900 rounded-xl p-3 flex flex-col items-center justify-between text-center shadow-sm print:shadow-none print:border-slate-800 print:rounded-lg print:p-2 min-h-[165px]"
               >
                 {/* Tag Header */}
-                <div className="w-full flex items-center justify-between border-b-2 border-slate-900 pb-1 mb-1.5 print:border-slate-800">
-                  <div className="flex items-center gap-1 font-black text-xs text-slate-950 tracking-wider">
-                    <Wrench className="w-3.5 h-3.5 text-blue-600 print:text-black" />
-                    <span>TOOLY</span>
+                <div className="w-full flex items-center justify-between border-b-2 border-slate-900 pb-1 mb-1.5 print:border-slate-800 overflow-hidden">
+                  <div className="flex items-center gap-1 font-black text-slate-950 min-w-0 flex-1 text-right">
+                    <Wrench className="w-3.5 h-3.5 text-blue-600 print:text-black shrink-0" />
+                    <span
+                      className={`truncate leading-none ${
+                        (companyName || 'TOOLY').length > 18
+                          ? 'text-[9.5px] print:text-[8.5px]'
+                          : (companyName || 'TOOLY').length > 12
+                          ? 'text-[11px] print:text-[9.5px]'
+                          : 'text-xs print:text-[11px] tracking-wider'
+                      }`}
+                      title={companyName || 'TOOLY'}
+                    >
+                      {companyName || 'TOOLY'}
+                    </span>
                   </div>
                   <span
-                    className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded border ${
+                    className={`shrink-0 text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded border ${
                       tag.isReprint
                         ? 'bg-amber-100 text-amber-900 border-amber-300 print:border-black'
                         : 'bg-slate-100 text-slate-800 border-slate-300 print:border-black'

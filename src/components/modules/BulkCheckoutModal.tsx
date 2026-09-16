@@ -135,14 +135,15 @@ export default function BulkCheckoutModal({
   }, [items]);
 
   const { role, assignedWarehouseId, assignedWarehouseName } = useAuth();
+  const isStorekeeper = role === 'storekeeper' || role === 'supervisor';
 
-  // Identify any tools in the cart that belong to a different warehouse
+  // Identify any tools in the cart that belong to a different warehouse (strictly enforced for storekeeper)
   const foreignItems = useMemo(() => {
-    if (role !== 'supervisor' || !assignedWarehouseId) return [];
+    if (!isStorekeeper || !assignedWarehouseId) return [];
     return items.filter(
       (item) => item.currentWarehouseId && item.currentWarehouseId !== assignedWarehouseId
     );
-  }, [role, assignedWarehouseId, items]);
+  }, [isStorekeeper, assignedWarehouseId, items]);
 
   if (!isOpen) return null;
 

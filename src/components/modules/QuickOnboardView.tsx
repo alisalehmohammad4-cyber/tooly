@@ -76,23 +76,27 @@ export default function QuickOnboardView({
 }: QuickOnboardViewProps) {
   const { role, assignedWarehouseId, openPinModal } = useAuth();
 
-  // Sticky Warehouse State (Locked for supervisor to their assigned facility)
+  // Scoped Storekeeper check: Locked strictly to assigned facility ("כל אחד של שלו")
+  const isStorekeeperScoped =
+    (role === 'storekeeper' || role === 'supervisor') && !!assignedWarehouseId;
+
+  // Sticky Warehouse State
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>(() => {
-    if (role === 'supervisor' && assignedWarehouseId) {
+    if (isStorekeeperScoped) {
       return assignedWarehouseId;
     }
     return warehouses[0]?.id || '';
   });
 
-  // Sync when supervisor assignment changes or loads
+  // Sync when storekeeper assignment changes or loads
   useEffect(() => {
-    if (role === 'supervisor' && assignedWarehouseId) {
+    if (isStorekeeperScoped) {
       const timer = setTimeout(() => {
         setSelectedWarehouseId(assignedWarehouseId);
       }, 0);
       return () => clearTimeout(timer);
     }
-  }, [role, assignedWarehouseId]);
+  }, [isStorekeeperScoped, assignedWarehouseId]);
 
   // Category State (Retained across scans)
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>(
@@ -601,7 +605,7 @@ export default function QuickOnboardView({
 
   // Handle Management (ניהול) button click
   const handleManagementActionClick = useCallback(() => {
-    if (role === 'supervisor' || role === 'admin') {
+    if (role !== 'worker') {
       setIsModalOpen(true);
     } else {
       // If current role is 'worker': do NOT show the worker card.
@@ -619,7 +623,7 @@ export default function QuickOnboardView({
   // Handle Add to Cart with supervisor role check
   const handleAddToCartClick = useCallback(() => {
     if (!scannedRegisteredAsset) return;
-    if (role === 'supervisor' || role === 'admin') {
+    if (role !== 'worker') {
       handleAddToCart(scannedRegisteredAsset);
       handleReScan();
     } else {
@@ -737,7 +741,7 @@ export default function QuickOnboardView({
                 <Building2 className="w-3.5 h-3.5 text-blue-600" />
                 אתר / מחסן פעיל
               </label>
-              {role === 'supervisor' && assignedWarehouseId && (
+              {isStorekeeperScoped && (
                 <span className="text-[11px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200 flex items-center gap-1">
                   <Lock className="w-3 h-3 text-amber-600" />
                   משויך למחסנאי (נעול)
@@ -747,10 +751,10 @@ export default function QuickOnboardView({
             <div className="relative">
               <select
                 value={selectedWarehouseId}
-                disabled={role === 'supervisor' && !!assignedWarehouseId}
+                disabled={isStorekeeperScoped}
                 onChange={(e) => setSelectedWarehouseId(e.target.value)}
                 className={`w-full min-h-[56px] bg-white text-blue-950 font-bold text-base px-4 py-3 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none appearance-none transition-colors shadow-sm ${
-                  role === 'supervisor' && !!assignedWarehouseId
+                  isStorekeeperScoped
                     ? 'cursor-not-allowed bg-slate-100 text-slate-700 border-slate-300 opacity-90'
                     : 'cursor-pointer'
                 }`}

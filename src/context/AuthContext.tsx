@@ -19,41 +19,96 @@ export const DEFAULT_WORKER_USER: AppUser = {
 };
 
 export const PREDEFINED_USERS: Record<string, AppUser> = {
+  // 1. General Manager (מנהל כללי)
   '1952': {
-    id: 'usr-admin-01',
-    fullName: 'מנהל מפעל ראשי',
+    id: 'usr-gm-01',
+    fullName: 'מנהל כללי (הנהלת מפעל)',
     username: 'Zatout01',
-    role: 'admin',
+    role: 'general_manager',
     pinCode: '1952',
     assignedWarehouseId: undefined,
-    assignedWarehouseName: 'כל המחסנים (הנהלה)',
+    assignedWarehouseName: 'כלל המפעל והפרויקטים',
     isActive: true,
   },
   'zatout01': {
-    id: 'usr-admin-01',
-    fullName: 'מנהל מפעל ראשי',
+    id: 'usr-gm-01',
+    fullName: 'מנהל כללי (הנהלת מפעל)',
     username: 'Zatout01',
-    role: 'admin',
+    role: 'general_manager',
     pinCode: '1952',
     assignedWarehouseId: undefined,
-    assignedWarehouseName: 'כל המחסנים (הנהלה)',
+    assignedWarehouseName: 'כלל המפעל והפרויקטים',
     isActive: true,
   },
   'Zatout01': {
-    id: 'usr-admin-01',
-    fullName: 'מנהל מפעל ראשי',
+    id: 'usr-gm-01',
+    fullName: 'מנהל כללי (הנהלת מפעל)',
     username: 'Zatout01',
-    role: 'admin',
+    role: 'general_manager',
     pinCode: '1952',
     assignedWarehouseId: undefined,
-    assignedWarehouseName: 'כל המחסנים (הנהלה)',
+    assignedWarehouseName: 'כלל המפעל והפרויקטים',
     isActive: true,
   },
+  'gm': {
+    id: 'usr-gm-01',
+    fullName: 'מנהל כללי (הנהלת מפעל)',
+    username: 'Zatout01',
+    role: 'general_manager',
+    pinCode: '1952',
+    assignedWarehouseId: undefined,
+    assignedWarehouseName: 'כלל המפעל והפרויקטים',
+    isActive: true,
+  },
+
+  // 2. Chief Operations (אחראי ראשי)
+  '2026': {
+    id: 'usr-co-01',
+    fullName: 'דן רוזן (אחראי תפעול ראשי)',
+    username: 'dan',
+    role: 'chief_operations',
+    pinCode: '2026',
+    assignedWarehouseId: undefined,
+    assignedWarehouseName: 'כלל המחסנים (All Depots)',
+    isActive: true,
+  },
+  'dan': {
+    id: 'usr-co-01',
+    fullName: 'דן רוזן (אחראי תפעול ראשי)',
+    username: 'dan',
+    role: 'chief_operations',
+    pinCode: '2026',
+    assignedWarehouseId: undefined,
+    assignedWarehouseName: 'כלל המחסנים (All Depots)',
+    isActive: true,
+  },
+  'ops_chief': {
+    id: 'usr-co-01',
+    fullName: 'דן רוזן (אחראי תפעול ראשי)',
+    username: 'dan',
+    role: 'chief_operations',
+    pinCode: '2026',
+    assignedWarehouseId: undefined,
+    assignedWarehouseName: 'כלל המחסנים (All Depots)',
+    isActive: true,
+  },
+
+  // 3. Scoped Storekeepers (מחסנאים מורשים)
   '1111': {
     id: 'usr-sk-01',
-    fullName: 'יוסי כהן (מחסנאי מורשה)',
+    fullName: 'יוסי כהן (מחסנאי ראשי חיפה)',
     username: 'yossi',
-    role: 'supervisor',
+    role: 'storekeeper',
+    pinCode: '1111',
+    assignedWarehouseId: 'wh-main-01',
+    assignedWarehouseName: "מחסן מרכזי - אגף א'",
+    isActive: true,
+  },
+  'yossi': {
+    id: 'usr-sk-01',
+    fullName: 'יוסי כהן (מחסנאי ראשי חיפה)',
+    username: 'yossi',
+    role: 'storekeeper',
     pinCode: '1111',
     assignedWarehouseId: 'wh-main-01',
     assignedWarehouseName: "מחסן מרכזי - אגף א'",
@@ -61,22 +116,34 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
   },
   '1234': {
     id: 'usr-sk-02',
-    fullName: 'אבי לוי (מחסנאי שטח)',
+    fullName: 'אבי לוי (מחסנאי אתר מגדל שלום)',
     username: 'avi',
-    role: 'supervisor',
+    role: 'storekeeper',
     pinCode: '1234',
     assignedWarehouseId: 'wh-site-02',
     assignedWarehouseName: "אתר בנייה - מכולה ב'",
     isActive: true,
   },
+  'avi': {
+    id: 'usr-sk-02',
+    fullName: 'אבי לוי (מחסנאי אתר מגדל שלום)',
+    username: 'avi',
+    role: 'storekeeper',
+    pinCode: '1234',
+    assignedWarehouseId: 'wh-site-02',
+    assignedWarehouseName: "אתר בנייה - מכולה ב'",
+    isActive: true,
+  },
+
+  // 4. Legacy Admin Backup
   '9999': {
     id: 'usr-admin-legacy',
     fullName: 'הנהלת מפעל (גיבוי)',
     username: 'admin',
-    role: 'admin',
+    role: 'general_manager',
     pinCode: '9999',
     assignedWarehouseId: undefined,
-    assignedWarehouseName: 'כל המחסנים (הנהלה)',
+    assignedWarehouseName: 'כלל המפעל והפרויקטים',
     isActive: true,
   },
 };
@@ -84,8 +151,12 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
 interface AuthContextType {
   user: AppUser;
   role: UserRole;
+  isGeneralManager: boolean;
+  isChiefOperations: boolean;
+  isStorekeeper: boolean;
   isSupervisorOrAdmin: boolean;
   isAdmin: boolean;
+  canSwitchDepots: boolean;
   assignedWarehouseId?: string;
   assignedWarehouseName?: string;
   loginWithPin: (pin: string) => { success: boolean; error?: string };
@@ -149,6 +220,9 @@ function getAuthSnapshot(): string {
       if (
         parsed &&
         (parsed.role === 'worker' ||
+          parsed.role === 'storekeeper' ||
+          parsed.role === 'chief_operations' ||
+          parsed.role === 'general_manager' ||
           parsed.role === 'supervisor' ||
           parsed.role === 'admin')
       ) {
@@ -208,6 +282,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (
         parsed &&
         (parsed.role === 'worker' ||
+          parsed.role === 'storekeeper' ||
+          parsed.role === 'chief_operations' ||
+          parsed.role === 'general_manager' ||
           parsed.role === 'supervisor' ||
           parsed.role === 'admin')
       ) {
@@ -335,12 +412,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     pinSuccessCallbackRef.current = null;
   }, []);
 
-  const value = useMemo<AuthContextType>(
-    () => ({
+  const value = useMemo<AuthContextType>(() => {
+    const isGeneralManager = user.role === 'general_manager' || user.role === 'admin';
+    const isChiefOperations = user.role === 'chief_operations';
+    const isStorekeeper = user.role === 'storekeeper' || user.role === 'supervisor';
+    const isSupervisorOrAdmin = user.role !== 'worker';
+    const isAdmin = isGeneralManager;
+    const canSwitchDepots = isGeneralManager || isChiefOperations;
+
+    return {
       user,
       role: user.role,
-      isSupervisorOrAdmin: user.role === 'supervisor' || user.role === 'admin',
-      isAdmin: user.role === 'admin',
+      isGeneralManager,
+      isChiefOperations,
+      isStorekeeper,
+      isSupervisorOrAdmin,
+      isAdmin,
+      canSwitchDepots,
       assignedWarehouseId: user.assignedWarehouseId,
       assignedWarehouseName: user.assignedWarehouseName,
       loginWithPin,
@@ -350,7 +438,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       pinDialogMessage,
       openPinModal,
       closePinModal,
-    }),
+    };
+  },
     [
       user,
       isPinModalOpen,

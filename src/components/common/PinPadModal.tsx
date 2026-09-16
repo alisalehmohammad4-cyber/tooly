@@ -11,7 +11,7 @@ export default function PinPadModal() {
 }
 
 function PinPadDialog() {
-  const { closePinModal, loginWithPin, switchToWorker, role, pinDialogMessage } = useAuth();
+  const { closePinModal, loginWithPin, switchToWorker, role, assignedWarehouseName, pinDialogMessage } = useAuth();
   const [pin, setPin] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSuccess, setIsSuccess] = useState<boolean>(false);
@@ -92,10 +92,12 @@ function PinPadDialog() {
           <div className="w-full mb-4 p-2.5 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-between text-xs">
             <span className="font-bold text-blue-950">מצב נוכחי:</span>
             <span className="font-black text-blue-700">
-              {role === 'admin'
-                ? '👑 מנהל מפעל ופרויקטים'
-                : role === 'supervisor'
-                ? '🔑 עמדת מחסנאי (פעיל)'
+              {role === 'general_manager' || role === 'admin'
+                ? '👑 מנהל כללי (מפעל ופרויקטים)'
+                : role === 'chief_operations'
+                ? '🌐 אחראי תפעול ראשי (כלל המחסנים)'
+                : role === 'storekeeper' || role === 'supervisor'
+                ? `🔑 עמדת מחסנאי (${assignedWarehouseName || 'משויך'})`
                 : '👷 עובד שטח'}
             </span>
           </div>
@@ -174,6 +176,42 @@ function PinPadDialog() {
             >
               <Delete className="w-5 h-5" />
             </button>
+          </div>
+
+          {/* Quick Demo Credentials */}
+          <div className="w-full mt-3 pt-2.5 border-t border-slate-200">
+            <div className="text-[11px] font-bold text-slate-500 mb-1.5 text-right">
+              התחברות מהירה לפי תפקיד (הדגמה):
+            </div>
+            <div className="grid grid-cols-3 gap-1.5 text-[11px] font-bold">
+              <button
+                type="button"
+                onClick={() => {
+                  loginWithPin('1952');
+                }}
+                className="p-1.5 rounded-lg bg-purple-50 text-purple-800 border border-purple-200 hover:bg-purple-100 transition-colors text-center cursor-pointer"
+              >
+                1952 👑 מנכ&quot;ל
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  loginWithPin('2026');
+                }}
+                className="p-1.5 rounded-lg bg-indigo-50 text-indigo-800 border border-indigo-200 hover:bg-indigo-100 transition-colors text-center cursor-pointer"
+              >
+                2026 🌐 תפעול
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  loginWithPin('1111');
+                }}
+                className="p-1.5 rounded-lg bg-blue-50 text-blue-800 border border-blue-200 hover:bg-blue-100 transition-colors text-center cursor-pointer"
+              >
+                1111 🔑 מחסנאי
+              </button>
+            </div>
           </div>
 
           {/* Switch to Worker Button if elevated */}

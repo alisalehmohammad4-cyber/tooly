@@ -93,7 +93,13 @@ export interface Asset {
   reservation?: AssetReservation | null;
 }
 
-export type UserRole = 'worker' | 'supervisor' | 'admin';
+export type UserRole =
+  | 'worker'
+  | 'storekeeper'
+  | 'chief_operations'
+  | 'general_manager'
+  | 'supervisor'
+  | 'admin';
 
 export interface AppUser {
   id: string;

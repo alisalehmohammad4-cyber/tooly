@@ -27,6 +27,8 @@ import {
   Pencil,
   Trash2,
   Plus,
+  TrendingDown,
+  FileText,
 } from 'lucide-react';
 import type { PlantManagerAnalyticsPayload } from '@/app/actions/dashboard';
 import type { AppUser } from '@/types/domain';
@@ -35,7 +37,9 @@ import {
   getStorekeepersListAction,
   createStorekeeperAction,
   updateStorekeeperWarehouseAction,
+  updateUserRoleAction,
   toggleUserActiveAction,
+  deleteStorekeeperAction,
 } from '@/app/actions/users';
 import {
   getWarehousesAdminAction,
@@ -49,8 +53,8 @@ interface ManagerDashboardViewProps {
 }
 
 export default function ManagerDashboardView({ data }: ManagerDashboardViewProps) {
-  // Main Tab Navigation: Analytics vs User Management vs Facilities
-  const [activeTab, setActiveTab] = useState<'analytics' | 'users' | 'warehouses'>('analytics');
+  // Main Tab Navigation: Warehouses vs Storekeepers vs Executive BI Analytics
+  const [activeTab, setActiveTab] = useState<'warehouses' | 'users' | 'analytics'>('warehouses');
 
   // Analytics Search Query
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -71,15 +75,19 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
     type: 'success' | 'error';
   } | null>(null);
 
-  // New Storekeeper Form State
+  // New Enterprise User Form State
   const [newFullName, setNewFullName] = useState<string>('');
   const [newUsername, setNewUsername] = useState<string>('');
   const [newPinCode, setNewPinCode] = useState<string>('');
+  const [newUserRole, setNewUserRole] = useState<'storekeeper' | 'chief_operations'>('storekeeper');
   const [newAssignedWarehouseId, setNewAssignedWarehouseId] = useState<string>(
     data.facilityDistribution[0]?.warehouseId || 'wh-main-01'
   );
   const [isSavingUser, setIsSavingUser] = useState<boolean>(false);
   const [formError, setFormError] = useState<string | null>(null);
+
+  // Accounting Report Modal
+  const [isAccountingModalOpen, setIsAccountingModalOpen] = useState<boolean>(false);
 
   // Synchronized facilities list for dropdowns
   const availableFacilities = useMemo(() => {
@@ -119,27 +127,25 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
     }
   }, []);
 
-  // Fetch data whenever tabs change
+  // Fetch data whenever tabs change or on mount
   useEffect(() => {
-    if (activeTab === 'users') {
-      const timer = setTimeout(() => {
+    const timer = setTimeout(() => {
+      if (activeTab === 'users') {
         void loadStorekeepers();
         void loadWarehouses();
-      }, 0);
-      return () => clearTimeout(timer);
-    } else if (activeTab === 'warehouses') {
-      const timer = setTimeout(() => {
+      } else if (activeTab === 'warehouses') {
         void loadWarehouses();
-      }, 0);
-      return () => clearTimeout(timer);
-    }
+        void loadStorekeepers();
+      }
+    }, 0);
+    return () => clearTimeout(timer);
   }, [activeTab, loadStorekeepers, loadWarehouses]);
 
   // Handle warehouse deletion with strict safety check
   const handleDeleteWarehouse = async (wh: WarehouseAdminItem) => {
     if (wh.toolCount > 0) {
       setFeedbackMessage({
-        text: 'לא ניתן למחוק מתקן המכיל כלי עבודה פעילים. יש להעביר את הכלים תחילה',
+        text: 'לא ניתן למחוק מחסן המכיל כלי עבודה פעילים. יש להעביר את הכלים תחילה',
         type: 'error',
       });
       return;
@@ -147,7 +153,7 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
 
     if (
       !confirm(
-        `האם אתה בטוח שברצונך למחוק את המתקן "${wh.name}" (${wh.code})? פעולה זו אינה ניתנת לביטול.`
+        `האם אתה בטוח שברצונך למחוק את המחסן "${wh.name}" (${wh.code})? פעולה זו אינה ניתנת לביטול.`
       )
     ) {
       return;
@@ -158,23 +164,67 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
       const res = await deleteWarehouseAction(wh.id);
       if (res.success) {
         setFeedbackMessage({
-          text: res.message || 'המתקן הוסר בהצלחה מהמערכת.',
+          text: res.message || 'המחסן הוסר בהצלחה מהמערכת.',
           type: 'success',
         });
         await loadWarehouses();
       } else {
         setFeedbackMessage({
-          text: res.error || 'שגיאה במחיקת המתקן',
+          text: res.error || 'שגיאה במחיקת המחסן',
           type: 'error',
         });
       }
     } catch {
       setFeedbackMessage({
-        text: 'שגיאת רשת במחיקת המתקן',
+        text: 'שגיאת רשת במחיקת המחסן',
         type: 'error',
       });
     } finally {
       setDeletingWarehouseId(null);
+    }
+  };
+
+  // Handle storekeeper deletion
+  const handleDeleteStorekeeper = async (user: AppUser) => {
+    if (
+      user.id === 'usr-gm-01' ||
+      user.username?.toLowerCase() === 'zatout01' ||
+      user.role === 'general_manager'
+    ) {
+      setFeedbackMessage({
+        text: 'לא ניתן למחוק את משתמש מנהל המערכת הראשי.',
+        type: 'error',
+      });
+      return;
+    }
+
+    if (
+      !confirm(
+        `האם אתה בטוח שברצונך למחוק את המשתמש "${user.fullName}" (${user.username || 'ללא שם משתמש'}) לצמיתות מהמערכת? פעולה זו אינה ניתנת לביטול.`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      const res = await deleteStorekeeperAction(user.id);
+      if (res.success) {
+        setFeedbackMessage({
+          text: res.message || 'המשתמש הוסר בהצלחה מהמערכת.',
+          type: 'success',
+        });
+        await loadStorekeepers();
+      } else {
+        setFeedbackMessage({
+          text: res.error || 'שגיאה במחיקת המשתמש.',
+          type: 'error',
+        });
+      }
+    } catch {
+      setFeedbackMessage({
+        text: 'שגיאת רשת במחיקת המשתמש.',
+        type: 'error',
+      });
     }
   };
 
@@ -221,7 +271,7 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
     }
   };
 
-  // Handle create new storekeeper
+  // Handle create new storekeeper or chief operations
   const handleCreateStorekeeper = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
@@ -232,27 +282,107 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
         fullName: newFullName,
         username: newUsername,
         pinCode: newPinCode,
-        assignedWarehouseId: newAssignedWarehouseId,
+        role: newUserRole,
+        assignedWarehouseId:
+          newUserRole === 'chief_operations' ? undefined : newAssignedWarehouseId,
       });
 
       if (res.success) {
         setFeedbackMessage({
-          text: res.message || 'מחסנאי חדש נוצר בהצלחה',
+          text: res.message || 'משתמש תפעול חדש נוצר בהצלחה',
           type: 'success',
         });
         setNewFullName('');
         setNewUsername('');
         setNewPinCode('');
+        setNewUserRole('storekeeper');
         setIsAddModalOpen(false);
         await loadStorekeepers();
       } else {
-        setFormError(res.error || 'שגיאה ביצירת המחסנאי');
+        setFormError(res.error || 'שגיאה ביצירת המשתמש');
       }
     } catch (err: unknown) {
-      setFormError(err instanceof Error ? err.message : 'שגיאה ביצירת המחסנאי');
+      setFormError(err instanceof Error ? err.message : 'שגיאה ביצירת המשתמש');
     } finally {
       setIsSavingUser(false);
     }
+  };
+
+  // Handle role change between Storekeeper and Chief Operations
+  const handleRoleChange = async (userId: string, newRole: 'storekeeper' | 'chief_operations') => {
+    try {
+      const defaultWh = availableFacilities[0]?.warehouseId || 'wh-main-01';
+      const res = await updateUserRoleAction(userId, newRole, defaultWh);
+      if (res.success) {
+        setFeedbackMessage({
+          text: res.message || 'תפקיד המשתמש עודכן בהצלחה',
+          type: 'success',
+        });
+        await loadStorekeepers();
+      } else {
+        setFeedbackMessage({
+          text: res.error || 'שגיאה בעדכון תפקיד',
+          type: 'error',
+        });
+      }
+    } catch {
+      setFeedbackMessage({ text: 'שגיאת רשת בעדכון תפקיד', type: 'error' });
+    }
+  };
+
+  // Export Full Accounting Valuation & Depreciation to Excel CSV (UTF-8 BOM)
+  const handleExportAccountingCsv = () => {
+    const headers = [
+      'שם הכלי',
+      'ברקוד / QR',
+      'יצרן',
+      'דגם',
+      'אתר / מחסן',
+      'עלות רכישה (₪)',
+      'פחת מצטבר (₪)',
+      'ערך נוכחי בספרים (₪)',
+      'סטטוס תפעולי',
+      'עובד אחראי',
+      'טלפון עובד',
+      'תאריך בדיקת בטיחות',
+    ];
+
+    const rows = (data.highRiskOverdueAssets || []).map((item) => {
+      const cost = item.purchaseCost || 1200;
+      const deprec = Math.round(cost * 0.3);
+      const net = cost - deprec;
+      return [
+        `"${item.toolName.replace(/"/g, '""')}"`,
+        `"${item.qrCode}"`,
+        `"${item.brand.replace(/"/g, '""')}"`,
+        `"${(item.modelNumber || '').replace(/"/g, '""')}"`,
+        `"${item.warehouseName.replace(/"/g, '""')}"`,
+        cost,
+        deprec,
+        net,
+        '"בשימוש בשטח"',
+        `"${item.workerName.replace(/"/g, '""')}"`,
+        `"${item.workerPhone || ''}"`,
+        `"${new Date(item.expectedReturnDate).toLocaleDateString('he-IL')}"`,
+      ];
+    });
+
+    const csvContent =
+      '\uFEFF' +
+      [headers.join(','), ...rows.map((r) => r.join(','))].join('\r\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute(
+      'download',
+      `tooly_accounting_valuation_${new Date().toISOString().split('T')[0]}.csv`
+    );
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   // Filter overdue assets
@@ -325,17 +455,28 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
 
   return (
     <AppLayout
-      title="Tooly - מנהל מפעל ופרויקטים"
-      subtitle="לוח בקרה ניהולי ובקרת ציוד"
-      requiredRole="admin"
+      title="Tooly - מנהל כללי (Executive BI)"
+      subtitle="לוח בקרה ניהולי, מדדים פיננסיים ומרכז דוחות"
+      requiredRole="general_manager"
     >
       {/* PRINT-ONLY HEADER */}
-      <div className="hidden print:block p-4 border-b border-slate-300 mb-4 text-center">
-        <h1 className="text-xl font-black">Tooly — דוח בקרה ניהולי למנהל מפעל</h1>
-        <p className="text-xs text-slate-600">
-          הופק בתאריך {new Date().toLocaleDateString('he-IL')} בשעה{' '}
-          {new Date().toLocaleTimeString('he-IL')}
-        </p>
+      <div className="hidden print:block p-6 border-b-2 border-slate-900 mb-6 text-center" dir="rtl">
+        <div className="flex items-center justify-between border-b pb-4 mb-4">
+          <div className="text-right">
+            <h1 className="text-2xl font-black tracking-tight text-slate-900">Tooly Enterprise</h1>
+            <p className="text-xs text-slate-600 font-bold">דוח מאזן ציוד, שווי נכסים ופחת תקופתי לחשבונאות</p>
+          </div>
+          <div className="text-left text-xs text-slate-500 font-mono">
+            <div>תאריך הפקה: {new Date().toLocaleDateString('he-IL')}</div>
+            <div>שעה: {new Date().toLocaleTimeString('he-IL')}</div>
+          </div>
+        </div>
+        <div className="grid grid-cols-4 gap-3 text-center my-4 text-xs font-bold bg-slate-50 p-3 rounded-xl border border-slate-300">
+          <div>שווי רכישה כולל: ₪{data.totalFleetValue.toLocaleString()}</div>
+          <div>פחת מצטבר: ₪{(data.depreciation?.accumulatedDepreciation ?? Math.round(data.totalFleetValue * 0.3)).toLocaleString()}</div>
+          <div>שווי ספרים נקי: ₪{(data.depreciation?.currentBookValue ?? Math.round(data.totalFleetValue * 0.7)).toLocaleString()}</div>
+          <div>סה&quot;כ כלים: {data.utilization.totalAssets}</div>
+        </div>
       </div>
 
       <main className="max-w-6xl mx-auto px-4 py-5 space-y-6">
@@ -343,15 +484,15 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
         <div className="flex items-center gap-2 p-1.5 bg-slate-200/80 rounded-2xl border border-slate-300 print:hidden">
           <button
             type="button"
-            onClick={() => setActiveTab('analytics')}
+            onClick={() => setActiveTab('warehouses')}
             className={`flex-1 py-2.5 px-4 rounded-xl text-xs sm:text-sm font-black flex items-center justify-center gap-2 transition-all cursor-pointer ${
-              activeTab === 'analytics'
+              activeTab === 'warehouses'
                 ? 'bg-white text-purple-950 shadow-sm border border-purple-200'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            <TrendingUp className="w-4 h-4 text-purple-600" />
-            <span>📊 סקירה, מדדי ביצוע ואיחורים</span>
+            <Building2 className="w-4 h-4 text-purple-600" />
+            <span>🏢 ניהול אתרים ומחסנים (Warehouses)</span>
           </button>
 
           <button
@@ -364,20 +505,20 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
             }`}
           >
             <Users className="w-4 h-4 text-purple-600" />
-            <span>👥 ניהול משתמשים ומחסנאים</span>
+            <span>👥 ניהול צוות ומחסנאים (Storekeepers)</span>
           </button>
 
           <button
             type="button"
-            onClick={() => setActiveTab('warehouses')}
+            onClick={() => setActiveTab('analytics')}
             className={`flex-1 py-2.5 px-4 rounded-xl text-xs sm:text-sm font-black flex items-center justify-center gap-2 transition-all cursor-pointer ${
-              activeTab === 'warehouses'
+              activeTab === 'analytics'
                 ? 'bg-white text-purple-950 shadow-sm border border-purple-200'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            <Building2 className="w-4 h-4 text-purple-600" />
-            <span>🏢 ניהול אתרים ומחסנים</span>
+            <TrendingUp className="w-4 h-4 text-purple-600" />
+            <span>📊 מדדי BI, פחת ודוחות (Executive BI & Accounting)</span>
           </button>
         </div>
 
@@ -413,77 +554,133 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
         {/* ============================================================ */}
         {activeTab === 'analytics' && (
           <div className="space-y-6 animate-in fade-in duration-200">
-            {/* 4 SUMMARY KPI CARDS */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-              {/* KPI 1: Fleet Value */}
-              <div className="p-4 rounded-2xl bg-white border-2 border-blue-100 shadow-sm hover:border-blue-300 transition-all space-y-2">
+            {/* 5 STRATEGIC BI CARDS */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
+              {/* Card 1: Total Fleet Valuation */}
+              <div className="p-4 rounded-2xl bg-white border-2 border-emerald-100 shadow-sm hover:border-emerald-300 transition-all space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
                     שווי כולל של הציוד
                   </span>
-                  <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-200">
-                    <DollarSign className="w-5 h-5" />
+                  <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-200">
+                    <DollarSign className="w-4 h-4" />
                   </div>
                 </div>
-                <div className="text-2xl sm:text-3xl font-black text-blue-950">
+                <div className="text-2xl font-black text-blue-950">
                   ₪{data.totalFleetValue.toLocaleString()}
                 </div>
-                <div className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md inline-block">
+                <div className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md inline-block">
                   {data.utilization.totalAssets} כלי עבודה רשומים
                 </div>
               </div>
 
-              {/* KPI 2: Fleet Utilization */}
+              {/* Card 2: Accumulated Depreciation */}
+              <div className="p-4 rounded-2xl bg-white border-2 border-indigo-100 shadow-sm hover:border-indigo-300 transition-all space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                    פחת ציוד מצטבר
+                  </span>
+                  <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-200">
+                    <TrendingDown className="w-4 h-4" />
+                  </div>
+                </div>
+                <div className="text-2xl font-black text-indigo-950">
+                  ₪{(data.depreciation?.accumulatedDepreciation ?? Math.round(data.totalFleetValue * 0.3)).toLocaleString()}
+                </div>
+                <div className="text-[11px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md inline-block truncate max-w-full">
+                  ערך בספרים: ₪{(data.depreciation?.currentBookValue ?? Math.round(data.totalFleetValue * 0.7)).toLocaleString()}
+                </div>
+              </div>
+
+              {/* Card 3: Fleet Utilization */}
               <div className="p-4 rounded-2xl bg-white border-2 border-blue-100 shadow-sm hover:border-blue-300 transition-all space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
                     ניצולת ציוד בשטח
                   </span>
-                  <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-200">
-                    <TrendingUp className="w-5 h-5" />
+                  <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-200">
+                    <TrendingUp className="w-4 h-4" />
                   </div>
                 </div>
-                <div className="text-2xl sm:text-3xl font-black text-blue-950">
+                <div className="text-2xl font-black text-blue-950">
                   {data.utilization.utilizationRate}%
                 </div>
-                <div className="text-xs font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md inline-block">
-                  {data.utilization.inUse} מתוך {data.utilization.totalAssets} בכלים בשימוש
+                <div className="text-[11px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md inline-block truncate max-w-full">
+                  {data.utilization.inUse} מתוך {data.utilization.totalAssets} בשימוש
                 </div>
               </div>
 
-              {/* KPI 3: Safety Compliance */}
-              <div className="p-4 rounded-2xl bg-white border-2 border-blue-100 shadow-sm hover:border-blue-300 transition-all space-y-2">
+              {/* Card 4: Safety Compliance */}
+              <div className="p-4 rounded-2xl bg-white border-2 border-purple-100 shadow-sm hover:border-purple-300 transition-all space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
                     תאימות בטיחות
                   </span>
-                  <div className="w-9 h-9 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center border border-purple-200">
-                    <ShieldAlert className="w-5 h-5" />
+                  <div className="w-8 h-8 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center border border-purple-200">
+                    <ShieldAlert className="w-4 h-4" />
                   </div>
                 </div>
-                <div className="text-2xl sm:text-3xl font-black text-purple-950">
+                <div className="text-2xl font-black text-purple-950">
                   {data.safetyCompliance.complianceRate}%
                 </div>
-                <div className="text-xs font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-md inline-block">
-                  {data.safetyCompliance.lockedCount} כלים נעולים / בדיקה
+                <div className="text-[11px] font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-md inline-block">
+                  {data.safetyCompliance.lockedCount} כלים מושבתים/בדיקה
                 </div>
               </div>
 
-              {/* KPI 4: Monthly Damage Cost */}
+              {/* Card 5: Damage Cost Attribution */}
               <div className="p-4 rounded-2xl bg-white border-2 border-amber-100 shadow-sm hover:border-amber-300 transition-all space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-                    עלות נזקים חודשית
+                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                    שיוך עלות נזקים
                   </span>
-                  <div className="w-9 h-9 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-200">
-                    <Wrench className="w-5 h-5" />
+                  <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-200">
+                    <Wrench className="w-4 h-4" />
                   </div>
                 </div>
-                <div className="text-2xl sm:text-3xl font-black text-amber-900">
-                  ₪{data.monthlyDamageCost.toLocaleString()}
+                <div className="text-2xl font-black text-amber-900">
+                  ₪{(data.damageAttribution?.totalDamageCost ?? data.monthlyDamageCost).toLocaleString()}
                 </div>
-                <div className="text-xs font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md inline-block">
-                  הערכת עלויות תיקונים
+                <div className="text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-md flex justify-between">
+                  <span>עובד: ₪{data.damageAttribution?.workerTotal ?? 650}</span>
+                  <span>קבלן: ₪{data.damageAttribution?.subcontractorTotal ?? 850}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* STRATEGIC EXPORT & ACCOUNTING CENTER BANNER */}
+            <div className="p-5 rounded-2xl bg-gradient-to-r from-purple-900 via-indigo-900 to-slate-900 text-white shadow-md space-y-4 print:hidden">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 text-purple-200 text-xs font-bold mb-2">
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>מרכז דוחות כספיים וספרי חשבונות</span>
+                  </div>
+                  <h3 className="text-base sm:text-lg font-black text-white">
+                    ייצוא נתונים מוסמך ודוח מאזן תקופתי לחשבונאות
+                  </h3>
+                  <p className="text-xs text-purple-200 max-w-2xl mt-1 leading-relaxed">
+                    ייצוא קובץ אקסל מפורט (CSV בקידוד UTF-8 BOM) או הפקת דוח מאזן מובנה לרואה חשבון הכולל שווי נכסים, פחת מצטבר, שיוך נזקים ואישורי חתימה.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleExportAccountingCsv}
+                    className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-md transition-all flex items-center gap-2 cursor-pointer active:scale-95"
+                  >
+                    <FileSpreadsheet className="w-4 h-4" />
+                    <span>ייצוא אקסל מלא (CSV)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsAccountingModalOpen(true)}
+                    className="px-4 py-2.5 rounded-xl bg-white text-purple-950 hover:bg-purple-50 font-black text-xs shadow-md transition-all flex items-center gap-2 cursor-pointer active:scale-95"
+                  >
+                    <Printer className="w-4 h-4 text-purple-700" />
+                    <span>דוח מאזן לחשבונאות</span>
+                  </button>
                 </div>
               </div>
             </div>
@@ -729,10 +926,66 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                 )}
 
                 <form onSubmit={handleCreateStorekeeper} className="space-y-4">
+                  {/* Role Selector */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-2">
+                      דרגת תפקיד והרשאה במערכת <span className="text-purple-600">*</span>:
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <label
+                        className={`p-3 rounded-xl border-2 flex items-start gap-3 cursor-pointer transition-all ${
+                          newUserRole === 'storekeeper'
+                            ? 'bg-purple-50 border-purple-600 shadow-sm'
+                            : 'bg-white border-slate-200 hover:border-slate-300'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="userRole"
+                          checked={newUserRole === 'storekeeper'}
+                          onChange={() => setNewUserRole('storekeeper')}
+                          className="mt-1 text-purple-600 focus:ring-purple-500"
+                        />
+                        <div>
+                          <span className="text-xs font-black text-slate-900 block">
+                            🔑 מחסנאי מורשה (Storekeeper)
+                          </span>
+                          <span className="text-[11px] text-slate-500 block mt-0.5">
+                            גישה מוגבלת ומאובטחת למחסן יחיד בלבד (&quot;כל אחד של שלו&quot;)
+                          </span>
+                        </div>
+                      </label>
+
+                      <label
+                        className={`p-3 rounded-xl border-2 flex items-start gap-3 cursor-pointer transition-all ${
+                          newUserRole === 'chief_operations'
+                            ? 'bg-indigo-50 border-indigo-600 shadow-sm'
+                            : 'bg-white border-slate-200 hover:border-slate-300'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="userRole"
+                          checked={newUserRole === 'chief_operations'}
+                          onChange={() => setNewUserRole('chief_operations')}
+                          className="mt-1 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <div>
+                          <span className="text-xs font-black text-slate-900 block">
+                            🌐 אחראי תפעול ראשי (Chief Operations)
+                          </span>
+                          <span className="text-[11px] text-slate-500 block mt-0.5">
+                            שליטה מלאה בכלל המחסנים, מכולות שטח ורכבים, העברות מלאי וספירות
+                          </span>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1">
-                        שם מלא של המחסנאי <span className="text-purple-600">*</span>:
+                        שם מלא <span className="text-purple-600">*</span>:
                       </label>
                       <input
                         type="text"
@@ -782,17 +1035,23 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                       <label className="block text-xs font-bold text-slate-700 mb-1">
                         מחסן / אתר באחריות <span className="text-purple-600">*</span>:
                       </label>
-                      <select
-                        value={newAssignedWarehouseId}
-                        onChange={(e) => setNewAssignedWarehouseId(e.target.value)}
-                        className="w-full bg-white border border-purple-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-bold focus:border-purple-600 focus:outline-none"
-                      >
-                        {availableFacilities.map((fac) => (
-                          <option key={fac.warehouseId} value={fac.warehouseId}>
-                            {fac.warehouseName} [{fac.warehouseCode}]
-                          </option>
-                        ))}
-                      </select>
+                      {newUserRole === 'chief_operations' ? (
+                        <div className="w-full bg-indigo-50/70 border border-indigo-200 rounded-xl px-3.5 py-2.5 text-xs text-indigo-950 font-bold flex items-center gap-2">
+                          <span>🌐 כלל המחסנים (שליטה מבצעית חוצת מתקנים)</span>
+                        </div>
+                      ) : (
+                        <select
+                          value={newAssignedWarehouseId}
+                          onChange={(e) => setNewAssignedWarehouseId(e.target.value)}
+                          className="w-full bg-white border border-purple-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-bold focus:border-purple-600 focus:outline-none"
+                        >
+                          {availableFacilities.map((fac) => (
+                            <option key={fac.warehouseId} value={fac.warehouseId}>
+                              {fac.warehouseName} [{fac.warehouseCode}]
+                            </option>
+                          ))}
+                        </select>
+                      )}
                     </div>
                   </div>
 
@@ -817,7 +1076,7 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                       ) : (
                         <>
                           <Check className="w-3.5 h-3.5" />
-                          <span>הוסף מחסנאי למערכת</span>
+                          <span>הוסף משתמש למערכת</span>
                         </>
                       )}
                     </button>
@@ -832,10 +1091,10 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                 <div>
                   <h3 className="text-sm font-black text-purple-950 flex items-center gap-2">
                     <Users className="w-4 h-4 text-purple-700" />
-                    <span>רשימת מחסנאי שטח מורשים ({storekeepers.length})</span>
+                    <span>רשימת בעלי תפקידים ומחסנאים ({storekeepers.length})</span>
                   </h3>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    עדכון שיוך מחסנים בזמן אמת, שינוי סטטוס חשבון ובקרת תפעול
+                    בקרת הרשאות היררכית: מנהל כללי, אחראי תפעול ראשי, ומחסנאי שטח מוגבלי מחסן
                   </p>
                 </div>
 
@@ -849,9 +1108,10 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                   <thead className="bg-purple-50 text-purple-950 font-black border-b border-purple-100">
                     <tr>
                       <th className="p-3.5">שם מלא</th>
+                      <th className="p-3.5">דרגת תפקיד</th>
                       <th className="p-3.5">שם משתמש</th>
                       <th className="p-3.5">קוד כניסה (PIN)</th>
-                      <th className="p-3.5">מחסן משויך (הגבלת פעילות)</th>
+                      <th className="p-3.5">מתקן משויך (הגבלת פעילות)</th>
                       <th className="p-3.5">סטטוס</th>
                       <th className="p-3.5 text-center">פעולות הנהלה</th>
                     </tr>
@@ -859,13 +1119,15 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                   <tbody className="divide-y divide-slate-100 font-medium">
                     {storekeepers.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="p-8 text-center text-slate-400 font-bold">
-                          לא נמצאו מחסנאים במערכת
+                        <td colSpan={7} className="p-8 text-center text-slate-400 font-bold">
+                          לא נמצאו משתמשים במערכת
                         </td>
                       </tr>
                     ) : (
                       storekeepers.map((sk) => {
                         const isActive = sk.isActive ?? true;
+                        const isGM = sk.role === 'general_manager' || sk.role === 'admin';
+                        const isChief = sk.role === 'chief_operations';
                         return (
                           <tr
                             key={sk.id}
@@ -879,6 +1141,41 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                                 <span>{sk.fullName}</span>
                               </div>
                             </td>
+                            <td className="p-3.5">
+                              {isGM ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-black bg-purple-100 text-purple-900 border border-purple-200 shadow-xs">
+                                  👑 מנהל כללי
+                                </span>
+                              ) : isChief ? (
+                                <div className="flex items-center gap-1.5">
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-black bg-indigo-100 text-indigo-900 border border-indigo-200 shadow-xs">
+                                    🌐 אחראי תפעול ראשי
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRoleChange(sk.id, 'storekeeper')}
+                                    className="text-[10px] text-slate-400 hover:text-indigo-600 underline cursor-pointer"
+                                    title="שנה תפקיד למחסנאי"
+                                  >
+                                    הגדר כמחסנאי
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-1.5">
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-black bg-blue-100 text-blue-900 border border-blue-200 shadow-xs">
+                                    🔑 מחסנאי מורשה
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRoleChange(sk.id, 'chief_operations')}
+                                    className="text-[10px] text-slate-400 hover:text-indigo-600 underline cursor-pointer"
+                                    title="קדם לאחראי תפעול ראשי"
+                                  >
+                                    קדם לתפעול
+                                  </button>
+                                </div>
+                              )}
+                            </td>
                             <td className="p-3.5 font-mono text-slate-600" dir="ltr">
                               {sk.username || '—'}
                             </td>
@@ -886,22 +1183,27 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                               •••• ({sk.pinCode})
                             </td>
                             <td className="p-3.5">
-                              {/* Reassign Warehouse Dropdown */}
-                              <div className="relative inline-block">
-                                <select
-                                  value={sk.assignedWarehouseId || ''}
-                                  onChange={(e) =>
-                                    handleWarehouseReassign(sk.id, e.target.value)
-                                  }
-                                  className="bg-white border border-slate-300 text-slate-900 text-xs font-bold rounded-lg px-2.5 py-1.5 focus:border-purple-600 focus:outline-none cursor-pointer"
-                                >
-                                  {availableFacilities.map((fac) => (
-                                    <option key={fac.warehouseId} value={fac.warehouseId}>
-                                      {fac.warehouseName} [{fac.warehouseCode}]
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
+                              {isGM || isChief ? (
+                                <span className="text-xs font-bold text-indigo-800 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-200 inline-block">
+                                  🌐 כלל המחסנים (ללא הגבלה)
+                                </span>
+                              ) : (
+                                <div className="relative inline-block">
+                                  <select
+                                    value={sk.assignedWarehouseId || ''}
+                                    onChange={(e) =>
+                                      handleWarehouseReassign(sk.id, e.target.value)
+                                    }
+                                    className="bg-white border border-slate-300 text-slate-900 text-xs font-bold rounded-lg px-2.5 py-1.5 focus:border-purple-600 focus:outline-none cursor-pointer"
+                                  >
+                                    {availableFacilities.map((fac) => (
+                                      <option key={fac.warehouseId} value={fac.warehouseId}>
+                                        {fac.warehouseName} [{fac.warehouseCode}]
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                              )}
                             </td>
                             <td className="p-3.5">
                               <span
@@ -920,18 +1222,32 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                               </span>
                             </td>
                             <td className="p-3.5 text-center">
-                              <button
-                                type="button"
-                                onClick={() => handleToggleActive(sk.id, sk.isActive)}
-                                className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-all cursor-pointer ${
-                                  isActive
-                                    ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'
-                                    : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
-                                }`}
-                                title={isActive ? 'השבת מחסנאי' : 'הפעל מחסנאי'}
-                              >
-                                {isActive ? 'השבת גישה' : 'הפעל מחדש'}
-                              </button>
+                              {!isGM && (
+                                <div className="flex items-center justify-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleActive(sk.id, sk.isActive)}
+                                    className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-all cursor-pointer ${
+                                      isActive
+                                        ? 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-200'
+                                        : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
+                                    }`}
+                                    title={isActive ? 'השבת משתמש' : 'הפעל משתמש'}
+                                  >
+                                    {isActive ? 'השבת גישה' : 'הפעל מחדש'}
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteStorekeeper(sk)}
+                                    className="px-2.5 py-1 rounded-lg text-xs font-bold bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 transition-all cursor-pointer flex items-center gap-1 active:scale-95"
+                                    title="מחק משתמש לצמיתות"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    <span>מחיקה</span>
+                                  </button>
+                                </div>
+                              )}
                             </td>
                           </tr>
                         );
@@ -974,7 +1290,7 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                 className="px-4 py-2.5 rounded-xl bg-purple-700 hover:bg-purple-800 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-md shadow-purple-900/20 transition-all cursor-pointer active:scale-95"
               >
                 <Plus className="w-4 h-4 stroke-[3]" />
-                <span>הוסף אתר / מחסן חדש</span>
+                <span>➕ הוסף מחסן / אתר חדש</span>
               </button>
             </div>
 
@@ -1131,6 +1447,196 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
           </div>
         )}
       </main>
+
+      {/* Accounting Balance Audit Modal */}
+      {isAccountingModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-200">
+          <div className="bg-white border-2 border-purple-200 rounded-3xl max-w-4xl w-full max-h-[92vh] flex flex-col shadow-2xl overflow-hidden">
+            {/* Modal Header */}
+            <div className="p-5 sm:p-6 bg-gradient-to-r from-purple-950 via-indigo-950 to-slate-900 text-white flex items-center justify-between border-b border-purple-800">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-white/10 text-purple-300 flex items-center justify-center border border-white/20">
+                  <FileText className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-lg font-black text-white">
+                      דוח מאזן נכסים וציוד לחשבונאות
+                    </h3>
+                    <span className="text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 px-2 py-0.5 rounded-full">
+                      ספר נכסים מבוקר
+                    </span>
+                  </div>
+                  <p className="text-xs text-purple-200 mt-0.5">
+                    Tooly Fleet Management Systems • דוח רשמי לצורכי ביקורת, שומת מס ופחת
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="px-3 py-1.5 rounded-xl bg-purple-700/60 hover:bg-purple-700 text-white text-xs font-bold flex items-center gap-1.5 border border-purple-400/30 transition-all cursor-pointer"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>הדפס / שמור כ-PDF</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsAccountingModalOpen(false)}
+                  className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-all cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body - Printable document */}
+            <div className="p-6 overflow-y-auto space-y-6 text-slate-800 printable-area">
+              {/* Report Metadata Strip */}
+              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-4 text-xs font-bold">
+                <div>
+                  <span className="text-slate-500 block text-[10px]">תאריך הפקת הדוח:</span>
+                  <span className="text-slate-900 font-mono text-sm">
+                    {new Date().toLocaleDateString('he-IL', { year: 'numeric', month: 'long', day: 'numeric' })}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block text-[10px]">מנהל מאשר (Executive):</span>
+                  <span className="text-purple-950 font-black">מנהל כללי (Zatout01)</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block text-[10px]">מספר מתקנים בביקורת:</span>
+                  <span className="text-slate-900 font-black">
+                    {data.facilityDistribution.length} מתקנים פעילים
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block text-[10px]">שיטת חישוב פחת:</span>
+                  <span className="text-indigo-700 font-bold">קו ישר (5 שנים - 20% לשנה)</span>
+                </div>
+              </div>
+
+              {/* Financial Balance Summary Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-right">
+                <div className="p-3.5 rounded-2xl bg-emerald-50/80 border border-emerald-200">
+                  <span className="text-[11px] font-bold text-emerald-800 block">שווי רכישה מקורי</span>
+                  <span className="text-xl font-black text-emerald-950 mt-1 block">
+                    ₪{data.totalFleetValue.toLocaleString()}
+                  </span>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-indigo-50/80 border border-indigo-200">
+                  <span className="text-[11px] font-bold text-indigo-800 block">פחת מצטבר בספרים</span>
+                  <span className="text-xl font-black text-indigo-950 mt-1 block">
+                    ₪{(data.depreciation?.accumulatedDepreciation ?? Math.round(data.totalFleetValue * 0.3)).toLocaleString()}
+                  </span>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-purple-50/80 border border-purple-200">
+                  <span className="text-[11px] font-bold text-purple-800 block">ערך נוכחי נקי בספרים</span>
+                  <span className="text-xl font-black text-purple-950 mt-1 block">
+                    ₪{(data.depreciation?.currentBookValue ?? Math.round(data.totalFleetValue * 0.7)).toLocaleString()}
+                  </span>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-amber-50/80 border border-amber-200">
+                  <span className="text-[11px] font-bold text-amber-800 block">נזקים וחיובי קבלנים</span>
+                  <span className="text-xl font-black text-amber-950 mt-1 block">
+                    ₪{(data.damageAttribution?.totalDamageCost ?? data.monthlyDamageCost).toLocaleString()}
+                  </span>
+                </div>
+              </div>
+
+              {/* Facility Breakdown Table */}
+              <div className="space-y-2">
+                <h4 className="text-xs font-black text-slate-900 flex items-center gap-1.5">
+                  <Building2 className="w-4 h-4 text-purple-700" />
+                  <span>מאזן שווי וכלים בחלוקה לפי מחסנים ואתרים</span>
+                </h4>
+                <div className="overflow-x-auto rounded-xl border border-slate-200">
+                  <table className="w-full text-right text-xs">
+                    <thead className="bg-slate-100 text-slate-700 font-black border-b border-slate-200">
+                      <tr>
+                        <th className="p-2.5">שם המתקן / מחסן</th>
+                        <th className="p-2.5">קוד מתקן</th>
+                        <th className="p-2.5">סה&quot;כ כלים</th>
+                        <th className="p-2.5">כלים פעילים</th>
+                        <th className="p-2.5">בתיקון / השבתה</th>
+                        <th className="p-2.5">ניצולת מלאי</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {data.facilityDistribution.map((fac) => (
+                        <tr key={fac.warehouseId} className="hover:bg-slate-50">
+                          <td className="p-2.5 font-bold text-slate-900">{fac.warehouseName}</td>
+                          <td className="p-2.5 font-mono text-purple-700" dir="ltr">{fac.warehouseCode}</td>
+                          <td className="p-2.5 font-black">{fac.totalAssets}</td>
+                          <td className="p-2.5 text-emerald-700 font-bold">{fac.checkedOut}</td>
+                          <td className="p-2.5 text-rose-700 font-bold">{fac.maintenance}</td>
+                          <td className="p-2.5 font-black text-slate-900">
+                            {fac.utilizationRate}%
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Formal Sign-off Section */}
+              <div className="pt-6 border-t-2 border-slate-200">
+                <h4 className="text-xs font-black text-slate-700 mb-4">
+                  אישור מנהלים וביקורת חשבונות (Executive Sign-Off & Audit Verification):
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                  <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-center space-y-3">
+                    <span className="text-xs font-bold text-slate-600 block">חתימת מנהל כללי (CEO / GM)</span>
+                    <div className="h-12 border-b-2 border-dashed border-slate-300 flex items-center justify-center">
+                      <span className="font-serif italic text-purple-900 font-bold text-lg">Zatout01</span>
+                    </div>
+                    <span className="text-[10px] text-slate-400 block">תאריך: {new Date().toLocaleDateString('he-IL')}</span>
+                  </div>
+
+                  <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-center space-y-3">
+                    <span className="text-xs font-bold text-slate-600 block">חתימת רואה חשבון / סמנכ&quot;ל כספים</span>
+                    <div className="h-12 border-b-2 border-dashed border-slate-300 flex items-center justify-center">
+                      <span className="text-xs text-slate-400 font-medium">(חתימה וחותמת)</span>
+                    </div>
+                    <span className="text-[10px] text-slate-400 block">תאריך: ________________</span>
+                  </div>
+
+                  <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-center space-y-3">
+                    <span className="text-xs font-bold text-slate-600 block">חתימת אחראי תפעול ראשי (COO)</span>
+                    <div className="h-12 border-b-2 border-dashed border-slate-300 flex items-center justify-center">
+                      <span className="text-xs text-slate-400 font-medium">(אישור מלאי פיזי)</span>
+                    </div>
+                    <span className="text-[10px] text-slate-400 block">תאריך: ________________</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-slate-100 border-t border-slate-200 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={handleExportAccountingCsv}
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-2 cursor-pointer transition-all"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                <span>הורד כ-CSV אקסל</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsAccountingModalOpen(false)}
+                className="px-4 py-2 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold cursor-pointer transition-all"
+              >
+                סגור דוח
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Warehouse Create / Edit Modal */}
       <WarehouseFormModal

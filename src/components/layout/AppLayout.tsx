@@ -78,7 +78,7 @@ export function RoleHeader({
   }
 
   // 2. Storekeeper Header
-  if (role === 'supervisor') {
+  if (role === 'storekeeper' || role === 'supervisor') {
     return (
       <header className="print:hidden sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-blue-100 px-4 py-3 shadow-sm shadow-blue-950/5">
         <div className="max-w-4xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
@@ -139,7 +139,67 @@ export function RoleHeader({
     );
   }
 
-  // 3. Executive Manager Header
+  // 3. Chief Operations Header
+  if (role === 'chief_operations') {
+    return (
+      <header className="print:hidden sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-indigo-100 px-4 py-3 shadow-sm shadow-indigo-950/5">
+        <div className="max-w-5xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
+          <div className="flex items-center gap-2.5">
+            <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-black text-xl shadow-md shadow-indigo-600/25 shrink-0">
+              T
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-indigo-700 font-extrabold">
+                {subtitle || 'שליטה ובקרה חוצת-מחסנים'}
+              </div>
+              <h1 className="text-base font-black text-blue-950 leading-tight">
+                {title || 'Tooly - מרכז תפעול ראשי'}
+              </h1>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            <NetworkSyncPill />
+
+            {cartCount > 0 && onOpenCart && (
+              <button
+                type="button"
+                onClick={onOpenCart}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-black transition-all active:scale-95 shadow-sm cursor-pointer animate-pulse"
+                title="פתיחת סל ניפוק כלים"
+              >
+                <ShoppingCart className="w-3.5 h-3.5" />
+                <span>סל ניפוק ({cartCount})</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => openPinModal()}
+              className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white border border-indigo-700 text-xs font-black shadow-sm transition-all active:scale-95 cursor-pointer"
+              title={`${user.fullName} - לחץ להחלפת משתמש`}
+            >
+              <span>🌐 אחראי תפעול ראשי</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={switchToWorker}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-red-50 text-slate-700 hover:text-red-700 border border-slate-300 hover:border-red-200 text-xs font-bold transition-all cursor-pointer active:scale-95 shadow-sm"
+              title="נעילת עמדה / יציאה - חזרה למצב עובד שטח"
+            >
+              <LogOut className="w-3.5 h-3.5 text-red-600 shrink-0" />
+              <span className="hidden md:inline">נעילת עמדה / יציאה</span>
+              <span className="md:hidden">נעילה</span>
+            </button>
+          </div>
+        </div>
+        {children}
+      </header>
+    );
+  }
+
+  // 4. Executive General Manager Header
   return (
     <header className="print:hidden sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-purple-100 px-4 py-3 shadow-sm shadow-purple-950/5">
       <div className="max-w-5xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
@@ -166,7 +226,7 @@ export function RoleHeader({
             className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-purple-700 hover:bg-purple-800 text-white border border-purple-800 text-xs font-black shadow-sm transition-all active:scale-95 cursor-pointer"
             title={`${user.fullName} - לחץ להחלפת משתמש`}
           >
-            <span>👑 מנהל מפעל ופרויקטים</span>
+            <span>👑 מנהל כללי</span>
           </button>
 
           <button
@@ -196,7 +256,7 @@ export function RoleBottomNav() {
   }
 
   // Storekeeper Mode: Strictly operational tabs
-  if (role === 'supervisor') {
+  if (role === 'storekeeper' || role === 'supervisor') {
     const storekeeperTabs = [
       { href: '/', label: 'סורק וניפוק', icon: Scan },
       { href: '/dashboard/warehouse', label: 'לוח מחסנאי', icon: WarehouseIcon },
@@ -233,12 +293,50 @@ export function RoleBottomNav() {
     );
   }
 
-  // Executive Manager Mode: Dedicated Executive Navigation
+  // Chief Operations Mode: Cross-depot Operations Navigation
+  if (role === 'chief_operations') {
+    const chiefOpsTabs = [
+      { href: '/dashboard/warehouse', label: 'מרכז תפעול ראשי', icon: WarehouseIcon },
+      { href: '/', label: 'סורק וניפוק', icon: Scan },
+      { href: '/history', label: 'יומן תנועות והעברות', icon: HistoryIcon },
+      { href: '/catalog', label: 'קטלוג וכלים', icon: Layers },
+    ];
+
+    return (
+      <nav
+        aria-label="ניווט אחראי תפעול ראשי"
+        className="fixed bottom-0 left-0 right-0 z-50 bg-white/95 backdrop-blur-lg border-t border-indigo-100 px-3 py-2 shadow-lg shadow-indigo-950/5 print:hidden"
+      >
+        <div className="max-w-lg mx-auto grid grid-cols-4 gap-1 sm:gap-2">
+          {chiefOpsTabs.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = pathname === tab.href;
+            return (
+              <Link
+                key={tab.href}
+                href={tab.href}
+                className={`min-h-[54px] rounded-xl flex flex-col items-center justify-center transition-all ${
+                  isActive
+                    ? 'bg-indigo-50 border border-indigo-200 text-indigo-800 font-black shadow-sm'
+                    : 'text-slate-500 hover:text-indigo-700 active:bg-indigo-50/50 font-bold'
+                }`}
+              >
+                <Icon className={`w-5 h-5 ${isActive ? 'text-indigo-700' : 'text-slate-500'}`} />
+                <span className="text-[10px] sm:text-[11px] mt-1">{tab.label}</span>
+              </Link>
+            );
+          })}
+        </div>
+      </nav>
+    );
+  }
+
+  // Executive General Manager Mode: Dedicated Executive Navigation
   const executiveTabs = [
-    { href: '/dashboard/manager', label: 'לוח מנהל מפעל', icon: LayoutDashboard },
+    { href: '/dashboard/manager', label: 'לוח מנהל כללי (BI)', icon: LayoutDashboard },
     { href: '/history', label: 'יומן תנועות ו-GPS', icon: HistoryIcon },
     { href: '/catalog', label: 'קטלוג ושווי מלאי', icon: Layers },
-    { href: '/dashboard/warehouse', label: 'עמדת מחסן', icon: WarehouseIcon },
+    { href: '/dashboard/warehouse', label: 'עמדת תפעול ומחסן', icon: WarehouseIcon },
   ];
 
   return (
@@ -277,11 +375,23 @@ interface AppLayoutProps {
   cartCount?: number;
   onOpenCart?: () => void;
   extraHeader?: React.ReactNode;
-  requiredRole?: 'supervisor' | 'admin' | 'any_elevated';
+  requiredRole?:
+    | 'general_manager'
+    | 'chief_operations'
+    | 'storekeeper'
+    | 'supervisor'
+    | 'admin'
+    | 'any_elevated';
 }
 
 interface AuthGateLoginFormProps {
-  requiredRole?: 'supervisor' | 'admin' | 'any_elevated';
+  requiredRole?:
+    | 'general_manager'
+    | 'chief_operations'
+    | 'storekeeper'
+    | 'supervisor'
+    | 'admin'
+    | 'any_elevated';
 }
 
 function AuthGateLoginForm({ requiredRole }: AuthGateLoginFormProps) {
@@ -312,8 +422,15 @@ function AuthGateLoginForm({ requiredRole }: AuthGateLoginFormProps) {
       } else if (result.user) {
         const userRole = result.user.role;
         const stillUnauthorized =
-          (requiredRole === 'supervisor' && userRole !== 'supervisor' && userRole !== 'admin') ||
-          (requiredRole === 'admin' && userRole !== 'admin') ||
+          ((requiredRole === 'general_manager' || requiredRole === 'admin') &&
+            userRole !== 'general_manager' &&
+            userRole !== 'admin') ||
+          (requiredRole === 'chief_operations' &&
+            userRole !== 'chief_operations' &&
+            userRole !== 'general_manager' &&
+            userRole !== 'admin') ||
+          ((requiredRole === 'storekeeper' || requiredRole === 'supervisor') &&
+            userRole === 'worker') ||
           (requiredRole === 'any_elevated' && userRole === 'worker');
 
         if (stillUnauthorized) {
@@ -431,8 +548,15 @@ export default function AppLayout({
 
   // Role Protection check:
   const isUnauthorized =
-    (requiredRole === 'supervisor' && role !== 'supervisor' && role !== 'admin') ||
-    (requiredRole === 'admin' && role !== 'admin') ||
+    ((requiredRole === 'general_manager' || requiredRole === 'admin') &&
+      role !== 'general_manager' &&
+      role !== 'admin') ||
+    (requiredRole === 'chief_operations' &&
+      role !== 'chief_operations' &&
+      role !== 'general_manager' &&
+      role !== 'admin') ||
+    ((requiredRole === 'storekeeper' || requiredRole === 'supervisor') &&
+      role === 'worker') ||
     (requiredRole === 'any_elevated' && role === 'worker');
 
   if (isUnauthorized) {

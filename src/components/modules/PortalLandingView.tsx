@@ -45,8 +45,14 @@ export default function PortalLandingView({
     try {
       const result = await loginWithCredentials(username.trim(), password.trim() || undefined);
       if (result.success && result.user) {
-        if (result.user.role === 'admin') {
+        if (result.user.role === 'general_manager' || result.user.role === 'admin') {
           router.push('/dashboard/manager');
+        } else if (
+          result.user.role === 'chief_operations' ||
+          result.user.role === 'storekeeper' ||
+          result.user.role === 'supervisor'
+        ) {
+          router.push('/dashboard/warehouse');
         }
       } else {
         setLoginError(result.error || 'פרטי התחברות שגויים');
