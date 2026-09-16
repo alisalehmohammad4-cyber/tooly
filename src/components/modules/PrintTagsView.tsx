@@ -1,36 +1,97 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import QRCode from 'qrcode';
 import {
   Printer,
   Settings2,
   Wrench,
   Sparkles,
+  CheckCircle2,
+  Search,
+  RotateCcw,
+  Tag,
+  Building2,
+  AlertCircle,
+  Layers,
 } from 'lucide-react';
 import AppLayout from '@/components/layout/AppLayout';
+import { getNextAvailableTagNumberAction } from '@/app/actions/assets';
+import { getAssetDetailsByQr, type ScannedAssetDetails } from '@/app/actions/custody';
 
 interface TagItem {
   serial: string;
   qrDataUrl: string;
+  toolName?: string;
+  facilityName?: string;
+  isReprint?: boolean;
 }
 
+type PrintMode = 'batch' | 'reprint';
+
 export default function PrintTagsView() {
-  // Config state
+  // Mode selection: Tab A (Batch) vs Tab B (Reprint)
+  const [activeTab, setActiveTab] = useState<PrintMode>('batch');
+
+  // Tab A: Batch Config State
   const [prefix, setPrefix] = useState<string>('TOOL-');
   const [startNumber, setStartNumber] = useState<number>(1);
+  const [suggestedStartNumber, setSuggestedStartNumber] = useState<number | null>(null);
   const [quantity, setQuantity] = useState<number>(24);
   const [customQtyInput, setCustomQtyInput] = useState<string>('24');
-  const [facilityText, setFacilityText] = useState<string>(
-    'מחסן מרכזי - ציוד קבוע'
-  );
+  const [facilityText, setFacilityText] = useState<string>('מחסן מרכזי - ציוד קבוע');
 
-  // Generated tags state
+  // Tab B: Reprint Damaged Label State
+  const [reprintSearchInput, setReprintSearchInput] = useState<string>('');
+  const [isSearchingReprint, setIsSearchingReprint] = useState<boolean>(false);
+  const [reprintAsset, setReprintAsset] = useState<ScannedAssetDetails | null>(null);
+  const [reprintError, setReprintError] = useState<string | null>(null);
+  const [reprintQuantity, setReprintQuantity] = useState<number>(1);
+
+  // Generated printable tags state
   const [tags, setTags] = useState<TagItem[]>([]);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
 
-  // Compute list of serials
-  const serials = useMemo(() => {
+  // 1. Auto-population: fetch highest existing serial from database and mockStore on mount / prefix change
+  useEffect(() => {
+    let isCurrent = true;
+
+    const fetchNextSequentialNumber = async () => {
+      try {
+        const nextNum = await getNextAvailableTagNumberAction(prefix);
+
+        // Check local storage for offline / last printed fallback
+        let lastPrinted = 0;
+        if (typeof window !== 'undefined') {
+          const stored = localStorage.getItem('tooly_last_printed_end_number');
+          if (stored) {
+            const parsed = parseInt(stored, 10);
+            if (!isNaN(parsed) && parsed > 0) {
+              lastPrinted = parsed;
+            }
+          }
+        }
+
+        const bestNext = Math.max(nextNum, lastPrinted > 0 ? lastPrinted + 1 : 1);
+
+        if (isCurrent) {
+          setSuggestedStartNumber(bestNext);
+          setStartNumber(bestNext);
+        }
+      } catch (err) {
+        console.warn('Error fetching next available tag number:', err);
+      }
+    };
+
+    fetchNextSequentialNumber();
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [prefix]);
+
+  // Compute batch list of serials
+  const batchSerials = useMemo(() => {
     const list: string[] = [];
     const validQty = Math.max(1, Math.min(quantity, 200));
     const padLength = Math.max(4, String(startNumber + validQty).length);
@@ -43,30 +104,72 @@ export default function PrintTagsView() {
     return list;
   }, [prefix, startNumber, quantity]);
 
-  // Generate QR Data URLs asynchronously
+  // Generate QR Data URLs for active mode
   useEffect(() => {
     let isCurrent = true;
 
     const generateQrs = async () => {
       try {
-        const results = await Promise.all(
-          serials.map(async (serial) => {
-            const qrDataUrl = await QRCode.toDataURL(serial, {
-              width: 360,
-              margin: 1,
-              errorCorrectionLevel: 'M',
-              color: {
-                dark: '#000000',
-                light: '#ffffff',
-              },
-            });
-            return { serial, qrDataUrl };
-          })
-        );
+        if (activeTab === 'batch') {
+          const results = await Promise.all(
+            batchSerials.map(async (serial) => {
+              const qrDataUrl = await QRCode.toDataURL(serial, {
+                width: 360,
+                margin: 1,
+                errorCorrectionLevel: 'M',
+                color: {
+                  dark: '#000000',
+                  light: '#ffffff',
+                },
+              });
+              return {
+                serial,
+                qrDataUrl,
+                facilityName: facilityText,
+                isReprint: false,
+              };
+            })
+          );
 
-        if (isCurrent) {
-          setTags(results);
-          setIsGenerating(false);
+          if (isCurrent) {
+            setTags(results);
+            setIsGenerating(false);
+          }
+        } else {
+          // Tab B: Reprint Mode
+          if (!reprintAsset) {
+            if (isCurrent) {
+              setTags([]);
+              setIsGenerating(false);
+            }
+            return;
+          }
+
+          const qrDataUrl = await QRCode.toDataURL(reprintAsset.qrCode, {
+            width: 360,
+            margin: 1,
+            errorCorrectionLevel: 'M',
+            color: {
+              dark: '#000000',
+              light: '#ffffff',
+            },
+          });
+
+          const count = Math.max(1, Math.min(reprintQuantity, 24));
+          const singleTag: TagItem = {
+            serial: reprintAsset.qrCode,
+            qrDataUrl,
+            toolName: reprintAsset.toolName,
+            facilityName: reprintAsset.warehouseName,
+            isReprint: true,
+          };
+
+          const results = Array.from({ length: count }, () => ({ ...singleTag }));
+
+          if (isCurrent) {
+            setTags(results);
+            setIsGenerating(false);
+          }
         }
       } catch (err) {
         console.error('Failed generating QR tags:', err);
@@ -79,7 +182,32 @@ export default function PrintTagsView() {
     return () => {
       isCurrent = false;
     };
-  }, [serials]);
+  }, [activeTab, batchSerials, facilityText, reprintAsset, reprintQuantity]);
+
+  // Handle Reprint Tool Search
+  const handleSearchReprint = useCallback(async () => {
+    const q = reprintSearchInput.trim();
+    if (!q) return;
+
+    setIsSearchingReprint(true);
+    setReprintError(null);
+
+    try {
+      const asset = await getAssetDetailsByQr(q);
+      if (asset) {
+        setReprintAsset(asset);
+        setReprintError(null);
+      } else {
+        setReprintAsset(null);
+        setReprintError(`לא נמצא כלי התואם למזהה/סיומת "${q}". נא לבדוק את המספר או לחפש בקטלוג.`);
+      }
+    } catch (err) {
+      console.error('Error finding asset for reprint:', err);
+      setReprintError('שגיאה באיתור הכלי במערכת.');
+    } finally {
+      setIsSearchingReprint(false);
+    }
+  }, [reprintSearchInput]);
 
   const handleQuantitySelect = (qty: number) => {
     setQuantity(qty);
@@ -96,6 +224,14 @@ export default function PrintTagsView() {
 
   const handlePrint = () => {
     if (typeof window !== 'undefined') {
+      if (activeTab === 'batch') {
+        const endNumber = startNumber + Math.max(1, Math.min(quantity, 200)) - 1;
+        try {
+          localStorage.setItem('tooly_last_printed_end_number', String(endNumber));
+        } catch {
+          // localStorage disabled or private mode
+        }
+      }
       window.print();
     }
   };
@@ -103,7 +239,7 @@ export default function PrintTagsView() {
   return (
     <AppLayout
       title="Tooly - הדפסת תגיות ברקוד"
-      subtitle="הפקת מדבקות A4"
+      subtitle="הפקת מדבקות A4 ורצף סידורי"
       requiredRole="any_elevated"
     >
       {/* Global Print-specific CSS */}
@@ -127,120 +263,313 @@ export default function PrintTagsView() {
       `}</style>
 
       {/* 1. CONFIGURATION DRAWER (Screen-only) */}
-      <div className="print:hidden max-w-4xl mx-auto px-4 py-4">
-        <div className="rounded-2xl border-2 border-blue-100 bg-white p-5 shadow-sm shadow-blue-950/5 space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3 flex-wrap gap-2">
-            <div className="flex items-center gap-2">
-              <Settings2 className="w-5 h-5 text-blue-600" />
-              <h2 className="text-sm font-black uppercase tracking-wider text-blue-950">
-                הגדרות תגיות ומספור סידורי
-              </h2>
+      <div className="print:hidden max-w-4xl mx-auto px-4 py-4 space-y-4">
+        {/* Mode Selector Tabs */}
+        <div className="flex items-center gap-2 p-1.5 bg-slate-100/80 rounded-2xl border border-slate-200">
+          <button
+            type="button"
+            onClick={() => setActiveTab('batch')}
+            className={`flex-1 min-h-[46px] rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer ${
+              activeTab === 'batch'
+                ? 'bg-white text-blue-950 shadow-md shadow-slate-300/40 border border-slate-200'
+                : 'text-slate-600 hover:text-blue-900 hover:bg-white/60'
+            }`}
+          >
+            <Layers className="w-4 h-4 text-blue-600" />
+            <span>הדפסה רציפה (רצף מדבקות חדשות)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('reprint')}
+            className={`flex-1 min-h-[46px] rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer ${
+              activeTab === 'reprint'
+                ? 'bg-white text-blue-950 shadow-md shadow-slate-300/40 border border-slate-200'
+                : 'text-slate-600 hover:text-blue-900 hover:bg-white/60'
+            }`}
+          >
+            <RotateCcw className="w-4 h-4 text-amber-600" />
+            <span>הדפסה חוזרת לכלי קיים (מדבקה בלויה)</span>
+          </button>
+        </div>
+
+        {/* TAB A: BATCH SEQUENTIAL PRINTING CONFIG */}
+        {activeTab === 'batch' && (
+          <div className="rounded-2xl border-2 border-blue-100 bg-white p-5 shadow-sm shadow-blue-950/5 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3 flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <Settings2 className="w-5 h-5 text-blue-600" />
+                <h2 className="text-sm font-black uppercase tracking-wider text-blue-950">
+                  הגדרות תגיות ומספור סידורי
+                </h2>
+              </div>
+
+              <button
+                type="button"
+                onClick={handlePrint}
+                disabled={isGenerating || tags.length === 0}
+                className="min-h-[44px] px-5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-md shadow-blue-600/25 active:scale-95 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Printer className="w-4 h-4 stroke-[2.5]" />
+                <span>הדפס גיליון מדבקות</span>
+              </button>
             </div>
 
-            <button
-              type="button"
-              onClick={handlePrint}
-              disabled={isGenerating || tags.length === 0}
-              className="min-h-[44px] px-5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-md shadow-blue-600/25 active:scale-95 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Printer className="w-4 h-4 stroke-[2.5]" />
-              <span>הדפס גיליון תגיות</span>
-            </button>
-          </div>
+            {/* Smart sequential start number badge */}
+            {suggestedStartNumber && (
+              <div className="flex items-center justify-between flex-wrap gap-2 px-3.5 py-2 rounded-xl bg-emerald-50 text-emerald-900 border border-emerald-200 text-xs font-bold">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>
+                    מספר התחלתי מוצע ברצף:{' '}
+                    <strong className="font-mono text-emerald-950 text-sm">
+                      {suggestedStartNumber}
+                    </strong>{' '}
+                    (על בסיס הכלים הקיימים במערכת)
+                  </span>
+                </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-            {/* Prefix */}
-            <div>
-              <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
-                קידומת מזהה (Prefix)
-              </label>
-              <input
-                type="text"
-                value={prefix}
-                onChange={(e) => setPrefix(e.target.value)}
-                placeholder="TOOL-"
-                className="w-full min-h-[48px] bg-white text-blue-950 font-mono font-bold text-base px-3.5 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none uppercase shadow-sm"
-                dir="ltr"
-              />
-            </div>
-
-            {/* Starting Number */}
-            <div>
-              <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
-                מספר התחלתי
-              </label>
-              <input
-                type="number"
-                min="1"
-                value={startNumber}
-                onChange={(e) => setStartNumber(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                className="w-full min-h-[48px] bg-white text-blue-950 font-mono font-bold text-base px-3.5 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none shadow-sm"
-                dir="ltr"
-              />
-            </div>
-
-            {/* Facility / Warehouse Label */}
-            <div>
-              <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
-                שם האתר / מחסן על התגית
-              </label>
-              <input
-                type="text"
-                value={facilityText}
-                onChange={(e) => setFacilityText(e.target.value)}
-                placeholder="מחסן ראשי"
-                className="w-full min-h-[48px] bg-white text-blue-950 font-bold text-sm px-3.5 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none shadow-sm"
-              />
-            </div>
-
-            {/* Tag Quantity Presets */}
-            <div>
-              <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
-                כמות תגיות להדפסה
-              </label>
-              <div className="grid grid-cols-4 gap-1">
-                {[12, 24, 48].map((qty) => (
+                {startNumber !== suggestedStartNumber && (
                   <button
-                    key={qty}
                     type="button"
-                    onClick={() => handleQuantitySelect(qty)}
-                    className={`min-h-[48px] rounded-xl font-black text-xs transition-all border cursor-pointer ${
-                      quantity === qty
-                        ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-blue-50'
-                    }`}
+                    onClick={() => setStartNumber(suggestedStartNumber)}
+                    className="text-xs font-black text-emerald-700 hover:text-emerald-900 hover:underline cursor-pointer"
                   >
-                    {qty}
+                    שחזר מספר מוצע ברצף
                   </button>
-                ))}
+                )}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+              {/* Prefix */}
+              <div>
+                <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
+                  קידומת מזהה (Prefix)
+                </label>
+                <input
+                  type="text"
+                  value={prefix}
+                  onChange={(e) => setPrefix(e.target.value)}
+                  placeholder="TOOL-"
+                  className="w-full min-h-[48px] bg-white text-blue-950 font-mono font-bold text-base px-3.5 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none uppercase shadow-sm"
+                  dir="ltr"
+                />
+              </div>
+
+              {/* Starting Number (100% editable without locks) */}
+              <div>
+                <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
+                  מספר התחלתי
+                </label>
                 <input
                   type="number"
                   min="1"
-                  max="200"
-                  value={customQtyInput}
-                  onChange={(e) => handleCustomQtyChange(e.target.value)}
-                  placeholder="מותאם"
-                  title="כמות מותאמת אישית"
-                  className="min-h-[48px] w-full text-center bg-white text-blue-950 font-bold text-xs rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none"
+                  value={startNumber}
+                  onChange={(e) => setStartNumber(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                  className="w-full min-h-[48px] bg-white text-blue-950 font-mono font-bold text-base px-3.5 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none shadow-sm"
+                  dir="ltr"
                 />
+              </div>
+
+              {/* Facility / Warehouse Label */}
+              <div>
+                <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
+                  שם האתר / מחסן על התגית
+                </label>
+                <input
+                  type="text"
+                  value={facilityText}
+                  onChange={(e) => setFacilityText(e.target.value)}
+                  placeholder="מחסן ראשי"
+                  className="w-full min-h-[48px] bg-white text-blue-950 font-bold text-sm px-3.5 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none shadow-sm"
+                />
+              </div>
+
+              {/* Tag Quantity Presets (1 to 200) */}
+              <div>
+                <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
+                  כמות תגיות (1 עד 200)
+                </label>
+                <div className="grid grid-cols-4 gap-1">
+                  {[12, 24, 48].map((qty) => (
+                    <button
+                      key={qty}
+                      type="button"
+                      onClick={() => handleQuantitySelect(qty)}
+                      className={`min-h-[48px] rounded-xl font-black text-xs transition-all border cursor-pointer ${
+                        quantity === qty
+                          ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-blue-50'
+                      }`}
+                    >
+                      {qty}
+                    </button>
+                  ))}
+                  <input
+                    type="number"
+                    min="1"
+                    max="200"
+                    value={customQtyInput}
+                    onChange={(e) => handleCustomQtyChange(e.target.value)}
+                    placeholder="מותאם"
+                    title="כמות מותאמת אישית (1 עד 200)"
+                    className="min-h-[48px] w-full text-center bg-white text-blue-950 font-bold text-xs rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Summary / Range Preview */}
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-2 text-xs font-medium text-slate-500 border-t border-slate-100">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-blue-600" />
+                <span>
+                  טווח ברקודים מופק:{' '}
+                  <strong className="font-mono text-blue-950" dir="ltr">
+                    {batchSerials[0]}
+                  </strong>{' '}
+                  עד{' '}
+                  <strong className="font-mono text-blue-950" dir="ltr">
+                    {batchSerials[batchSerials.length - 1]}
+                  </strong>
+                </span>
+              </div>
+              <div className="text-slate-400">
+                סה&quot;כ:{' '}
+                <strong className="text-blue-900 font-bold">{tags.length} תגיות</strong> (מותאם לפורמט גיליון A4)
               </div>
             </div>
           </div>
+        )}
 
-          {/* Summary / Range Preview */}
-          <div className="flex flex-wrap items-center justify-between gap-3 pt-2 text-xs font-medium text-slate-500 border-t border-slate-100">
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-blue-600" />
-              <span>
-                טווח ברקודים מופק: <strong className="font-mono text-blue-950" dir="ltr">{serials[0]}</strong> עד{' '}
-                <strong className="font-mono text-blue-950" dir="ltr">{serials[serials.length - 1]}</strong>
-              </span>
+        {/* TAB B: REPRINT DAMAGED LABEL MODE */}
+        {activeTab === 'reprint' && (
+          <div className="rounded-2xl border-2 border-amber-200 bg-white p-5 shadow-sm space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3 flex-wrap gap-2">
+              <div className="flex items-center gap-2 text-amber-900">
+                <RotateCcw className="w-5 h-5 text-amber-600" />
+                <h2 className="text-sm font-black uppercase tracking-wider">
+                  הדפסת מדבקה חלופית לכלי עבודה קיים
+                </h2>
+              </div>
+
+              {reprintAsset && (
+                <button
+                  type="button"
+                  onClick={handlePrint}
+                  disabled={isGenerating || tags.length === 0}
+                  className="min-h-[44px] px-5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-md shadow-amber-600/25 active:scale-95 transition-all cursor-pointer"
+                >
+                  <Printer className="w-4 h-4 stroke-[2.5]" />
+                  <span>הדפס מדבקה חלופית ({reprintQuantity})</span>
+                </button>
+              )}
             </div>
-            <div className="text-slate-400">
-              סה&quot;כ: <strong className="text-blue-900 font-bold">{tags.length} תגיות</strong> (מותאם לפורמט גיליון A4)
+
+            <p className="text-xs text-slate-600 font-medium">
+              הזן את הברקוד המלא או סיומת המספר (למשל &quot;001&quot;, &quot;WLD-001&quot; או &quot;TOOL-WLD-001&quot;) כדי לשחזר ולהדפיס מדבקת החלפה מדויקת לכלי.
+            </p>
+
+            {/* Search Input Row */}
+            <div className="flex flex-col sm:flex-row gap-3">
+              <div className="relative flex-1">
+                <Search className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                <input
+                  type="text"
+                  value={reprintSearchInput}
+                  onChange={(e) => setReprintSearchInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void handleSearchReprint();
+                  }}
+                  placeholder="הזן ברקוד או סיומת כלי (לדוגמה: 001 או TOOL-WLD-001)..."
+                  className="w-full min-h-[48px] bg-white text-blue-950 font-bold text-sm pr-10 pl-4 py-2 rounded-xl border-2 border-amber-200 focus:border-amber-600 focus:outline-none shadow-sm"
+                  dir="ltr"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleSearchReprint()}
+                  disabled={isSearchingReprint || !reprintSearchInput.trim()}
+                  className="min-h-[48px] px-6 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-sm"
+                >
+                  {isSearchingReprint ? (
+                    <span>מחפש...</span>
+                  ) : (
+                    <>
+                      <Search className="w-4 h-4" />
+                      <span>אתר כלי לשחזור</span>
+                    </>
+                  )}
+                </button>
+
+                {reprintAsset && (
+                  <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1 min-h-[48px]">
+                    <span className="text-xs font-bold text-slate-600">עותקים:</span>
+                    <select
+                      value={reprintQuantity}
+                      onChange={(e) => setReprintQuantity(parseInt(e.target.value, 10))}
+                      className="bg-white border border-slate-300 font-black text-xs rounded-lg px-2 py-1 focus:outline-none cursor-pointer"
+                    >
+                      {[1, 2, 4, 8, 12].map((n) => (
+                        <option key={n} value={n}>
+                          {n}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
             </div>
+
+            {/* Error Message */}
+            {reprintError && (
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-bold flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{reprintError}</span>
+              </div>
+            )}
+
+            {/* Found Asset Card Preview */}
+            {reprintAsset && (
+              <div className="p-4 rounded-xl bg-amber-50/60 border border-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300">
+                      {reprintAsset.brand}
+                    </span>
+                    <span className="font-mono text-xs font-black text-blue-950 bg-white px-2 py-0.5 rounded border border-amber-200" dir="ltr">
+                      {reprintAsset.qrCode}
+                    </span>
+                  </div>
+                  <h3 className="text-sm font-black text-blue-950">{reprintAsset.toolName}</h3>
+                  <div className="text-xs text-slate-600 flex items-center gap-2">
+                    <Building2 className="w-3.5 h-3.5 text-blue-600" />
+                    <span>{reprintAsset.warehouseName}</span>
+                    {reprintAsset.modelNumber && (
+                      <span className="font-mono" dir="ltr">
+                        &bull; {reprintAsset.modelNumber}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handlePrint}
+                    className="min-h-[42px] px-4 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-xs flex items-center gap-1.5 shadow-sm cursor-pointer"
+                  >
+                    <Printer className="w-4 h-4" />
+                    <span>הדפס עכשיו</span>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
-        </div>
+        )}
       </div>
 
       {/* 2. PRINTABLE INDUSTRIAL TAGS GRID (A4 Optimized) */}
@@ -249,11 +578,21 @@ export default function PrintTagsView() {
           <div className="p-12 text-center text-slate-400 font-bold text-sm">
             מייצר תגיות QR באיכות גבוהה...
           </div>
+        ) : tags.length === 0 ? (
+          <div className="p-12 text-center bg-white rounded-2xl border-2 border-dashed border-slate-200 max-w-lg mx-auto space-y-2">
+            <Tag className="w-8 h-8 text-slate-300 mx-auto" />
+            <p className="text-sm font-black text-slate-700">אין תגיות מוכנות להדפסה</p>
+            <p className="text-xs text-slate-500">
+              {activeTab === 'reprint'
+                ? 'חפש כלי קיים לפי ברקוד או סיומת כדי להפיק מדבקה חלופית.'
+                : 'הגדר את המספור והכמות למעלה כדי להפיק גיליון מדבקות.'}
+            </p>
+          </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 print:grid-cols-3 gap-3 print:gap-2">
-            {tags.map((tag) => (
+            {tags.map((tag, idx) => (
               <div
-                key={tag.serial}
+                key={`${tag.serial}-${idx}`}
                 className="industrial-tag bg-white border-2 border-slate-900 rounded-xl p-3 flex flex-col items-center justify-between text-center shadow-sm print:shadow-none print:border-slate-800 print:rounded-lg print:p-2 min-h-[165px]"
               >
                 {/* Tag Header */}
@@ -262,8 +601,14 @@ export default function PrintTagsView() {
                     <Wrench className="w-3.5 h-3.5 text-blue-600 print:text-black" />
                     <span>TOOLY</span>
                   </div>
-                  <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-800 border border-slate-300 print:border-black">
-                    ציוד מבוקר
+                  <span
+                    className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded border ${
+                      tag.isReprint
+                        ? 'bg-amber-100 text-amber-900 border-amber-300 print:border-black'
+                        : 'bg-slate-100 text-slate-800 border-slate-300 print:border-black'
+                    }`}
+                  >
+                    {tag.isReprint ? 'מדבקה חלופית' : 'ציוד מבוקר'}
                   </span>
                 </div>
 
@@ -282,8 +627,13 @@ export default function PrintTagsView() {
                   <div className="text-xs font-mono font-black text-slate-950 tracking-wider select-all" dir="ltr">
                     {tag.serial}
                   </div>
+                  {tag.toolName ? (
+                    <div className="text-[10px] font-bold text-slate-800 truncate mt-0.5">
+                      {tag.toolName}
+                    </div>
+                  ) : null}
                   <div className="text-[9px] font-bold text-slate-600 truncate mt-0.5">
-                    {facilityText}
+                    {tag.facilityName || facilityText}
                   </div>
                 </div>
 

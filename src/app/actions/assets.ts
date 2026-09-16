@@ -10,6 +10,7 @@ import {
   getMockAssetByQr,
   addMockAsset,
   getMockCatalogData,
+  getNextAvailableMockTagNumber,
 } from '@/lib/mockStore';
 
 export interface OnboardFormData {
@@ -401,5 +402,46 @@ export async function getCatalogData(warehouseId?: string): Promise<CatalogDataP
     console.error('getCatalogData exception, returning fallback:', err);
     return getFallbackCatalog(warehouseId);
   }
+}
+
+/**
+ * Detects the highest existing tag/QR serial number matching the prefix
+ * across database assets and mock store, and returns the next sequential number.
+ * e.g., from TOOL-WLD-001 or TOOL-0043 -> returns 44.
+ */
+export async function getNextAvailableTagNumberAction(
+  prefix: string = 'TOOL-'
+): Promise<number> {
+  const cleanPrefix = prefix.trim().toUpperCase();
+
+  if (isSupabaseConfigured()) {
+    try {
+      const { data, error } = await supabase
+        .from('assets')
+        .select('qr_code')
+        .ilike('qr_code', `${cleanPrefix}%`);
+
+      if (!error && data && data.length > 0) {
+        let maxNumber = 0;
+        for (const row of data) {
+          const qr = (row.qr_code || '').trim();
+          const match = qr.match(/(\d+)$/);
+          if (match) {
+            const val = parseInt(match[1], 10);
+            if (!isNaN(val) && val > maxNumber) {
+              maxNumber = val;
+            }
+          }
+        }
+        if (maxNumber > 0) {
+          return maxNumber + 1;
+        }
+      }
+    } catch (err) {
+      console.warn('Error fetching highest QR code from Supabase, falling back to mock:', err);
+    }
+  }
+
+  return getNextAvailableMockTagNumber(cleanPrefix);
 }
 

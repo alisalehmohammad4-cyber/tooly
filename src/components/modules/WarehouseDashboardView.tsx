@@ -80,7 +80,7 @@ export default function WarehouseDashboardView({
   // Open tool passport modal by QR
   const handleOpenPassport = async (qrCode: string) => {
     try {
-      const asset = await getAssetDetailsByQr(qrCode);
+      const asset = await getAssetDetailsByQr(qrCode, selectedWarehouseId);
       if (asset) {
         setPassportAsset(asset);
         setIsPassportOpen(true);

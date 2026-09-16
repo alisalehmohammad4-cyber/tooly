@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Flame,
   Anchor,
@@ -27,6 +27,7 @@ import AppLayout from '@/components/layout/AppLayout';
 import AssetActionModal from '@/components/modules/AssetActionModal';
 import ToolPassportModal from '@/components/modules/ToolPassportModal';
 import type { ScannedAssetDetails } from '@/app/actions/custody';
+import { matchesToolSearch } from '@/lib/search/toolDictionary';
 
 interface CatalogViewProps {
   initialData: CatalogDataPayload;
@@ -59,13 +60,21 @@ function getCategoryIcon(iconName: string | null, className: string = 'w-6 h-6')
   }
 }
 
+type StatusFilter = 'all' | 'available' | 'checked_out';
+
 export default function CatalogView({ initialData }: CatalogViewProps) {
   const { role } = useAuth();
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>(
     initialData.selectedWarehouseId || 'all'
   );
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState<string>('');
+
+  // Rapid debounced search input (100ms debounce)
+  const [rawSearchQuery, setRawSearchQuery] = useState<string>('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState<string>('');
+
+  // 3 Instant status toggle pills
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
 
   // Modal inspection & custody state
   const [selectedAsset, setSelectedAsset] = useState<ScannedAssetDetails | null>(null);
@@ -73,21 +82,51 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
   const [passportAsset, setPassportAsset] = useState<ScannedAssetDetails | null>(null);
   const [isPassportOpen, setIsPassportOpen] = useState<boolean>(false);
 
-  // Filter assets by selected warehouse
-  const filteredAssets = useMemo(() => {
+  // Debounce raw input by 100ms for zero typing lag
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(rawSearchQuery);
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [rawSearchQuery]);
+
+  // 1. Filter assets by selected warehouse
+  const warehouseFilteredAssets = useMemo(() => {
     if (!selectedWarehouseId || selectedWarehouseId === 'all') {
       return initialData.assets;
     }
     return initialData.assets.filter((a) => a.warehouseId === selectedWarehouseId);
   }, [initialData.assets, selectedWarehouseId]);
 
-  // Compute live category tool counts based on filtered assets
+  // Status counts for the pills within current warehouse selection
+  const totalWarehouseToolsCount = warehouseFilteredAssets.length;
+  const availableWarehouseToolsCount = useMemo(
+    () => warehouseFilteredAssets.filter((a) => a.status === 'available').length,
+    [warehouseFilteredAssets]
+  );
+  const inUseWarehouseToolsCount = useMemo(
+    () => warehouseFilteredAssets.filter((a) => a.status === 'checked_out').length,
+    [warehouseFilteredAssets]
+  );
+
+  // 2. Filter assets by status filter
+  const statusFilteredAssets = useMemo(() => {
+    if (statusFilter === 'available') {
+      return warehouseFilteredAssets.filter((a) => a.status === 'available');
+    }
+    if (statusFilter === 'checked_out') {
+      return warehouseFilteredAssets.filter((a) => a.status === 'checked_out');
+    }
+    return warehouseFilteredAssets;
+  }, [warehouseFilteredAssets, statusFilter]);
+
+  // 3. Compute dynamic category tool counts matching active warehouse & status filter
   const categoriesWithCount = useMemo(() => {
     return initialData.categories.map((cat) => ({
       ...cat,
-      toolCount: filteredAssets.filter((a) => a.categoryId === cat.id).length,
+      toolCount: statusFilteredAssets.filter((a) => a.categoryId === cat.id).length,
     }));
-  }, [initialData.categories, filteredAssets]);
+  }, [initialData.categories, statusFilteredAssets]);
 
   // Active category object if in drilldown view
   const activeCategory = useMemo(() => {
@@ -95,24 +134,28 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
     return categoriesWithCount.find((c) => c.id === activeCategoryId) || null;
   }, [activeCategoryId, categoriesWithCount]);
 
-  // Assets inside the currently active category, filtered by search query
-  const categoryAssets = useMemo(() => {
-    if (!activeCategoryId) return [];
-    let items = filteredAssets.filter((a) => a.categoryId === activeCategoryId);
+  // 4. Multi-field search filtering across:
+  // 1. Tool Name (Hebrew & English)
+  // 2. Brand
+  // 3. Model Number
+  // 4. QR Code / Serial Number (including suffix match)
+  // 5. Assigned Worker Name (`current_assigned_worker`)
+  const displayedAssets = useMemo(() => {
+    let list = statusFilteredAssets;
 
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
-      items = items.filter(
-        (a) =>
-          a.toolName.toLowerCase().includes(q) ||
-          a.brand.toLowerCase().includes(q) ||
-          a.qrCode.toLowerCase().includes(q) ||
-          (a.modelNumber && a.modelNumber.toLowerCase().includes(q)) ||
-          (a.currentAssignedWorker && a.currentAssignedWorker.toLowerCase().includes(q))
-      );
+    if (activeCategoryId) {
+      list = list.filter((a) => a.categoryId === activeCategoryId);
     }
-    return items;
-  }, [filteredAssets, activeCategoryId, searchQuery]);
+
+    if (debouncedSearchQuery.trim()) {
+      list = list.filter((a) => matchesToolSearch(a, debouncedSearchQuery));
+    }
+
+    return list;
+  }, [statusFilteredAssets, activeCategoryId, debouncedSearchQuery]);
+
+  const isSearching = debouncedSearchQuery.trim().length > 0;
+  const showToolList = Boolean(activeCategoryId || isSearching);
 
   return (
     <AppLayout
@@ -126,7 +169,8 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
               type="button"
               onClick={() => {
                 setActiveCategoryId(null);
-                setSearchQuery('');
+                setRawSearchQuery('');
+                setDebouncedSearchQuery('');
               }}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-50 text-blue-800 border border-blue-200 text-xs font-bold hover:bg-blue-100 transition-colors cursor-pointer"
             >
@@ -137,15 +181,15 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
         ) : undefined
       }
     >
-      <div className="max-w-lg mx-auto px-4 py-4 space-y-5">
-        {/* Warehouse Filter Bar */}
+      <div className="max-w-lg mx-auto px-4 py-4 space-y-4">
+        {/* 1. Warehouse Filter Bar */}
         <div>
           <div className="relative">
             <Building2 className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-600 pointer-events-none" />
             <select
               value={selectedWarehouseId}
               onChange={(e) => setSelectedWarehouseId(e.target.value)}
-              className="w-full min-h-[50px] bg-white text-blue-950 font-bold text-sm pr-10 pl-9 py-2.5 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none appearance-none cursor-pointer transition-colors shadow-sm"
+              className="w-full min-h-[48px] bg-white text-blue-950 font-bold text-sm pr-10 pl-9 py-2.5 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none appearance-none cursor-pointer transition-colors shadow-sm"
             >
               <option value="all">כל המחסנים והאתרים הפעילים</option>
               {initialData.warehouses.map((wh) => (
@@ -161,8 +205,96 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
           </div>
         </div>
 
-        {/* VIEW A: CATEGORIES OVERVIEW GRID */}
-        {!activeCategoryId && (
+        {/* 2. Rapid Search Bar with 100ms Debounce */}
+        <div className="space-y-2.5">
+          <div className="relative">
+            <Search className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+            <input
+              type="text"
+              value={rawSearchQuery}
+              onChange={(e) => setRawSearchQuery(e.target.value)}
+              placeholder="חיפוש לפי כלי, מותג (דיוולט/מקיטה), דגם, מק״ט, או שם עובד..."
+              className="w-full min-h-[48px] bg-white text-blue-950 font-medium text-sm pr-10 pl-14 py-2.5 rounded-xl border-2 border-blue-100 focus:border-blue-600 focus:outline-none shadow-sm placeholder:text-slate-400"
+            />
+            {rawSearchQuery && (
+              <button
+                type="button"
+                onClick={() => {
+                  setRawSearchQuery('');
+                  setDebouncedSearchQuery('');
+                }}
+                className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400 hover:text-blue-600 cursor-pointer"
+              >
+                נקה
+              </button>
+            )}
+          </div>
+
+          {/* 3 Instant Status Toggle Pills */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+            <button
+              type="button"
+              onClick={() => setStatusFilter('all')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer whitespace-nowrap border-2 flex items-center gap-1.5 ${
+                statusFilter === 'all'
+                  ? 'bg-blue-600 text-white border-blue-600 shadow-sm shadow-blue-500/20'
+                  : 'bg-white text-slate-700 border-blue-100 hover:border-blue-300 hover:bg-blue-50/50'
+              }`}
+            >
+              <span>כל הכלים</span>
+              <span
+                className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                  statusFilter === 'all' ? 'bg-blue-500 text-white' : 'bg-slate-100 text-slate-700'
+                }`}
+              >
+                {totalWarehouseToolsCount}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setStatusFilter('available')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer whitespace-nowrap border-2 flex items-center gap-1.5 ${
+                statusFilter === 'available'
+                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm shadow-emerald-500/20'
+                  : 'bg-white text-emerald-800 border-emerald-200 hover:border-emerald-300 hover:bg-emerald-50/50'
+              }`}
+            >
+              <span className="text-xs">🟢</span>
+              <span>זמין במלאי בלבד</span>
+              <span
+                className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                  statusFilter === 'available' ? 'bg-emerald-500 text-white' : 'bg-emerald-100 text-emerald-800'
+                }`}
+              >
+                {availableWarehouseToolsCount}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setStatusFilter('checked_out')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer whitespace-nowrap border-2 flex items-center gap-1.5 ${
+                statusFilter === 'checked_out'
+                  ? 'bg-amber-600 text-white border-amber-600 shadow-sm shadow-amber-500/20'
+                  : 'bg-white text-amber-900 border-amber-200 hover:border-amber-300 hover:bg-amber-50/50'
+              }`}
+            >
+              <span className="text-xs">🟠</span>
+              <span>בשימוש בשטח</span>
+              <span
+                className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                  statusFilter === 'checked_out' ? 'bg-amber-500 text-white' : 'bg-amber-100 text-amber-900'
+                }`}
+              >
+                {inUseWarehouseToolsCount}
+              </span>
+            </button>
+          </div>
+        </div>
+
+        {/* VIEW A: CATEGORIES OVERVIEW GRID (when not drilling down and not searching) */}
+        {!showToolList && (
           <div>
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
@@ -172,7 +304,7 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
                 </h2>
               </div>
               <span className="text-xs text-slate-500 font-bold">
-                סה&quot;כ {filteredAssets.length} כלים במלאי
+                סה&quot;כ {statusFilteredAssets.length} כלים
               </span>
             </div>
 
@@ -183,7 +315,6 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
                   type="button"
                   onClick={() => {
                     setActiveCategoryId(cat.id);
-                    setSearchQuery('');
                   }}
                   className="p-4 rounded-2xl bg-white border-2 border-blue-100 hover:border-blue-400 hover:shadow-md transition-all flex items-center justify-between text-right group active:scale-[0.98] cursor-pointer"
                 >
@@ -196,7 +327,7 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
                         {cat.name}
                       </h3>
                       <p className="text-xs text-slate-500 font-bold mt-0.5">
-                        {cat.toolCount} כלים רשומים
+                        {cat.toolCount} כלים
                       </p>
                     </div>
                   </div>
@@ -207,65 +338,69 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
           </div>
         )}
 
-        {/* VIEW B: CATEGORY DRILLDOWN & TOOL LIST */}
-        {activeCategoryId && (
-          <div className="space-y-4">
-            {/* Search Filter Inside Category */}
-            <div className="relative">
-              <Search className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="חיפוש לפי שם כלי, דגם או מספר סידורי..."
-                className="w-full min-h-[50px] bg-white text-blue-950 font-medium text-sm pr-10 pl-14 py-2.5 rounded-xl border-2 border-blue-100 focus:border-blue-600 focus:outline-none shadow-sm placeholder:text-slate-400"
-              />
-              {searchQuery && (
+        {/* VIEW B: TOOL LIST (Category Drilldown OR Search Results) */}
+        {showToolList && (
+          <div className="space-y-3.5">
+            {/* Results Header / Breadcrumb */}
+            <div className="flex items-center justify-between text-xs font-bold text-slate-600 px-1">
+              <div>
+                {activeCategory ? (
+                  <span>
+                    קטגוריה: <strong>{activeCategory.name}</strong> &bull; נמצאו{' '}
+                    <strong className="text-blue-900">{displayedAssets.length}</strong> כלים
+                  </span>
+                ) : (
+                  <span>
+                    תוצאות חיפוש בכל הקטלוג: נמצאו{' '}
+                    <strong className="text-blue-900">{displayedAssets.length}</strong> כלים
+                  </span>
+                )}
+              </div>
+
+              {activeCategoryId ? (
                 <button
                   type="button"
-                  onClick={() => setSearchQuery('')}
-                  className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400 hover:text-blue-600 cursor-pointer"
+                  onClick={() => {
+                    setActiveCategoryId(null);
+                    setRawSearchQuery('');
+                    setDebouncedSearchQuery('');
+                  }}
+                  className="text-blue-600 hover:underline flex items-center gap-1 cursor-pointer font-black"
                 >
-                  נקה
+                  <span>כל הקטגוריות</span>
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRawSearchQuery('');
+                    setDebouncedSearchQuery('');
+                  }}
+                  className="text-slate-500 hover:text-blue-600 flex items-center gap-1 cursor-pointer font-bold"
+                >
+                  <span>סגור חיפוש</span>
                 </button>
               )}
             </div>
 
-            {/* Results Count Header */}
-            <div className="flex items-center justify-between text-xs font-bold text-slate-500 px-1">
-              <span>
-                נמצאו <strong>{categoryAssets.length}</strong> כלים
-              </span>
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveCategoryId(null);
-                  setSearchQuery('');
-                }}
-                className="text-blue-600 hover:underline flex items-center gap-1 cursor-pointer font-black"
-              >
-                <span>חזור לכל הקטגוריות</span>
-                <ChevronLeft className="w-3.5 h-3.5" />
-              </button>
-            </div>
-
             {/* Empty State */}
-            {categoryAssets.length === 0 && (
+            {displayedAssets.length === 0 && (
               <div className="p-8 rounded-2xl border-2 border-dashed border-slate-200 bg-white text-center space-y-2">
                 <Wrench className="w-8 h-8 text-slate-300 mx-auto" />
                 <p className="text-sm font-black text-slate-700">
-                  לא נמצאו כלים בקטגוריה זו
+                  לא נמצאו כלים התואמים לחיפוש
                 </p>
                 <p className="text-xs text-slate-500">
-                  נסה לשנות את הסינון או המחסן שנבחר.
+                  נסה לבדוק איות, להשתמש במונח כללי (כגון &quot;פטישון&quot; או &quot;דוולט&quot;), או לשנות את המחסן והסטטוס.
                 </p>
               </div>
             )}
 
             {/* Tool Cards List */}
-            {categoryAssets.length > 0 && (
+            {displayedAssets.length > 0 && (
               <div className="space-y-3">
-                {categoryAssets.map((asset) => {
+                {displayedAssets.map((asset) => {
                   const isAvailable = asset.status === 'available';
                   const isCheckedOut = asset.status === 'checked_out';
                   const isMaintenance = asset.status === 'maintenance';

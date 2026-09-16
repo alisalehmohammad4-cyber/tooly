@@ -17,6 +17,10 @@ import type {
   AuditHistoryFilters,
 } from '@/app/actions/history';
 import type { ScannedAssetDetails } from '@/app/actions/custody';
+import {
+  matchesCodeSuffix,
+  pickBestAssetMatch,
+} from '@/lib/search/toolDictionary';
 
 export interface WarehouseAdminItem {
   id: string;
@@ -170,6 +174,7 @@ export interface UnifiedAssetItem {
   id: string;
   qrCode: string;
   nfcUid?: string;
+  serialNumber?: string | null;
   toolName: string;
   brand: string;
   modelNumber: string | null;
@@ -794,19 +799,7 @@ export function getMockAssets(): UnifiedAssetItem[] {
   return assetsStore;
 }
 
-/**
- * Get asset by QR code or ID from unified mock store.
- */
-export function getMockAssetByQr(qrCode: string): ScannedAssetDetails | null {
-  const clean = qrCode.trim().toUpperCase();
-  const asset = assetsStore.find(
-    (a) =>
-      a.qrCode.toUpperCase() === clean ||
-      a.id.toUpperCase() === clean ||
-      (a.nfcUid && a.nfcUid.toUpperCase() === clean)
-  );
-  if (!asset) return null;
-
+function toScannedAssetDetails(asset: UnifiedAssetItem): ScannedAssetDetails {
   return {
     id: asset.id,
     qrCode: asset.qrCode,
@@ -830,6 +823,52 @@ export function getMockAssetByQr(qrCode: string): ScannedAssetDetails | null {
     expectedReturnDate: asset.expectedReturnDate,
     accessories: asset.accessories,
   };
+}
+
+/**
+ * Get asset by QR code, NFC UID, or suffix resolution from unified mock store.
+ * 1. Attempt exact match on qr_code, nfc_uid, or id.
+ * 2. If no exact match: perform suffix matching on qr_code, serial_number, and model_number.
+ * 3. If multiple match, return the exact active asset matching the facility.
+ */
+export function getMockAssetByQr(
+  qrCode: string,
+  facilityId?: string
+): ScannedAssetDetails | null {
+  const clean = qrCode.trim();
+  if (!clean) return null;
+  const cleanUpper = clean.toUpperCase();
+
+  // 1. Exact match on qr_code, nfc_uid, id, or serial_number
+  const exact = assetsStore.find(
+    (a) =>
+      a.qrCode.toUpperCase() === cleanUpper ||
+      a.id.toUpperCase() === cleanUpper ||
+      (a.nfcUid && a.nfcUid.toUpperCase() === cleanUpper) ||
+      (a.serialNumber && a.serialNumber.toUpperCase() === cleanUpper)
+  );
+  if (exact) {
+    return toScannedAssetDetails(exact);
+  }
+
+  // 2. Suffix matching on qr_code, serial_number, and model_number
+  const suffixMatches = assetsStore.filter((a) => {
+    return (
+      matchesCodeSuffix(a.qrCode, clean) ||
+      (a.serialNumber && matchesCodeSuffix(a.serialNumber, clean)) ||
+      (a.modelNumber && matchesCodeSuffix(a.modelNumber, clean))
+    );
+  });
+
+  if (suffixMatches.length > 0) {
+    // 3. If multiple match, return the exact active asset matching the facility
+    const best = pickBestAssetMatch(suffixMatches, clean, facilityId);
+    if (best) {
+      return toScannedAssetDetails(best);
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -1323,4 +1362,30 @@ export function getMockUserByCredentials(identifier: string, secret?: string): A
   }
 
   return null;
+}
+
+/**
+ * Scans all existing mock asset QR codes and extracts the maximum integer suffix
+ * matching the given prefix. Returns max + 1 (defaulting to 1 if no matches).
+ * e.g., from TOOL-WLD-001 or TOOL-0043 -> extracts max number.
+ */
+export function getNextAvailableMockTagNumber(prefix: string = 'TOOL-'): number {
+  const cleanPrefix = prefix.trim().toUpperCase();
+  let maxNumber = 0;
+
+  for (const asset of assetsStore) {
+    const qr = (asset.qrCode || '').trim().toUpperCase();
+    if (qr.startsWith(cleanPrefix) || cleanPrefix === '' || qr.includes(cleanPrefix)) {
+      // Extract trailing digits
+      const match = qr.match(/(\d+)$/);
+      if (match) {
+        const val = parseInt(match[1], 10);
+        if (!isNaN(val) && val > maxNumber) {
+          maxNumber = val;
+        }
+      }
+    }
+  }
+
+  return maxNumber > 0 ? maxNumber + 1 : 1;
 }

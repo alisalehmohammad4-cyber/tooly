@@ -14,6 +14,10 @@ import {
 } from '@/core/assets/custody.schema';
 import type { AssetReservation } from '@/types/domain';
 import { appendAuditHistoryEntry } from '@/app/actions/history';
+import {
+  matchesCodeSuffix,
+  pickBestAssetMatch,
+} from '@/lib/search/toolDictionary';
 
 export interface ScannedAssetDetails {
   id: string;
@@ -122,18 +126,77 @@ function checkToolLockout(asset: ScannedAssetDetails): { allowed: boolean; error
   return { allowed: true };
 }
 
+interface JoinedAssetData {
+  id: string;
+  qr_code: string;
+  nfc_uid?: string | null;
+  status: ScannedAssetDetails['status'];
+  condition: ScannedAssetDetails['condition'];
+  current_assigned_worker: string | null;
+  current_warehouse_id: string;
+  version: number;
+  purchase_date?: string;
+  purchase_cost?: number;
+  warranty_until?: string;
+  safety_inspection_due?: string;
+  is_locked?: boolean;
+  lock_reason?: string;
+  reservation?: AssetReservation | null;
+  tool_models: {
+    id: string;
+    name: string;
+    brand: string;
+    model_number: string | null;
+  } | null;
+  warehouses: {
+    id: string;
+    name: string;
+    code: string;
+  } | null;
+}
+
+function mapJoinedRowToScannedAsset(row: JoinedAssetData): ScannedAssetDetails {
+  return {
+    id: row.id,
+    qrCode: row.qr_code,
+    nfcUid: row.nfc_uid || undefined,
+    status: row.status,
+    condition: row.condition,
+    currentAssignedWorker: row.current_assigned_worker,
+    currentWarehouseId: row.current_warehouse_id,
+    warehouseName: row.warehouses?.name || 'Assigned Facility',
+    warehouseCode: row.warehouses?.code || 'FAC',
+    toolName: row.tool_models?.name || 'Registered Tool',
+    brand: row.tool_models?.brand || 'Standard',
+    modelNumber: row.tool_models?.model_number || null,
+    version: row.version || 1,
+    purchaseDate: row.purchase_date,
+    purchaseCost: row.purchase_cost,
+    warrantyUntil: row.warranty_until,
+    safetyInspectionDue: row.safety_inspection_due,
+    isLocked: row.is_locked,
+    lockReason: row.lock_reason,
+    reservation: row.reservation,
+  };
+}
+
 /**
  * Retrieves full asset details by QR Code, joining tool model and warehouse.
+ * 1. First, attempt exact match on qr_code and nfc_uid.
+ * 2. If no exact match: perform suffix matching (qr_code ILIKE '%' || input or serial_number ILIKE '%' || input).
+ * 3. If multiple match, return the exact active asset matching the facility.
  */
 export async function getAssetDetailsByQr(
-  qrCode: string
+  qrCode: string,
+  facilityId?: string
 ): Promise<ScannedAssetDetails | null> {
   const cleanQr = qrCode.trim();
   if (!cleanQr) return null;
 
   if (isSupabaseConfigured()) {
     try {
-      const { data, error } = await supabase
+      // 1. First, attempt exact match on qr_code, nfc_uid, or id
+      const { data: exactData, error: exactError } = await supabase
         .from('assets')
         .select(`
           id,
@@ -166,76 +229,78 @@ export async function getAssetDetailsByQr(
         .or(`qr_code.eq.${cleanQr},nfc_uid.eq.${cleanQr},id.eq.${cleanQr}`)
         .maybeSingle();
 
-      if (!error && data) {
-        interface JoinedData {
-          id: string;
-          qr_code: string;
-          nfc_uid?: string | null;
-          status: ScannedAssetDetails['status'];
-          condition: ScannedAssetDetails['condition'];
-          current_assigned_worker: string | null;
-          current_warehouse_id: string;
-          version: number;
-          purchase_date?: string;
-          purchase_cost?: number;
-          warranty_until?: string;
-          safety_inspection_due?: string;
-          is_locked?: boolean;
-          lock_reason?: string;
-          reservation?: AssetReservation | null;
-          tool_models: {
-            id: string;
-            name: string;
-            brand: string;
-            model_number: string | null;
-          } | null;
-          warehouses: {
-            id: string;
-            name: string;
-            code: string;
-          } | null;
-        }
+      if (!exactError && exactData) {
+        return mapJoinedRowToScannedAsset(exactData as unknown as JoinedAssetData);
+      }
 
-        const row = data as unknown as JoinedData;
-        return {
-          id: row.id,
-          qrCode: row.qr_code,
-          nfcUid: row.nfc_uid || undefined,
-          status: row.status,
-          condition: row.condition,
-          currentAssignedWorker: row.current_assigned_worker,
-          currentWarehouseId: row.current_warehouse_id,
-          warehouseName: row.warehouses?.name || 'Assigned Facility',
-          warehouseCode: row.warehouses?.code || 'FAC',
-          toolName: row.tool_models?.name || 'Registered Tool',
-          brand: row.tool_models?.brand || 'Standard',
-          modelNumber: row.tool_models?.model_number || null,
-          version: row.version || 1,
-          purchaseDate: row.purchase_date,
-          purchaseCost: row.purchase_cost,
-          warrantyUntil: row.warranty_until,
-          safetyInspectionDue: row.safety_inspection_due,
-          isLocked: row.is_locked,
-          lockReason: row.lock_reason,
-          reservation: row.reservation,
-        };
+      // 2. Suffix matching in Supabase: qr_code ILIKE '%' || input
+      const { data: suffixData, error: suffixError } = await supabase
+        .from('assets')
+        .select(`
+          id,
+          qr_code,
+          nfc_uid,
+          status,
+          condition,
+          current_assigned_worker,
+          current_warehouse_id,
+          version,
+          purchase_date,
+          purchase_cost,
+          warranty_until,
+          safety_inspection_due,
+          is_locked,
+          lock_reason,
+          reservation,
+          tool_models:tool_model_id (
+            id,
+            name,
+            brand,
+            model_number
+          ),
+          warehouses:current_warehouse_id (
+            id,
+            name,
+            code
+          )
+        `)
+        .ilike('qr_code', `%${cleanQr}`);
+
+      if (!suffixError && suffixData && suffixData.length > 0) {
+        const typedRows = suffixData as unknown as JoinedAssetData[];
+        const best = pickBestAssetMatch(typedRows, cleanQr, facilityId);
+        if (best) {
+          return mapJoinedRowToScannedAsset(best);
+        }
       }
     } catch (err) {
       console.warn('Supabase query error in getAssetDetailsByQr, falling back to mock:', err);
     }
   }
 
-  // Fallback lookup from unified mockStore
-  const mockItem = getMockAssetByQr(cleanQr);
+  // Fallback lookup from unified mockStore (with suffix and facility disambiguation)
+  const mockItem = getMockAssetByQr(cleanQr, facilityId);
   if (mockItem) {
     return mockItem;
   }
 
-  // Fallback lookup by QR (case-insensitive)
+  // Fallback lookup from local in-memory registry:
+  // 1. Exact match
   const normalized = cleanQr.toUpperCase();
   for (const key of Object.keys(FALLBACK_CUSTODY_ASSETS)) {
     if (key.toUpperCase() === normalized) {
       return { ...FALLBACK_CUSTODY_ASSETS[key] };
+    }
+  }
+
+  // 2. Suffix match in fallback registry
+  const fallbackMatches = Object.values(FALLBACK_CUSTODY_ASSETS).filter((a) =>
+    matchesCodeSuffix(a.qrCode, cleanQr)
+  );
+  if (fallbackMatches.length > 0) {
+    const bestFallback = pickBestAssetMatch(fallbackMatches, cleanQr, facilityId);
+    if (bestFallback) {
+      return { ...bestFallback };
     }
   }
 
