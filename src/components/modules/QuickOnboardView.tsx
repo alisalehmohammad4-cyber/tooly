@@ -28,6 +28,8 @@ import {
   PackagePlus,
   Radio,
   Smartphone,
+  Type,
+  Camera,
 } from 'lucide-react';
 import type { Category, Warehouse, AssetCondition } from '@/types/domain';
 import { checkQrCodeExists, onboardAsset } from '@/app/actions/assets';
@@ -44,6 +46,7 @@ import WorkerToolCard from '@/components/modules/WorkerToolCard';
 import { getCurrentGpsCoordinates } from '@/lib/geo';
 import { getCachedAssetByQr, cacheAsset } from '@/lib/offline/offlineDb';
 import { useWebNfc } from '@/lib/nfc/useWebNfc';
+import { useOcrScanner } from '@/lib/ocr/useOcrScanner';
 
 interface QuickOnboardViewProps {
   categories: Category[];
@@ -111,6 +114,21 @@ export default function QuickOnboardView({
   // Camera Hardware Controls (Torch & Barcode Mode)
   const [isTorchOn, setIsTorchOn] = useState<boolean>(false);
   const [scanMode, setScanMode] = useState<'qr' | 'barcode'>('qr');
+
+  // OCR Text Scanner (Lazy initialization on demand)
+  const [isOcrMode, setIsOcrMode] = useState<boolean>(false);
+  const [ocrScanFeedback, setOcrScanFeedback] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
+
+  const {
+    isInitializing: isOcrInitializing,
+    isRecognizing: isOcrRecognizing,
+    ocrProgress,
+    initOcr,
+    recognizeFrame,
+  } = useOcrScanner();
 
   // Web NFC Hook (Android Chrome direct reading/writing & iPhone deep-link support)
   const {
@@ -362,6 +380,82 @@ export default function QuickOnboardView({
     },
     [isRapidDispatchMode, stopScanner, handleAddToCart, role]
   );
+
+  // Handle Barcode & Text OCR Detections directly into the scan pipeline
+  const handleBarcodeDetected = useCallback(
+    (detectedCode: string) => {
+      handleScanSuccess(detectedCode);
+    },
+    [handleScanSuccess]
+  );
+
+  // Toggle OCR Mode & initialize Tesseract worker lazily on demand
+  const handleToggleOcrMode = useCallback(() => {
+    setIsOcrMode((prev) => {
+      const next = !prev;
+      if (next) {
+        // Pre-warm OCR worker in background
+        void initOcr();
+        setOcrScanFeedback({
+          type: 'success',
+          message: 'מצב סריקת טקסט OCR פעיל. מקם את הטקסט במסגרת ולחץ "סרוק טקסט עכשיו".',
+        });
+      } else {
+        setOcrScanFeedback(null);
+      }
+      return next;
+    });
+  }, [initOcr]);
+
+  // Trigger OCR Snapshot Recognition from active camera video feed
+  const handleTriggerOcrScan = useCallback(async () => {
+    if (isOcrRecognizing || isOcrInitializing) return;
+
+    // Locate the active video element injected by Html5Qrcode into #qr-reader
+    const videoElement = document.querySelector<HTMLVideoElement>('#qr-reader video');
+    if (!videoElement) {
+      setOcrScanFeedback({
+        type: 'error',
+        message: 'המצלמה אינה פעילה כרגע. ודא שהסורק פתוח ופעיל.',
+      });
+      return;
+    }
+
+    setOcrScanFeedback(null);
+
+    try {
+      const recognized = await recognizeFrame(videoElement);
+      if (recognized) {
+        // Haptic feedback on successful text recognition
+        if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+          try {
+            navigator.vibrate([100, 50, 100]);
+          } catch {
+            // ignore if unsupported
+          }
+        }
+
+        setOcrScanFeedback({
+          type: 'success',
+          message: `טקסט זוהה בהצלחה: ${recognized}`,
+        });
+
+        // Route directly through handleBarcodeDetected just like a normal QR scan
+        handleBarcodeDetected(recognized);
+      } else {
+        setOcrScanFeedback({
+          type: 'error',
+          message: 'לא זוהה קוד כלי ברור. קרב את המצלמה למספר הכלי ונסה שוב.',
+        });
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'שגיאה במהלך סריקת הטקסט';
+      setOcrScanFeedback({
+        type: 'error',
+        message: msg,
+      });
+    }
+  }, [isOcrRecognizing, isOcrInitializing, recognizeFrame, handleBarcodeDetected]);
 
   // 1. Universal iOS Background NFC Resolver & URL Deep-Link listener (?nfc=... or ?tool=...)
   useEffect(() => {
@@ -945,27 +1039,46 @@ export default function QuickOnboardView({
               <div className="relative w-full aspect-square max-h-72 rounded-xl overflow-hidden bg-slate-900 border-2 border-blue-200 flex flex-col items-center justify-center shadow-inner">
                 <div id="qr-reader" className="w-full h-full" />
 
-                {/* FLOATING CAMERA HARDWARE CONTROLS (Torch & 1D/QR Switcher) */}
+                {/* FLOATING CAMERA HARDWARE CONTROLS (Torch, 1D Barcode & OCR Text Scanner) */}
                 {scannerActive && !scannerError && (
-                  <div className="absolute top-3 inset-x-3 flex items-center justify-between pointer-events-none z-20">
-                    <button
-                      type="button"
-                      onClick={handleToggleScanMode}
-                      className="pointer-events-auto px-2.5 py-1.5 rounded-lg bg-slate-900/80 backdrop-blur-md text-white text-[11px] font-bold border border-white/20 flex items-center gap-1.5 shadow-lg active:scale-95 transition-all cursor-pointer hover:bg-slate-800"
-                      title="החלף בין סריקת ברקוד רחב (1D) לקוד QR"
-                    >
-                      {scanMode === 'barcode' ? (
-                        <>
-                          <Barcode className="w-3.5 h-3.5 text-blue-400" />
-                          <span>ברקוד רחב (1D)</span>
-                        </>
-                      ) : (
-                        <>
-                          <QrCode className="w-3.5 h-3.5 text-blue-400" />
-                          <span>קוד QR</span>
-                        </>
-                      )}
-                    </button>
+                  <div className="absolute top-2 inset-x-2 flex flex-wrap items-center justify-between gap-1.5 pointer-events-none z-20">
+                    <div className="flex flex-wrap items-center gap-1.5 pointer-events-auto">
+                      <button
+                        type="button"
+                        onClick={handleToggleScanMode}
+                        className="px-2.5 py-1.5 rounded-lg bg-slate-900/80 backdrop-blur-md text-white text-[11px] font-bold border border-white/20 flex items-center gap-1.5 shadow-lg active:scale-95 transition-all cursor-pointer hover:bg-slate-800"
+                        title="החלף בין סריקת ברקוד רחב (1D) לקוד QR"
+                      >
+                        {scanMode === 'barcode' ? (
+                          <>
+                            <Barcode className="w-3.5 h-3.5 text-blue-400" />
+                            <span>ברקוד רחב (1D)</span>
+                          </>
+                        ) : (
+                          <>
+                            <QrCode className="w-3.5 h-3.5 text-blue-400" />
+                            <span>קוד QR</span>
+                          </>
+                        )}
+                      </button>
+
+                      {/* Dedicated OCR Text Scanner Toggle Button */}
+                      <button
+                        type="button"
+                        onClick={handleToggleOcrMode}
+                        className={`px-2.5 py-1.5 rounded-lg backdrop-blur-md border flex items-center gap-1.5 shadow-lg active:scale-95 transition-all cursor-pointer ${
+                          isOcrMode
+                            ? 'bg-amber-500 text-slate-950 border-amber-300 ring-2 ring-amber-400/50'
+                            : 'bg-slate-900/80 text-white border-white/20 hover:bg-slate-800'
+                        }`}
+                        title="זיהוי טקסט OCR (כאשר ה-QR מחוק)"
+                      >
+                        <Type className={`w-3.5 h-3.5 ${isOcrMode ? 'text-slate-950 stroke-[2.5]' : 'text-amber-400'}`} />
+                        <span className="text-[11px] font-bold">
+                          {isOcrMode ? '🔤 זיהוי טקסט פעיל' : '🔤 זיהוי טקסט OCR (כאשר ה-QR מחוק)'}
+                        </span>
+                      </button>
+                    </div>
 
                     <button
                       type="button"
@@ -986,8 +1099,32 @@ export default function QuickOnboardView({
                 )}
 
                 {/* Laser Alignment Guide in Barcode Mode */}
-                {scanMode === 'barcode' && scannerActive && !scannerError && (
+                {scanMode === 'barcode' && !isOcrMode && scannerActive && !scannerError && (
                   <div className="absolute inset-x-6 top-1/2 -translate-y-1/2 h-0.5 bg-red-500/80 shadow-[0_0_8px_rgba(239,68,68,0.9)] pointer-events-none z-10 animate-pulse" />
+                )}
+
+                {/* Focused Horizontal Text Targeting Bracket & Guidance Overlay in OCR Mode */}
+                {isOcrMode && scannerActive && !scannerError && (
+                  <div className="absolute inset-0 pointer-events-none z-10 flex flex-col items-center justify-center p-3">
+                    <div className="absolute inset-0 bg-slate-950/40" />
+
+                    {/* Focused horizontal targeting bracket */}
+                    <div className="relative w-[85%] h-20 rounded-lg border-2 border-amber-400 bg-amber-400/5 shadow-[0_0_20px_rgba(245,158,11,0.5)] flex items-center justify-center z-10">
+                      {/* Corner accents */}
+                      <div className="absolute -top-1.5 -left-1.5 w-4 h-4 border-t-2 border-l-2 border-amber-300" />
+                      <div className="absolute -top-1.5 -right-1.5 w-4 h-4 border-t-2 border-r-2 border-amber-300" />
+                      <div className="absolute -bottom-1.5 -left-1.5 w-4 h-4 border-b-2 border-l-2 border-amber-300" />
+                      <div className="absolute -bottom-1.5 -right-1.5 w-4 h-4 border-b-2 border-r-2 border-amber-300" />
+
+                      {/* Horizontal laser guidance line */}
+                      <div className="w-full h-0.5 bg-amber-400/80 shadow-[0_0_8px_rgba(245,158,11,0.9)] animate-pulse" />
+                    </div>
+
+                    {/* Guidance Text */}
+                    <div className="relative z-10 mt-3 px-3 py-1.5 rounded-lg bg-slate-950/90 backdrop-blur-sm border border-amber-400/50 text-[11px] font-bold text-amber-200 text-center max-w-[92%] shadow-lg leading-tight">
+                      כוון את המסגרת לטקסט המודפס בתחתית המדבקה (לדוגמה: TOOL-001)
+                    </div>
+                  </div>
                 )}
 
                 {scannerError && (
@@ -1013,6 +1150,55 @@ export default function QuickOnboardView({
                   </div>
                 )}
               </div>
+
+              {/* OCR Action Trigger Button & Status Feedback */}
+              {isOcrMode && scannerActive && !scannerError && (
+                <div className="space-y-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleTriggerOcrScan}
+                    disabled={isOcrRecognizing || isOcrInitializing}
+                    className={`w-full min-h-[48px] px-4 py-2.5 rounded-xl font-bold text-sm shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                      isOcrRecognizing || isOcrInitializing
+                        ? 'bg-amber-100 text-amber-900 border border-amber-300 cursor-wait opacity-85'
+                        : 'bg-amber-500 hover:bg-amber-600 active:scale-[0.99] text-slate-950 border border-amber-400 shadow-amber-500/20'
+                    }`}
+                  >
+                    {isOcrRecognizing || isOcrInitializing ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin text-amber-900" />
+                        <span>
+                          {isOcrInitializing
+                            ? `מאתחל מנוע OCR (${ocrProgress}%)...`
+                            : 'מפענח טקסט מהמצלמה...'}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <Camera className="w-5 h-5 text-slate-950" />
+                        <span>📸 סרוק טקסט עכשיו</span>
+                      </>
+                    )}
+                  </button>
+
+                  {ocrScanFeedback && (
+                    <div
+                      className={`p-2.5 rounded-lg text-xs font-semibold flex items-center gap-2 border animate-in fade-in duration-200 ${
+                        ocrScanFeedback.type === 'success'
+                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                          : 'bg-rose-50 text-rose-800 border-rose-200'
+                      }`}
+                    >
+                      {ocrScanFeedback.type === 'success' ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      ) : (
+                        <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                      )}
+                      <span>{ocrScanFeedback.message}</span>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Manual Input Toggle */}
               <div className="pt-1">
