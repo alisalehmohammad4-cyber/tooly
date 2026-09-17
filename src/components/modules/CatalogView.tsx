@@ -93,6 +93,7 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
     return () => clearTimeout(timer);
   }, [rawSearchQuery]);
 
+
   // 1. Filter assets by selected warehouse
   const warehouseFilteredAssets = useMemo(() => {
     if (!selectedWarehouseId || selectedWarehouseId === 'all') {

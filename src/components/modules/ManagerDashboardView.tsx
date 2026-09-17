@@ -31,6 +31,7 @@ import {
   FileText,
   Package,
   Layers,
+  Eye,
 } from 'lucide-react';
 import Link from 'next/link';
 import type { PlantManagerAnalyticsPayload } from '@/app/actions/dashboard';
@@ -49,6 +50,7 @@ import {
   deleteWarehouseAction,
 } from '@/app/actions/warehouses';
 import WarehouseFormModal from '@/components/modules/WarehouseFormModal';
+import WarehouseToolsModal from '@/components/modules/WarehouseToolsModal';
 import AppLayout from '@/components/layout/AppLayout';
 
 interface ManagerDashboardViewProps {
@@ -68,6 +70,8 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
   const [isWarehouseModalOpen, setIsWarehouseModalOpen] = useState<boolean>(false);
   const [editingWarehouse, setEditingWarehouse] = useState<WarehouseAdminItem | null>(null);
   const [deletingWarehouseId, setDeletingWarehouseId] = useState<string | null>(null);
+  const [selectedViewingWarehouse, setSelectedViewingWarehouse] = useState<WarehouseAdminItem | null>(null);
+  const [isToolsModalOpen, setIsToolsModalOpen] = useState<boolean>(false);
 
   // Storekeepers Management State
   const [storekeepers, setStorekeepers] = useState<AppUser[]>([]);
@@ -1464,6 +1468,18 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                       <button
                         type="button"
                         onClick={() => {
+                          setSelectedViewingWarehouse(wh);
+                          setIsToolsModalOpen(true);
+                        }}
+                        className="px-3 py-1.5 rounded-xl text-xs font-black bg-purple-700 hover:bg-purple-800 text-white flex items-center gap-1.5 shadow-sm shadow-purple-900/10 transition-all cursor-pointer active:scale-95"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                        <span>צפה בכלים ({wh.totalTools ?? wh.toolCount})</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
                           setEditingWarehouse(wh);
                           setIsWarehouseModalOpen(true);
                         }}
@@ -1700,6 +1716,16 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
           await loadWarehouses();
         }}
         initialData={editingWarehouse}
+      />
+
+      {/* Warehouse View Tools Modal */}
+      <WarehouseToolsModal
+        isOpen={isToolsModalOpen}
+        onClose={() => {
+          setIsToolsModalOpen(false);
+          setSelectedViewingWarehouse(null);
+        }}
+        warehouse={selectedViewingWarehouse}
       />
     </AppLayout>
   );

@@ -9,8 +9,16 @@ export const metadata: Metadata = {
   description: 'קטלוג כלי עבודה, סינון לפי קטגוריות ומעקב מלאי לפי מחסנים ואתרים.',
 };
 
-export default async function CatalogPage() {
-  const catalogData = await getCatalogData();
-
-  return <CatalogView initialData={catalogData} />;
+interface CatalogPageProps {
+  searchParams?: Promise<{ warehouse?: string }>;
 }
+
+export default async function CatalogPage(props: CatalogPageProps) {
+  const searchParams = await props.searchParams;
+  const warehouseId = searchParams?.warehouse;
+  const catalogData = await getCatalogData(warehouseId);
+
+  return <CatalogView key={warehouseId || 'all'} initialData={catalogData} />;
+}
+
+

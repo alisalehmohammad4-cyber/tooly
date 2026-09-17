@@ -8,6 +8,7 @@ import {
   updateMockWarehouse,
   deleteMockWarehouse,
   type WarehouseAdminItem,
+  isLegacyEnglishCategory,
 } from '@/lib/mockStore';
 
 export interface WarehouseActionResult {
@@ -381,4 +382,136 @@ export async function reconcileStockAction(input: {
     discrepancyCount: 0,
   };
 }
+
+export interface WarehouseToolItem {
+  id: string;
+  name: string;
+  qr_code: string;
+  serial_number: string | null;
+  category_name: string;
+  status: string;
+  current_assigned_worker: string | null;
+  order_number: string | null;
+}
+
+/**
+ * Retrieves all tools/assets stationed at a specific facility/warehouse.
+ * Supports both Supabase persistence and unified mockStore fallback.
+ */
+export async function getWarehouseToolsAction(
+  warehouseId: string
+): Promise<WarehouseToolItem[]> {
+  const cleanWhId = (warehouseId || '').trim();
+  if (!cleanWhId) {
+    return [];
+  }
+
+  let toolsList: WarehouseToolItem[] = [];
+
+  if (isSupabaseConfigured()) {
+    try {
+      // Find matching warehouse by id or code to ensure robust resolution
+      let targetWhId = cleanWhId;
+      const { data: wh } = await supabase
+        .from('warehouses')
+        .select('id, code')
+        .or(`id.eq.${cleanWhId},code.eq.${cleanWhId}`)
+        .maybeSingle();
+
+      if (wh?.id) {
+        targetWhId = wh.id;
+      }
+
+      const [assetsRes, categoriesRes] = await Promise.all([
+        supabase
+          .from('assets')
+          .select('*')
+          .or(`current_warehouse_id.eq.${targetWhId},warehouse_id.eq.${targetWhId}`)
+          .limit(5000),
+        supabase.from('categories').select('id, name'),
+      ]);
+
+      if (!assetsRes.error && assetsRes.data && assetsRes.data.length > 0) {
+        const catMap = new Map<string, string>();
+        if (categoriesRes.data) {
+          categoriesRes.data
+            .filter((c: { id: string; name: string }) => !isLegacyEnglishCategory(c))
+            .forEach((c: { id: string; name: string }) => {
+              catMap.set(c.id, c.name);
+            });
+        }
+
+        toolsList = (assetsRes.data as Record<string, unknown>[]).map((row) => {
+          const qr = (row.qr_code || row.qrCode || '') as string;
+          const catId = (row.category_id || row.categoryId || '') as string;
+          const rawCatName = (row.category_name || row.categoryName || row.category || '') as string;
+          const cleanRawCat = isLegacyEnglishCategory({ name: rawCatName }) ? 'ציוד כללי' : rawCatName;
+          const resolvedCatName = catMap.get(catId) || cleanRawCat || 'ציוד כללי';
+
+          return {
+            id: (row.id as string) || qr,
+            name: (row.name || row.tool_name || row.toolName || 'כלי עבודה') as string,
+            qr_code: qr,
+            serial_number: (row.serial_number || row.serialNumber || null) as string | null,
+            category_name: resolvedCatName,
+            status: (row.status as string) || 'available',
+            current_assigned_worker: (row.current_assigned_worker || row.currentAssignedWorker || null) as string | null,
+            order_number: (row.order_number || row.orderNumber || null) as string | null,
+          };
+        });
+      }
+    } catch (err) {
+      console.warn('[getWarehouseToolsAction] Supabase query warning, falling back to mockStore:', err);
+    }
+  }
+
+  // Fallback to mockStore if empty or Supabase not configured
+  if (toolsList.length === 0) {
+    const { getMockAssets, getMockWarehouses } = await import('@/lib/mockStore');
+    const mockWhs = getMockWarehouses(true);
+    const targetWh = mockWhs.find(
+      (w) => w.id === cleanWhId || (w.code && w.code.toUpperCase() === cleanWhId.toUpperCase())
+    );
+
+    const allAssets = getMockAssets();
+    const filtered = allAssets.filter((a) => {
+      const matchDirect =
+        a.current_warehouse_id === cleanWhId ||
+        a.currentWarehouseId === cleanWhId ||
+        a.warehouse_id === cleanWhId ||
+        a.warehouseId === cleanWhId ||
+        a.warehouseCode === cleanWhId ||
+        a.warehouse_code === cleanWhId;
+
+      if (matchDirect) return true;
+
+      if (targetWh) {
+        return (
+          a.current_warehouse_id === targetWh.id ||
+          a.currentWarehouseId === targetWh.id ||
+          a.warehouse_id === targetWh.id ||
+          a.warehouseId === targetWh.id ||
+          (Boolean(targetWh.code) &&
+            (a.warehouseCode === targetWh.code || a.warehouse_code === targetWh.code))
+        );
+      }
+
+      return false;
+    });
+
+    toolsList = filtered.map((a) => ({
+      id: a.id,
+      name: a.toolName || a.tool_name || 'כלי עבודה',
+      qr_code: a.qrCode || a.qr_code || '',
+      serial_number: a.serialNumber || a.serial_number || null,
+      category_name: a.categoryName || a.category_name || a.category || 'ציוד כללי',
+      status: a.status || 'available',
+      current_assigned_worker: a.currentAssignedWorker || a.current_assigned_worker || null,
+      order_number: a.orderNumber || a.order_number || null,
+    }));
+  }
+
+  return toolsList;
+}
+
 

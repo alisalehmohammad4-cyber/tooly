@@ -247,7 +247,36 @@ export function deleteMockWarehouse(targetId: string): { success: boolean; error
   return { success: true };
 }
 
-// 2. Authoritative Standardized Categories (100% Hebrew matching catalog)
+// 2. Authoritative Standardized Categories (Authentic 37 Hebrew categories from company inventory)
+export const LEGACY_ENGLISH_CATEGORY_NAMES = new Set([
+  'welding',
+  'lifting',
+  'cutting',
+  'drilling & fastening',
+  'drilling and fastening',
+  'measurement & surveying',
+  'measurement and surveying',
+]);
+
+export function isLegacyEnglishCategory(
+  category?: { name?: string | null; slug?: string | null; id?: string | null } | null
+): boolean {
+  if (!category) return false;
+  const nameLower = (category.name || '').trim().toLowerCase();
+  const slugLower = (category.slug || '').trim().toLowerCase();
+  const idLower = (category.id || '').trim().toLowerCase();
+  return (
+    LEGACY_ENGLISH_CATEGORY_NAMES.has(nameLower) ||
+    slugLower === 'drilling-fastening' ||
+    slugLower === 'measurement-surveying' ||
+    idLower === 'cat-drilling-fastening' ||
+    idLower === 'cat-measurement-surveying' ||
+    (nameLower === 'welding' && (slugLower === 'welding' || idLower === 'cat-welding')) ||
+    (nameLower === 'lifting' && (slugLower === 'lifting' || idLower === 'cat-lifting')) ||
+    (nameLower === 'cutting' && (slugLower === 'cutting' || idLower === 'cat-cutting'))
+  );
+}
+
 export const MOCK_CATEGORIES: Category[] = [
   {
     "id": "cat-water-pumps",
@@ -355,165 +384,158 @@ export const MOCK_CATEGORIES: Category[] = [
     "displayOrder": 15
   },
   {
-    "id": "cat-general-equipment",
-    "name": "ציוד כללי",
-    "slug": "general-equipment",
-    "icon": "wrench",
-    "displayOrder": 16
-  },
-  {
     "id": "cat-piping-tools",
     "name": "צנרת",
     "slug": "piping-tools",
     "icon": "scissors",
-    "displayOrder": 17
+    "displayOrder": 16
   },
   {
     "id": "cat-jigsaws",
     "name": "גקסון",
     "slug": "jigsaws",
     "icon": "scissors",
-    "displayOrder": 18
+    "displayOrder": 17
   },
   {
     "id": "cat-measuring-tools",
     "name": "כלי מדידה",
     "slug": "measuring-tools",
     "icon": "ruler",
-    "displayOrder": 19
+    "displayOrder": 18
   },
   {
     "id": "cat-saws",
     "name": "משור",
     "slug": "saws",
     "icon": "scissors",
-    "displayOrder": 20
+    "displayOrder": 19
   },
   {
     "id": "cat-welding-masks",
     "name": "מסיכת ריתוך",
     "slug": "welding-masks",
     "icon": "flame",
-    "displayOrder": 21
+    "displayOrder": 20
   },
   {
     "id": "cat-blowers",
     "name": "מפוחים",
     "slug": "blowers",
     "icon": "wrench",
-    "displayOrder": 22
+    "displayOrder": 21
   },
   {
     "id": "cat-compressors",
     "name": "קומפרסור",
     "slug": "compressors",
     "icon": "wrench",
-    "displayOrder": 23
+    "displayOrder": 22
   },
   {
     "id": "cat-breathing-apparatus",
     "name": "מנפ\"ם",
     "slug": "breathing-apparatus",
     "icon": "crane",
-    "displayOrder": 24
+    "displayOrder": 23
   },
   {
     "id": "cat-levels",
     "name": "מאזנת",
     "slug": "levels",
     "icon": "ruler",
-    "displayOrder": 25
+    "displayOrder": 24
   },
   {
     "id": "cat-sirius",
     "name": "סיריוס",
     "slug": "sirius",
     "icon": "wrench",
-    "displayOrder": 26
+    "displayOrder": 25
   },
   {
     "id": "cat-vacuums",
     "name": "שואב אבק",
     "slug": "vacuums",
     "icon": "wrench",
-    "displayOrder": 27
+    "displayOrder": 26
   },
   {
     "id": "cat-paint-compressors",
     "name": "קומפרסור צבע",
     "slug": "paint-compressors",
     "icon": "wrench",
-    "displayOrder": 28
+    "displayOrder": 27
   },
   {
     "id": "cat-ladders",
     "name": "סולמות",
     "slug": "ladders",
     "icon": "crane",
-    "displayOrder": 29
+    "displayOrder": 28
   },
   {
     "id": "cat-oxygen-batteries",
     "name": "סוללת חמצן",
     "slug": "oxygen-batteries",
     "icon": "crane",
-    "displayOrder": 30
+    "displayOrder": 29
   },
   {
     "id": "cat-gardening",
     "name": "גינון",
     "slug": "gardening",
     "icon": "wrench",
-    "displayOrder": 31
+    "displayOrder": 30
   },
   {
     "id": "cat-electric-panels",
     "name": "לוח חשמל",
     "slug": "electric-panels",
     "icon": "wrench",
-    "displayOrder": 32
+    "displayOrder": 31
   },
   {
     "id": "cat-gas-detectors",
     "name": "גלאי גז",
     "slug": "gas-detectors",
     "icon": "ruler",
-    "displayOrder": 33
+    "displayOrder": 32
   },
   {
     "id": "cat-explosion-proof-lighting",
     "name": "גוף תאורה מגן פיצוץ",
     "slug": "explosion-proof-lighting",
     "icon": "wrench",
-    "displayOrder": 34
+    "displayOrder": 33
   },
   {
     "id": "cat-generators",
     "name": "גנרטור",
     "slug": "generators",
     "icon": "wrench",
-    "displayOrder": 35
+    "displayOrder": 34
   },
   {
     "id": "cat-extractors",
     "name": "מחלץ",
     "slug": "extractors",
     "icon": "wrench",
-    "displayOrder": 36
+    "displayOrder": 35
   },
   {
     "id": "cat-drones",
     "name": "רחפן",
     "slug": "drones",
     "icon": "wrench",
-    "displayOrder": 37
+    "displayOrder": 36
   },
   {
     "id": "cat-isolation-transformers",
     "name": "שנאי מבדיל",
     "slug": "isolation-transformers",
     "icon": "wrench",
-    "displayOrder": 38
+    "displayOrder": 37
   }
 ];
 
@@ -535,6 +557,7 @@ export interface UnifiedAssetItem {
   category_name?: string;
   category?: string;
   warehouseId: string;
+  warehouse_id?: string;
   currentWarehouseId?: string;
   current_warehouse_id?: string;
   warehouseName: string;

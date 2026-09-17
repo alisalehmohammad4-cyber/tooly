@@ -11,6 +11,7 @@ import {
   addMockAsset,
   getMockAssets,
   getNextAvailableMockTagNumber,
+  isLegacyEnglishCategory,
 } from '@/lib/mockStore';
 
 export interface OnboardFormData {
@@ -24,12 +25,18 @@ export type OnboardAssetResult =
 
 /**
  * Queries and returns active warehouses and categories ordered by display_order.
+ * Strictly filters out legacy English demo categories.
  */
 export async function getOnboardFormData(): Promise<OnboardFormData> {
   if (!isSupabaseConfigured()) {
     return {
       warehouses: getMockWarehouses().map((w) => ({ id: w.id, name: w.name, code: w.code })),
-      categories: MOCK_CATEGORIES.map((c) => ({ id: c.id, name: c.name, slug: c.slug, icon: c.icon ?? null })),
+      categories: MOCK_CATEGORIES.filter((c) => !isLegacyEnglishCategory(c)).map((c) => ({
+        id: c.id,
+        name: c.name,
+        slug: c.slug,
+        icon: c.icon ?? null,
+      })),
     };
   }
 
@@ -54,9 +61,21 @@ export async function getOnboardFormData(): Promise<OnboardFormData> {
     throw new Error(`Failed to load categories: ${categoriesResponse.error.message}`);
   }
 
+  const rawCategories = (categoriesResponse.data ?? []).filter(
+    (c) => !isLegacyEnglishCategory(c)
+  );
+
   return {
     warehouses: warehousesResponse.data ?? [],
-    categories: categoriesResponse.data ?? [],
+    categories:
+      rawCategories.length > 0
+        ? rawCategories
+        : MOCK_CATEGORIES.filter((c) => !isLegacyEnglishCategory(c)).map((c) => ({
+            id: c.id,
+            name: c.name,
+            slug: c.slug,
+            icon: c.icon ?? null,
+          })),
   };
 }
 
@@ -323,7 +342,9 @@ export async function getCatalogData(warehouseId?: string): Promise<CatalogDataP
         warehousesList = warehousesRes.data;
       }
       if (!categoriesRes.error && categoriesRes.data && categoriesRes.data.length > 0) {
-        categoriesList = categoriesRes.data;
+        categoriesList = (
+          categoriesRes.data as Array<{ id: string; name: string; slug: string; icon: string | null }>
+        ).filter((c) => !isLegacyEnglishCategory(c));
       }
       if (!assetsRes.error && assetsRes.data && assetsRes.data.length > 0) {
         const warehouseMap = new Map(warehousesList.map((w) => [w.id, w]));
@@ -389,7 +410,12 @@ export async function getCatalogData(warehouseId?: string): Promise<CatalogDataP
     warehousesList = getMockWarehouses().map((w) => ({ id: w.id, name: w.name, code: w.code }));
   }
   if (categoriesList.length === 0) {
-    categoriesList = MOCK_CATEGORIES.map((c) => ({ id: c.id, name: c.name, slug: c.slug, icon: c.icon ?? null }));
+    categoriesList = MOCK_CATEGORIES.filter((c) => !isLegacyEnglishCategory(c)).map((c) => ({
+      id: c.id,
+      name: c.name,
+      slug: c.slug,
+      icon: c.icon ?? null,
+    }));
   }
   if (allAssets.length === 0) {
     allAssets = getMockAssets().map((a) => ({
