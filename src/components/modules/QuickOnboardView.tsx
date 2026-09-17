@@ -32,7 +32,11 @@ import {
   Camera,
 } from 'lucide-react';
 import type { Category, Warehouse, AssetCondition } from '@/types/domain';
-import { checkQrCodeExists, onboardAsset } from '@/app/actions/assets';
+import {
+  checkQrCodeExists,
+  onboardAsset,
+  getNextAvailableTagNumberAction,
+} from '@/app/actions/assets';
 import AssetActionModal from '@/components/modules/AssetActionModal';
 import BulkCheckoutModal from '@/components/modules/BulkCheckoutModal';
 import ToolPassportModal from '@/components/modules/ToolPassportModal';
@@ -114,6 +118,7 @@ export default function QuickOnboardView({
 
   // Storekeeper Streamlined View State (Hide onboarding form by default for high-velocity dispatch)
   const [showOnboardForm, setShowOnboardForm] = useState<boolean>(false);
+  const [isSuggestingQr, setIsSuggestingQr] = useState<boolean>(false);
 
   // Camera Hardware Controls (Torch & Barcode Mode)
   const [isTorchOn, setIsTorchOn] = useState<boolean>(false);
@@ -195,6 +200,35 @@ export default function QuickOnboardView({
       }
     }
   }, []);
+
+  // Automatically fetch and pre-fill next sequential available code (e.g. ZR-1099)
+  const handleAutoSuggestNextQr = useCallback(async () => {
+    setIsSuggestingQr(true);
+    try {
+      const nextNum = await getNextAvailableTagNumberAction('ZR-');
+      const suggested = `ZR-${nextNum}`;
+      setQrCode(suggested);
+      setManualQrInput(suggested);
+      setQrWarning(null);
+    } catch (err) {
+      console.warn('Failed to fetch next sequential code:', err);
+      setQrCode('ZR-1099');
+      setManualQrInput('ZR-1099');
+      setQrWarning(null);
+    } finally {
+      setIsSuggestingQr(false);
+    }
+  }, []);
+
+  // Open Onboard Form and auto-suggest if no QR was previously scanned
+  const handleOpenOnboardForm = useCallback(async () => {
+    if (!qrCode.trim()) {
+      await handleAutoSuggestNextQr();
+    }
+    await stopScanner();
+    setShowOnboardForm(true);
+  }, [qrCode, handleAutoSuggestNextQr, stopScanner]);
+
 
   // Toggle Torch on active camera video stream
   const toggleTorch = useCallback(async () => {
@@ -1360,7 +1394,7 @@ export default function QuickOnboardView({
             <div className="pt-2 border-t border-slate-100">
               <button
                 type="button"
-                onClick={() => setShowOnboardForm(true)}
+                onClick={handleOpenOnboardForm}
                 className="w-full min-h-[54px] rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-800 border-2 border-dashed border-blue-300 font-black text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98] cursor-pointer shadow-sm"
               >
                 <PackagePlus className="w-5 h-5 text-blue-600" />
@@ -1393,6 +1427,73 @@ export default function QuickOnboardView({
               >
                 ביטול וחזרה לסורק
               </button>
+            </div>
+
+            {/* 1. EDITABLE QR CODE / SERIAL BARCODE IDENTIFIER */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider flex items-center gap-1.5">
+                  <Barcode className="w-4 h-4 text-blue-600" />
+                  <span>קוד מזהה / תגית ברקוד (QR / Barcode)</span>
+                  <span className="text-blue-600">*</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={handleAutoSuggestNextQr}
+                  disabled={isSuggestingQr}
+                  className="text-[11px] font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 hover:underline cursor-pointer disabled:opacity-50"
+                  title="חשב והחל את המספר הסידורי הפנוי הבא ברצף"
+                >
+                  <RotateCcw className={`w-3 h-3 ${isSuggestingQr ? 'animate-spin' : ''}`} />
+                  <span>{isSuggestingQr ? 'מחשב מספר הבא...' : 'החל מספר סידורי פנוי הבא (ZR-XXXX)'}</span>
+                </button>
+              </div>
+
+              <div className="relative">
+                <input
+                  type="text"
+                  value={qrCode}
+                  onChange={async (e) => {
+                    const val = e.target.value;
+                    setQrCode(val);
+                    setManualQrInput(val);
+                    if (!val.trim()) {
+                      setQrWarning('יש להזין קוד זיהוי או תגית ברקוד.');
+                    } else {
+                      const exists = await checkQrCodeExists(val.trim());
+                      if (exists) {
+                        setQrWarning(`קוד ברקוד/QR "${val.trim()}" כבר רשום במערכת.`);
+                      } else {
+                        setQrWarning(null);
+                      }
+                    }
+                  }}
+                  placeholder="לדוגמה: ZR-1099 או סרוק ברקוד יצרן"
+                  className={`w-full min-h-[56px] bg-white text-blue-950 font-mono font-bold text-base px-4 rounded-xl border-2 transition-colors placeholder:text-slate-400 shadow-sm ${
+                    qrWarning
+                      ? 'border-amber-400 focus:border-amber-600'
+                      : 'border-blue-200 focus:border-blue-600'
+                  } focus:outline-none`}
+                  dir="ltr"
+                />
+              </div>
+
+              {qrWarning ? (
+                <div className="flex items-center gap-1.5 mt-1.5 text-xs font-bold text-amber-700 bg-amber-50 p-2.5 rounded-xl border border-amber-200">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>{qrWarning}</span>
+                </div>
+              ) : qrCode ? (
+                <p className="text-[11px] text-slate-500 mt-1 font-medium">
+                  {qrCode.toUpperCase().startsWith('ZR')
+                    ? '✓ מספר סידורי רשמי ברצף החברה (ZR-[מספר]). ניתן לערוך ידנית לברקוד יצרן לפי הצורך.'
+                    : '✓ ברקוד חופשי / ברקוד יצרן מקורי. ניתן לעריכה חופשית.'}
+                </p>
+              ) : (
+                <p className="text-[11px] text-amber-600 mt-1 font-bold">
+                  * שדה חובה. לא ניתן לרשום כלי ללא קוד מזהה.
+                </p>
+              )}
             </div>
 
             {/* SINGLE-TAP CATEGORY SELECTOR */}

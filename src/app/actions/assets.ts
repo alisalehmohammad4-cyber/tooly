@@ -407,25 +407,36 @@ export async function getCatalogData(warehouseId?: string): Promise<CatalogDataP
 /**
  * Detects the highest existing tag/QR serial number matching the prefix
  * across database assets and mock store, and returns the next sequential number.
- * e.g., from TOOL-WLD-001 or TOOL-0043 -> returns 44.
+/**
+ * Detects the highest sequential tag number in either live Supabase or mock store.
+ * e.g., across all ZR- codes (like ZR-282, ZR-1098) -> returns max + 1 (1099).
  */
 export async function getNextAvailableTagNumberAction(
-  prefix: string = 'TOOL-'
+  prefix: string = 'ZR-'
 ): Promise<number> {
   const cleanPrefix = prefix.trim().toUpperCase();
+  let maxNumber = 0;
 
+  // 1. Check mock store assets (contains all 1016 imported Excel assets, max 1098)
+  const mockNext = getNextAvailableMockTagNumber(cleanPrefix);
+  if (mockNext > 1) {
+    maxNumber = Math.max(maxNumber, mockNext - 1);
+  }
+
+  // 2. Check live Supabase assets (if configured and has items)
   if (isSupabaseConfigured()) {
     try {
+      const isZr = cleanPrefix.startsWith('ZR');
+      const prefixPattern = isZr ? 'ZR%' : `${cleanPrefix}%`;
       const { data, error } = await supabase
         .from('assets')
         .select('qr_code')
-        .ilike('qr_code', `${cleanPrefix}%`);
+        .ilike('qr_code', prefixPattern);
 
       if (!error && data && data.length > 0) {
-        let maxNumber = 0;
         for (const row of data) {
-          const qr = (row.qr_code || '').trim();
-          const match = qr.match(/(\d+)$/);
+          const qr = (row.qr_code || '').trim().toUpperCase();
+          const match = isZr ? qr.match(/ZR[-_ ]*(\d+)/i) : qr.match(/(\d+)$/);
           if (match) {
             const val = parseInt(match[1], 10);
             if (!isNaN(val) && val > maxNumber) {
@@ -433,15 +444,17 @@ export async function getNextAvailableTagNumberAction(
             }
           }
         }
-        if (maxNumber > 0) {
-          return maxNumber + 1;
-        }
       }
     } catch (err) {
-      console.warn('Error fetching highest QR code from Supabase, falling back to mock:', err);
+      console.warn('Error fetching highest QR code from Supabase:', err);
     }
   }
 
-  return getNextAvailableMockTagNumber(cleanPrefix);
+  if (maxNumber > 0) {
+    return maxNumber + 1;
+  }
+
+  return cleanPrefix.startsWith('ZR') ? 1099 : 1;
 }
+
 

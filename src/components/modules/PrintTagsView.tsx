@@ -38,9 +38,9 @@ export default function PrintTagsView() {
   const [labelFormat, setLabelFormat] = useState<LabelFormat>('tsc');
 
   // Tab A: Batch Config State
-  const [prefix, setPrefix] = useState<string>('TOOL-');
-  const [startNumber, setStartNumber] = useState<number>(1);
-  const [suggestedStartNumber, setSuggestedStartNumber] = useState<number | null>(null);
+  const [prefix, setPrefix] = useState<string>('ZR-');
+  const [startNumber, setStartNumber] = useState<number>(1099);
+  const [suggestedStartNumber, setSuggestedStartNumber] = useState<number | null>(1099);
   const [quantity, setQuantity] = useState<number>(24);
   const [customQtyInput, setCustomQtyInput] = useState<string>('24');
   const [facilityText, setFacilityText] = useState<string>('מחסן מרכזי - ציוד קבוע');
@@ -99,7 +99,9 @@ export default function PrintTagsView() {
           }
         }
 
-        const bestNext = Math.max(nextNum, lastPrinted > 0 ? lastPrinted + 1 : 1);
+        const isZr = prefix.trim().toUpperCase().startsWith('ZR');
+        const fallbackStart = isZr ? 1099 : 1;
+        const bestNext = Math.max(nextNum, lastPrinted > 0 ? lastPrinted + 1 : fallbackStart);
 
         if (isCurrent) {
           setSuggestedStartNumber(bestNext);
@@ -117,16 +119,16 @@ export default function PrintTagsView() {
     };
   }, [prefix]);
 
-  // Compute batch list of serials
+  // Compute batch list of serials: strictly ${prefix}${num} without extra zero-padding
   const batchSerials = useMemo(() => {
     const list: string[] = [];
     const validQty = Math.max(1, Math.min(quantity, 200));
-    const padLength = Math.max(4, String(startNumber + validQty).length);
+    const cleanPrefix = prefix.trim().toUpperCase();
+    const formattedPrefix = cleanPrefix.startsWith('ZR') && !cleanPrefix.endsWith('-') ? `${cleanPrefix}-` : cleanPrefix;
 
     for (let i = 0; i < validQty; i++) {
       const num = startNumber + i;
-      const paddedNum = String(num).padStart(padLength, '0');
-      list.push(`${prefix.trim().toUpperCase()}${paddedNum}`);
+      list.push(`${formattedPrefix}${num}`);
     }
     return list;
   }, [prefix, startNumber, quantity]);
@@ -532,7 +534,7 @@ export default function PrintTagsView() {
                   type="text"
                   value={prefix}
                   onChange={(e) => setPrefix(e.target.value)}
-                  placeholder="TOOL-"
+                  placeholder="ZR-"
                   className="w-full min-h-[48px] bg-white text-blue-950 font-mono font-bold text-base px-3.5 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none uppercase shadow-sm"
                   dir="ltr"
                 />

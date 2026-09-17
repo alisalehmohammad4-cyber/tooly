@@ -8,8 +8,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, '..');
 
-// 12 Authoritative Warehouse UUIDs and Metadata
-export const AUTHORITATIVE_WAREHOUSES = [
+// Authoritative Base Warehouses
+export const BASE_WAREHOUSES = [
   {
     id: '10000000-0000-0000-0000-000000000001',
     name: 'הבונים',
@@ -108,55 +108,6 @@ export const AUTHORITATIVE_WAREHOUSES = [
   },
 ];
 
-const WAREHOUSE_MAP = {
-  'הבונים': '10000000-0000-0000-0000-000000000001',
-  'בז"ן': '10000000-0000-0000-0000-000000000002',
-  'שגיא 2000': '10000000-0000-0000-0000-000000000003',
-  'חגית': '10000000-0000-0000-0000-000000000004',
-  'אורות רבין': '10000000-0000-0000-0000-000000000005',
-  'צפית': '10000000-0000-0000-0000-000000000006',
-  'עגלת טורבינות': '10000000-0000-0000-0000-000000000007',
-  'אשקלון': '10000000-0000-0000-0000-000000000008',
-  'גדות': '10000000-0000-0000-0000-000000000009',
-  'צלבנים': '10000000-0000-0000-0000-000000000010',
-  'תחנת כוח גזר': '10000000-0000-0000-0000-000000000011',
-  'באר שבע': '10000000-0000-0000-0000-000000000012',
-};
-
-function resolveWarehouseId(siteValue, statusRaw) {
-  const cleanSite = (siteValue || '').trim();
-  if (cleanSite && WAREHOUSE_MAP[cleanSite]) {
-    return WAREHOUSE_MAP[cleanSite];
-  }
-  if (cleanSite) {
-    for (const [name, uuid] of Object.entries(WAREHOUSE_MAP)) {
-      if (cleanSite.includes(name) || name.includes(cleanSite)) {
-        return uuid;
-      }
-    }
-  }
-  if ((!cleanSite || cleanSite === '') && statusRaw === 'מחסן ראשי') {
-    return WAREHOUSE_MAP['הבונים'];
-  }
-  return WAREHOUSE_MAP['הבונים'];
-}
-
-function mapStatus(statusRaw) {
-  const clean = (statusRaw || '').trim();
-  if (clean === 'בשימוש') return 'checked_out';
-  if (clean === 'בתיקון') return 'maintenance';
-  if (clean === 'צריך תיקון') return 'needs_repair';
-  if (clean === 'מחסן ראשי') return 'available';
-  return 'available';
-}
-
-function mapCondition(statusMapped) {
-  if (statusMapped === 'needs_repair' || statusMapped === 'maintenance') {
-    return 'needs_repair';
-  }
-  return 'good';
-}
-
 function extractBrand(toolName) {
   const t = (toolName || '').toLowerCase();
   if (t.includes('מקיטה') || t.includes('makita')) return 'Makita';
@@ -172,17 +123,78 @@ function extractBrand(toolName) {
   return 'Zatout';
 }
 
-function resolveCategoryId(catName) {
-  if (!catName) return 'cat-drill';
-  const clean = catName.trim();
-  if (clean.includes('ריתוך') || clean.includes('רתכות') || clean.includes('תנור')) return 'cat-weld';
-  if (clean.includes('הרמה') || clean.includes('סולמות') || clean.includes('מנפ"ם')) return 'cat-lift';
-  if (clean.includes('דיסק') || clean.includes('חיתוך') || clean.includes('משור') || clean.includes('גקסון') || clean.includes('אבן אצבע') || clean.includes('צנרת')) return 'cat-cut';
-  if (clean.includes('מדידה') || clean.includes('מאזנת') || clean.includes('מומנט') || clean.includes('מומנת')) return 'cat-meas';
-  return 'cat-drill';
+function mapStatus(statusRaw) {
+  const s = String(statusRaw || '').trim();
+  if (s.includes('צריך תיקון')) return 'needs_repair';
+  if (s.includes('בתיקון')) return 'maintenance';
+  if (s.includes('בשימוש')) return 'checked_out';
+  if (s.includes('מחסן ראשי')) return 'available';
+  return 'available';
 }
 
-// Read .env.local if present
+function mapCondition(statusMapped) {
+  if (statusMapped === 'needs_repair' || statusMapped === 'maintenance') {
+    return 'needs_repair';
+  }
+  return 'good';
+}
+
+function getCategoryIcon(name) {
+  const s = (name || '').trim();
+  if (s.includes('ריתוך') || s.includes('רתכות') || s.includes('תנור')) return 'flame';
+  if (s.includes('הרמה') || s.includes('סולמות') || s.includes('מנפ"ם') || s.includes('חמצן')) return 'crane';
+  if (s.includes('דיסק') || s.includes('חיתוך') || s.includes('משור') || s.includes('גקסון') || s.includes('אצבע') || s.includes('צנרת')) return 'scissors';
+  if (s.includes('קידוח') || s.includes('מברג') || s.includes('אימפקט') || s.includes('פטישון') || s.includes('קונגו') || s.includes('מקדח')) return 'drill';
+  if (s.includes('מדידה') || s.includes('מאזנת') || s.includes('מומנט') || s.includes('מומנת') || s.includes('גלאי')) return 'ruler';
+  return 'wrench';
+}
+
+function getCategorySlug(name) {
+  const s = (name || '').trim();
+  const slugMap = {
+    'משאבות מים': 'water-pumps',
+    'רתכות': 'welding',
+    'אימפקט': 'impact-drivers',
+    'מברגות': 'screwdrivers',
+    'תנור': 'heating-ovens',
+    'דיסקים': 'grinding-discs',
+    'ערבל בטון': 'concrete-mixers',
+    'קונגו': 'demolition-hammers',
+    'פטישונים': 'rotary-hammers',
+    'מקדחים': 'drill-bits',
+    'ציוד הרמה': 'lifting-equipment',
+    'מקדח מגנטי': 'magnetic-drills',
+    'מכונת לחץ מים': 'pressure-washers',
+    'אבן אצבע': 'die-grinder',
+    'ידית מומנת': 'torque-wrenches',
+    'צנרת': 'piping-tools',
+    'גקסון': 'jigsaws',
+    'כלי מדידה': 'measuring-tools',
+    'משור': 'saws',
+    'מסיכת ריתוך': 'welding-masks',
+    'מפוחים': 'blowers',
+    'קומפרסור': 'compressors',
+    'מנפ"ם': 'breathing-apparatus',
+    'מאזנת': 'levels',
+    'סיריוס': 'sirius',
+    'שואב אבק': 'vacuums',
+    'קומפרסור צבע': 'paint-compressors',
+    'סולמות': 'ladders',
+    'סוללת חמצן': 'oxygen-batteries',
+    'גינון': 'gardening',
+    'לוח חשמל': 'electric-panels',
+    'גלאי גז': 'gas-detectors',
+    'גוף תאורה מגן פיצוץ': 'explosion-proof-lighting',
+    'גנרטור': 'generators',
+    'מחלץ': 'extractors',
+    'רחפן': 'drones',
+    'שנאי מבדיל': 'isolation-transformers',
+    'ציוד כללי': 'general-equipment',
+  };
+  return slugMap[s] || `cat-${Buffer.from(s).toString('hex').slice(0, 8)}`;
+}
+
+// Load .env.local if present
 function loadEnvLocal() {
   const envPath = path.join(projectRoot, '.env.local');
   const env = { ...process.env };
@@ -206,7 +218,7 @@ function loadEnvLocal() {
 }
 
 async function main() {
-  // 1. Locate and parse Excel file
+  // 1. Locate Excel file
   let excelPath = path.join(projectRoot, 'zatout_inventory.xlsx');
   if (!fs.existsSync(excelPath)) {
     excelPath = path.join(projectRoot, 'zatout_inventory.xlsx.xlsx');
@@ -218,71 +230,179 @@ async function main() {
   }
 
   const wb = xlsx.readFile(excelPath);
-  const sheetName = wb.SheetNames[0];
-  const sheet = wb.Sheets[sheetName];
-  const rawRows = xlsx.utils.sheet_to_json(sheet, { header: 1 });
+  const sheetNames = wb.SheetNames;
 
-  // Locate header row containing 'Task ID'
-  const headerIdx = rawRows.findIndex((r) => r && r.includes('Task ID'));
-  if (headerIdx === -1) {
-    console.error('Could not find header row with "Task ID" in Excel');
-    process.exit(1);
+  // 2. Iterate through EVERY worksheet in the workbook
+  const rawAssetsList = [];
+  for (const sheetName of sheetNames) {
+    const sheet = wb.Sheets[sheetName];
+    if (!sheet) continue;
+
+    const jsonRows = xlsx.utils.sheet_to_json(sheet, { defval: '', raw: false });
+    let headerKeyToColName = {};
+
+    for (const row of jsonRows) {
+      const rowValues = Object.values(row).map((v) => String(v).trim());
+      if (rowValues.includes('Task ID')) {
+        headerKeyToColName = {};
+        for (const [k, v] of Object.entries(row)) {
+          headerKeyToColName[k] = String(v).trim();
+        }
+        continue;
+      }
+
+      let rowObj = row;
+      if (Object.keys(headerKeyToColName).length > 0) {
+        rowObj = {};
+        for (const [k, v] of Object.entries(row)) {
+          const colName = headerKeyToColName[k] || k;
+          rowObj[colName] = v;
+        }
+      }
+
+      const taskId = String(rowObj['Task ID'] || '').trim();
+      if (taskId && taskId.startsWith('86')) {
+        rawAssetsList.push(rowObj);
+      }
+    }
   }
 
-  const headers = rawRows[headerIdx];
-  const colMap = {};
-  headers.forEach((h, idx) => {
-    colMap[String(h).trim()] = idx;
-  });
+  // 3. Dynamic Auto-Discovery of Facilities & Categories
+  const discoveredWarehouses = [...BASE_WAREHOUSES];
+  const warehouseMap = new Map();
+  for (const wh of discoveredWarehouses) {
+    warehouseMap.set(wh.name.trim(), wh);
+  }
 
-  // Parse task rows
-  const parsedRecords = [];
-  for (let i = headerIdx + 1; i < rawRows.length; i++) {
-    const r = rawRows[i];
-    if (!r || !r[colMap['Task ID']]) continue;
-    const originalTaskId = String(r[colMap['Task ID']]).trim();
-    if (!originalTaskId.startsWith('86')) continue;
+  const habonimWh = discoveredWarehouses[0];
 
-    const customId = String(r[colMap['Task Custom ID']] || '').trim();
-    const name = String(r[colMap['Task Name']] || '').trim();
-    const statusRaw = String(r[colMap['Status']] || '').trim();
-    const siteRaw = r[colMap['אתר ציוד (drop down)']] ? String(r[colMap['אתר ציוד (drop down)']]).trim() : '';
-    const workerRaw = r[colMap['שם מקבל (short text)']] ? String(r[colMap['שם מקבל (short text)']]).trim() : '';
-    const categoryName = r[colMap['קבוצת ציוד (drop down)']] ? String(r[colMap['קבוצת ציוד (drop down)']]).trim() : '';
-    const orderNumber = r[colMap['מספר הזמנה (short text)']] ? String(r[colMap['מספר הזמנה (short text)']]).trim() : '';
+  function resolveOrCreateWarehouse(siteName, statusRaw) {
+    const cleanSite = (siteName || '').trim();
+    if (!cleanSite && statusRaw.includes('מחסן ראשי')) {
+      return habonimWh;
+    }
+
+    if (!cleanSite) {
+      return habonimWh;
+    }
+
+    // Direct name match
+    if (warehouseMap.has(cleanSite)) {
+      return warehouseMap.get(cleanSite);
+    }
+
+    // Substring match with known facilities
+    for (const [name, wh] of warehouseMap.entries()) {
+      if (cleanSite.includes(name) || name.includes(cleanSite)) {
+        return wh;
+      }
+    }
+
+    // Auto-discover new facility
+    const nextIdx = discoveredWarehouses.length + 1;
+    const newUuid = `10000000-0000-0000-0000-${String(nextIdx).padStart(12, '0')}`;
+    const cleanCode = `WH-${cleanSite.replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() || nextIdx}`;
+    const newType = cleanSite.includes('ראשי') || cleanSite.includes('מרכזי') ? 'central_warehouse' : 'site_container';
+    const newWh = {
+      id: newUuid,
+      name: cleanSite,
+      code: cleanCode,
+      type: newType,
+      address: null,
+      isActive: true,
+    };
+    discoveredWarehouses.push(newWh);
+    warehouseMap.set(cleanSite, newWh);
+    return newWh;
+  }
+
+  // Discover all unique categories
+  const discoveredCategories = [];
+  const categoryMap = new Map();
+
+  function resolveOrCreateCategory(catName) {
+    const clean = (catName || '').trim() || 'ציוד כללי';
+    if (categoryMap.has(clean)) {
+      return categoryMap.get(clean);
+    }
+
+    const slug = getCategorySlug(clean);
+    const icon = getCategoryIcon(clean);
+    const newCat = {
+      id: `cat-${slug}`,
+      name: clean,
+      slug: slug,
+      icon: icon,
+      displayOrder: discoveredCategories.length + 1,
+    };
+    discoveredCategories.push(newCat);
+    categoryMap.set(clean, newCat);
+    return newCat;
+  }
+
+  // 4. Full Asset Mapping (Zero Alteration)
+  let maxZR = 0;
+  const finalAssets = [];
+  const facilityCounts = {};
+  const categoryCounts = {};
+
+  for (const row of rawAssetsList) {
+    const originalTaskId = String(row['Task ID'] || '').trim();
+    const customId = String(row['Task Custom ID'] || '').trim();
+    const qrCode = customId || originalTaskId;
+    const serialNumber = customId || originalTaskId;
+    const name = String(row['Task Name'] || '').trim();
+    const statusRaw = String(row['Status'] || '').trim();
+    const siteRaw = String(row['אתר ציוד (drop down)'] || '').trim();
+    const workerRaw = String(row['שם מקבל (short text)'] || '').trim();
+    const categoryName = String(row['קבוצת ציוד (drop down)'] || '').trim();
+    const orderNumber = String(row['מספר הזמנה (short text)'] || '').trim();
 
     const status = mapStatus(statusRaw);
     const condition = mapCondition(status);
-    const warehouseId = resolveWarehouseId(siteRaw, statusRaw);
-    const warehouse = AUTHORITATIVE_WAREHOUSES.find((w) => w.id === warehouseId) || AUTHORITATIVE_WAREHOUSES[0];
+    const wh = resolveOrCreateWarehouse(siteRaw, statusRaw);
+    const cat = resolveOrCreateCategory(categoryName);
 
-    parsedRecords.push({
-      originalTaskId,
-      qr_code: customId,
-      serial_number: customId,
-      name,
+    // Track max ZR number
+    const match = qrCode.match(/(\d+)$/);
+    if (match) {
+      const num = parseInt(match[1], 10);
+      if (!isNaN(num) && num > maxZR) {
+        maxZR = num;
+      }
+    }
+
+    facilityCounts[wh.name] = (facilityCounts[wh.name] || 0) + 1;
+    categoryCounts[cat.name] = (categoryCounts[cat.name] || 0) + 1;
+
+    finalAssets.push({
+      id: `ast-${originalTaskId}`,
+      qrCode,
+      serialNumber,
+      toolName: name,
+      brand: extractBrand(name),
+      modelNumber: null,
+      categoryId: cat.id,
+      categoryName: cat.name,
+      warehouseId: wh.id,
+      warehouseName: wh.name,
+      warehouseCode: wh.code,
       status,
       condition,
-      warehouseId: warehouse.id,
-      warehouseName: warehouse.name,
-      warehouseCode: warehouse.code,
-      current_assigned_worker: workerRaw || null,
-      category_name: categoryName || 'כללי',
-      categoryId: resolveCategoryId(categoryName),
-      order_number: orderNumber || null,
-      brand: extractBrand(name),
+      currentAssignedWorker: workerRaw || null,
+      workerPhone: null,
+      version: 1,
+      purchaseCost: 2500,
+      purchaseDate: '2026-01-15',
+      warrantyUntil: '2028-01-15',
+      safetyInspectionDue: '2027-01-15',
+      isLocked: false,
+      originalTaskId,
+      orderNumber: orderNumber || null,
     });
   }
 
-  // Exactly 501 authoritative records for ingestion
-  const TARGET_COUNT = 501;
-  const recordsToIngest = parsedRecords.slice(0, TARGET_COUNT);
-
-  if (recordsToIngest.length < TARGET_COUNT) {
-    console.warn(`Warning: Extracted ${recordsToIngest.length} records, expected ${TARGET_COUNT}`);
-  }
-
-  // 2. Direct Supabase Ingestion
+  // 5. Batch Upsert to Supabase
   const env = loadEnvLocal();
   const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL || '';
   const supabaseKey = env.SUPABASE_SERVICE_ROLE_KEY || env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
@@ -296,9 +416,9 @@ async function main() {
     try {
       const supabase = createClient(supabaseUrl, supabaseKey);
 
-      // A. Ensure the 12 warehouses exist
-      const { error: whError } = await supabase.from('warehouses').upsert(
-        AUTHORITATIVE_WAREHOUSES.map((w) => ({
+      // Upsert discovered warehouses
+      const { error: whErr } = await supabase.from('warehouses').upsert(
+        discoveredWarehouses.map((w) => ({
           id: w.id,
           name: w.name,
           code: w.code,
@@ -308,90 +428,78 @@ async function main() {
         })),
         { onConflict: 'id' }
       );
-      if (whError) {
-        console.warn('[Supabase] Note on warehouses sync:', whError.message);
-      }
+      if (whErr) console.warn('[Supabase] Warehouses upsert notice:', whErr.message);
 
-      // B. Ingest the 501 records into assets table in batches of 50
+      // Upsert discovered categories
+      const { error: catErr } = await supabase.from('categories').upsert(
+        discoveredCategories.map((c) => ({
+          id: c.id,
+          name: c.name,
+          slug: c.slug,
+          icon: c.icon,
+          display_order: c.displayOrder,
+        })),
+        { onConflict: 'id' }
+      );
+      if (catErr) console.warn('[Supabase] Categories upsert notice:', catErr.message);
+
+      // Upsert assets in batches of 50
       const BATCH_SIZE = 50;
-      for (let i = 0; i < recordsToIngest.length; i += BATCH_SIZE) {
-        const batch = recordsToIngest.slice(i, i + BATCH_SIZE);
+      for (let i = 0; i < finalAssets.length; i += BATCH_SIZE) {
+        const batch = finalAssets.slice(i, i + BATCH_SIZE);
         const dbPayload = batch.map((item) => ({
-          id: `ast-${item.originalTaskId}`,
-          qr_code: item.qr_code,
-          serial_number: item.serial_number,
+          id: item.id,
+          qr_code: item.qrCode,
+          serial_number: item.serialNumber,
           current_warehouse_id: item.warehouseId,
           status: item.status,
           condition: item.condition,
-          current_assigned_worker: item.current_assigned_worker,
+          current_assigned_worker: item.currentAssignedWorker,
           version: 1,
-          purchase_cost: 2500,
-          purchase_date: '2026-01-15',
+          purchase_cost: item.purchaseCost,
+          purchase_date: item.purchaseDate,
         }));
 
-        const { error: batchError } = await supabase.from('assets').upsert(dbPayload, {
+        const { error: batchErr } = await supabase.from('assets').upsert(dbPayload, {
           onConflict: 'qr_code',
         });
-
-        if (batchError) {
-          console.warn(`[Supabase] Batch ${Math.floor(i / BATCH_SIZE) + 1} notice:`, batchError.message);
+        if (batchErr) {
+          console.warn(`[Supabase] Batch ${Math.floor(i / BATCH_SIZE) + 1} notice:`, batchErr.message);
         }
       }
     } catch (err) {
-      console.warn('[Supabase] Supabase connection error:', err.message);
+      console.warn('[Supabase] Ingestion error:', err.message);
     }
-  } else {
-    // Offline/fallback mode: live DB not connected via .env.local
   }
 
-  // 3. Synchronize src/lib/mockStore.ts with the exact 501 assets array
+  // 6. Synchronize src/lib/mockStore.ts with complete exhaustive dataset
   const mockStorePath = path.join(projectRoot, 'src', 'lib', 'mockStore.ts');
   if (fs.existsSync(mockStorePath)) {
     const mockStoreContent = fs.readFileSync(mockStorePath, 'utf-8');
 
-    // Build the exact 501 assets objects array
-    const mockAssetsArray = recordsToIngest.map((item) => ({
-      id: `ast-${item.originalTaskId}`,
-      qrCode: item.qr_code,
-      serialNumber: item.serial_number,
-      toolName: item.name,
-      brand: item.brand,
-      modelNumber: null,
-      categoryId: item.categoryId,
-      categoryName: item.category_name,
-      warehouseId: item.warehouseId,
-      warehouseName: item.warehouseName,
-      warehouseCode: item.warehouseCode,
-      status: item.status,
-      condition: item.condition,
-      currentAssignedWorker: item.current_assigned_worker,
-      workerPhone: null,
-      version: 1,
-      purchaseCost: 2500,
-      purchaseDate: '2026-01-15',
-      warrantyUntil: '2028-01-15',
-      safetyInspectionDue: '2027-01-15',
-      isLocked: false,
-      originalTaskId: item.originalTaskId,
-      orderNumber: item.order_number,
-    }));
+    const mockWarehousesString = JSON.stringify(discoveredWarehouses, null, 2);
+    const mockCategoriesString = JSON.stringify(discoveredCategories, null, 2);
+    const mockAssetsString = JSON.stringify(finalAssets, null, 2);
 
-    const mockWarehousesString = JSON.stringify(AUTHORITATIVE_WAREHOUSES, null, 2);
-    const mockAssetsString = JSON.stringify(mockAssetsArray, null, 2);
-
-    // 1. Replace MOCK_WAREHOUSES and warehousesStore
+    // Replace MOCK_WAREHOUSES and warehousesStore
     let updatedContent = mockStoreContent.replace(
       /export const MOCK_WAREHOUSES: Warehouse\[\] =[\s\S]*?;\r?\n\r?\nconst warehousesStore: Warehouse\[\] =[\s\S]*?;/,
       `export const MOCK_WAREHOUSES: Warehouse[] = ${mockWarehousesString};\n\nconst warehousesStore: Warehouse[] = [...MOCK_WAREHOUSES];`
     );
 
-    // 2. Replace MOCK_ASSETS
+    // Replace MOCK_CATEGORIES
+    updatedContent = updatedContent.replace(
+      /export const MOCK_CATEGORIES: Category\[\] =[\s\S]*?;\r?\n\r?\nexport interface UnifiedAssetItem/,
+      `export const MOCK_CATEGORIES: Category[] = ${mockCategoriesString};\n\nexport interface UnifiedAssetItem`
+    );
+
+    // Replace MOCK_ASSETS
     updatedContent = updatedContent.replace(
       /export const MOCK_ASSETS: UnifiedAssetItem\[\] =[\s\S]*?;\r?\n\r?\n(\/\/ 4\. Authoritative Audit History Records)/,
       `export const MOCK_ASSETS: UnifiedAssetItem[] = ${mockAssetsString};\n\n$1`
     );
 
-    // 3. Replace assetsStore initialization
+    // Replace assetsStore initialization
     updatedContent = updatedContent.replace(
       /const assetsStore: UnifiedAssetItem\[\] =[\s\S]*?;/,
       `const assetsStore: UnifiedAssetItem[] = [...MOCK_ASSETS];`
@@ -400,8 +508,23 @@ async function main() {
     fs.writeFileSync(mockStorePath, updatedContent, 'utf-8');
   }
 
-  // 4. Output success confirmation
-  console.log(`✓ Successfully ingested ${recordsToIngest.length} assets into Supabase and mockStore`);
+  // 7. Print Required Detailed Statistics & Confirmation
+  console.log('====================================================');
+  console.log('  ZATOUT INVENTORY FULL PLATFORM SYNCHRONIZATION');
+  console.log('====================================================');
+  console.log(`• Total sheets scanned: ${sheetNames.length} (${sheetNames.join(', ')})`);
+  console.log(`• Total assets extracted and upserted: ${finalAssets.length}`);
+  console.log(`• Maximum ZR- number detected: ZR-${maxZR} (Next sequential tag: ZR-${maxZR + 1})`);
+  console.log('\n--- Facilities & Asset Distribution ---');
+  for (const [facility, count] of Object.entries(facilityCounts)) {
+    console.log(`  - ${facility}: ${count} assets`);
+  }
+  console.log('\n--- Categories & Asset Distribution ---');
+  for (const [category, count] of Object.entries(categoryCounts)) {
+    console.log(`  - ${category}: ${count} assets`);
+  }
+  console.log('====================================================');
+  console.log(`✓ Successfully ingested ${finalAssets.length} assets into Supabase and mockStore`);
 }
 
 main().catch((err) => {
