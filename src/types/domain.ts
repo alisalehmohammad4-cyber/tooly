@@ -31,7 +31,8 @@ export type AssetStatus =
   | 'checked_out'
   | 'in_transit'
   | 'maintenance'
-  | 'lost';
+  | 'lost'
+  | 'needs_repair';
 
 export type AssetCondition =
   | 'excellent'

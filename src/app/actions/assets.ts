@@ -2,7 +2,7 @@
 
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { QuickOnboardSchema, type QuickOnboardInput } from '@/core/assets/onboard.schema';
-import type { AssetReservation } from '@/types/domain';
+import type { AssetReservation, AssetStatus } from '@/types/domain';
 import { appendAuditHistoryEntry } from '@/app/actions/history';
 import {
   getMockWarehouses,
@@ -259,7 +259,7 @@ export interface CatalogCategory {
 export interface CatalogAssetItem {
   id: string;
   qrCode: string;
-  status: 'available' | 'checked_out' | 'in_transit' | 'maintenance' | 'lost';
+  status: AssetStatus;
   condition: 'excellent' | 'good' | 'needs_repair' | 'retired';
   currentAssignedWorker: string | null;
   warehouseId: string;
@@ -349,7 +349,7 @@ export async function getCatalogData(warehouseId?: string): Promise<CatalogDataP
     interface RawJoinedAssetRow {
       id: string;
       qr_code: string;
-      status: 'available' | 'checked_out' | 'in_transit' | 'maintenance' | 'lost';
+      status: AssetStatus;
       condition: 'excellent' | 'good' | 'needs_repair' | 'retired';
       current_assigned_worker: string | null;
       current_warehouse_id: string;

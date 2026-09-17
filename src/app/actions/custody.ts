@@ -12,7 +12,7 @@ import {
   type TransferInput,
   type AssetAccessories,
 } from '@/core/assets/custody.schema';
-import type { AssetReservation } from '@/types/domain';
+import type { AssetReservation, AssetStatus } from '@/types/domain';
 import { appendAuditHistoryEntry } from '@/app/actions/history';
 import {
   matchesCodeSuffix,
@@ -23,7 +23,7 @@ export interface ScannedAssetDetails {
   id: string;
   qrCode: string;
   nfcUid?: string;
-  status: 'available' | 'checked_out' | 'in_transit' | 'maintenance' | 'lost';
+  status: AssetStatus;
   condition: 'excellent' | 'good' | 'needs_repair' | 'retired';
   currentAssignedWorker: string | null;
   currentWarehouseId: string;
