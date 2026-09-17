@@ -9,7 +9,7 @@ import {
   MOCK_CATEGORIES,
   getMockAssetByQr,
   addMockAsset,
-  getMockCatalogData,
+  getMockAssets,
   getNextAvailableMockTagNumber,
 } from '@/lib/mockStore';
 
@@ -300,124 +300,166 @@ export interface CatalogDataPayload {
   selectedWarehouseId?: string;
 }
 
-function getFallbackCatalog(warehouseId?: string): CatalogDataPayload {
-  return getMockCatalogData(warehouseId);
-}
 
 /**
- * Queries all categories with tool counts and assets directly.
- * Does not require inner joins on tool_models; resolves warehouse and category names smoothly.
- * Filters by warehouseId if specified.
+ * Queries all categories with live tool counts and assets.
+ * Resolves warehouse and category names smoothly and enriches with catalog counts.
+ * Filters returned assets by warehouseId if specified.
  */
 export async function getCatalogData(warehouseId?: string): Promise<CatalogDataPayload> {
-  if (!isSupabaseConfigured()) {
-    return getFallbackCatalog(warehouseId);
+  let warehousesList: Array<{ id: string; name: string; code: string }> = [];
+  let categoriesList: Array<{ id: string; name: string; slug: string; icon: string | null }> = [];
+  let allAssets: CatalogAssetItem[] = [];
+
+  if (isSupabaseConfigured()) {
+    try {
+      const [warehousesRes, categoriesRes, assetsRes] = await Promise.all([
+        supabase.from('warehouses').select('id, name, code').eq('is_active', true),
+        supabase.from('categories').select('id, name, slug, icon').order('display_order', { ascending: true }),
+        supabase.from('assets').select('*').limit(10000),
+      ]);
+
+      if (!warehousesRes.error && warehousesRes.data && warehousesRes.data.length > 0) {
+        warehousesList = warehousesRes.data;
+      }
+      if (!categoriesRes.error && categoriesRes.data && categoriesRes.data.length > 0) {
+        categoriesList = categoriesRes.data;
+      }
+      if (!assetsRes.error && assetsRes.data && assetsRes.data.length > 0) {
+        const warehouseMap = new Map(warehousesList.map((w) => [w.id, w]));
+        const categoryMap = new Map(categoriesList.map((c) => [c.id, c]));
+        const categoryNameMap = new Map(categoriesList.map((c) => [c.name, c]));
+        const mockAssetMap = new Map(getMockAssets().map((a) => [a.qrCode, a]));
+
+        allAssets = (assetsRes.data as Record<string, unknown>[]).map((row) => {
+          const qr = (row.qr_code || row.qrCode || '') as string;
+          const mockFallback = mockAssetMap.get(qr);
+
+          const whId = (row.current_warehouse_id || row.warehouse_id || row.currentWarehouseId || mockFallback?.currentWarehouseId || '') as string;
+          const wh = warehouseMap.get(whId);
+          const catId = (row.category_id || row.categoryId || mockFallback?.categoryId || '') as string;
+          const catName = (row.category_name || row.categoryName || row.category || mockFallback?.categoryName || '') as string;
+          const cat = categoryMap.get(catId) || categoryNameMap.get(catName);
+
+          const toolName = (row.tool_name || row.toolName || row.name || mockFallback?.toolName || 'כלי עבודה') as string;
+          const brand = (row.brand || mockFallback?.brand || 'Zatout') as string;
+          const worker = (row.current_assigned_worker || row.currentAssignedWorker || mockFallback?.currentAssignedWorker || null) as string | null;
+          const orderNum = (row.order_number || row.orderNumber || mockFallback?.orderNumber || null) as string | null;
+          const resolvedCatName = cat?.name || catName || mockFallback?.categoryName || 'ציוד כללי';
+
+          return {
+            id: (row.id || mockFallback?.id || '') as string,
+            qrCode: qr,
+            qr_code: qr,
+            status: (row.status || mockFallback?.status || 'available') as AssetStatus,
+            condition: (row.condition || mockFallback?.condition || 'good') as 'excellent' | 'good' | 'needs_repair' | 'retired',
+            currentAssignedWorker: worker,
+            current_assigned_worker: worker,
+            warehouseId: whId,
+            currentWarehouseId: whId,
+            current_warehouse_id: whId,
+            warehouseName: wh?.name || mockFallback?.warehouseName || (row.warehouse_name as string) || 'מחסן ראשי',
+            warehouse_name: wh?.name || mockFallback?.warehouseName || (row.warehouse_name as string) || 'מחסן ראשי',
+            warehouseCode: wh?.code || mockFallback?.warehouseCode || (row.warehouse_code as string) || 'WH',
+            warehouse_code: wh?.code || mockFallback?.warehouseCode || (row.warehouse_code as string) || 'WH',
+            categoryId: cat?.id || catId,
+            category_id: cat?.id || catId,
+            categoryName: resolvedCatName,
+            category_name: resolvedCatName,
+            category: resolvedCatName,
+            toolName,
+            tool_name: toolName,
+            brand,
+            modelNumber: (row.model_number || row.modelNumber || mockFallback?.modelNumber || null) as string | null,
+            model_number: (row.model_number || row.modelNumber || mockFallback?.modelNumber || null) as string | null,
+            purchaseDate: (row.purchase_date || row.purchaseDate || mockFallback?.purchaseDate) as string | undefined,
+            purchaseCost: Number(row.purchase_cost || row.purchaseCost || mockFallback?.purchaseCost) || 2500,
+            orderNumber: orderNum,
+            order_number: orderNum,
+          };
+        });
+      }
+    } catch (err) {
+      console.warn('Supabase error in getCatalogData, falling back to mockStore:', err);
+    }
   }
 
-  try {
-    const [warehousesRes, categoriesRes] = await Promise.all([
-      supabase.from('warehouses').select('id, name, code').eq('is_active', true),
-      supabase.from('categories').select('id, name, slug, icon').order('display_order', { ascending: true }),
-    ]);
+  // Fallback to mockStore if empty
+  if (warehousesList.length === 0) {
+    warehousesList = getMockWarehouses().map((w) => ({ id: w.id, name: w.name, code: w.code }));
+  }
+  if (categoriesList.length === 0) {
+    categoriesList = MOCK_CATEGORIES.map((c) => ({ id: c.id, name: c.name, slug: c.slug, icon: c.icon ?? null }));
+  }
+  if (allAssets.length === 0) {
+    allAssets = getMockAssets().map((a) => ({
+      id: a.id,
+      qrCode: a.qrCode || a.qr_code || '',
+      qr_code: a.qrCode || a.qr_code || '',
+      status: a.status,
+      condition: a.condition,
+      currentAssignedWorker: a.currentAssignedWorker || a.current_assigned_worker || null,
+      current_assigned_worker: a.currentAssignedWorker || a.current_assigned_worker || null,
+      warehouseId: a.currentWarehouseId || a.current_warehouse_id || a.warehouseId,
+      currentWarehouseId: a.currentWarehouseId || a.current_warehouse_id || a.warehouseId,
+      current_warehouse_id: a.currentWarehouseId || a.current_warehouse_id || a.warehouseId,
+      warehouseName: a.warehouseName || a.warehouse_name || 'מחסן ראשי',
+      warehouse_name: a.warehouseName || a.warehouse_name || 'מחסן ראשי',
+      warehouseCode: a.warehouseCode || a.warehouse_code || 'WH',
+      warehouse_code: a.warehouseCode || a.warehouse_code || 'WH',
+      categoryId: a.categoryId || a.category_id || '',
+      category_id: a.categoryId || a.category_id || '',
+      categoryName: a.category || a.categoryName || a.category_name || '',
+      category_name: a.category || a.categoryName || a.category_name || '',
+      category: a.category || a.categoryName || a.category_name || '',
+      toolName: a.toolName || a.tool_name || 'כלי עבודה',
+      tool_name: a.toolName || a.tool_name || 'כלי עבודה',
+      brand: a.brand || 'Zatout',
+      modelNumber: a.modelNumber || a.model_number || null,
+      model_number: a.modelNumber || a.model_number || null,
+      purchaseDate: a.purchaseDate,
+      purchaseCost: a.purchaseCost,
+      orderNumber: a.orderNumber || a.order_number || null,
+      order_number: a.orderNumber || a.order_number || null,
+    }));
+  }
 
-    // Query assets directly without requiring inner join on tool_models
-    let assetQuery = supabase.from('assets').select('*');
+  // 2. Compute toolCount for EACH category:
+  // Count of assets where asset.category_name === cat.name || asset.category === cat.name
+  const categoriesWithCount: CatalogCategory[] = categoriesList.map((cat) => {
+    const toolCount = allAssets.filter(
+      (asset) =>
+        asset.category_name === cat.name ||
+        asset.category === cat.name ||
+        asset.categoryName === cat.name
+    ).length;
 
-    if (warehouseId && warehouseId !== 'all') {
-      assetQuery = assetQuery.eq('current_warehouse_id', warehouseId);
-    }
-
-    const { data: rawAssets, error: assetErr } = await assetQuery;
-
-    if (
-      warehousesRes.error ||
-      categoriesRes.error ||
-      assetErr ||
-      !rawAssets ||
-      rawAssets.length === 0
-    ) {
-      console.warn('Using fallback catalog data due to empty database or query error');
-      return getFallbackCatalog(warehouseId);
-    }
-
-    const warehousesList = warehousesRes.data ?? [];
-    const categoriesList = categoriesRes.data ?? [];
-
-    const warehouseMap = new Map(warehousesList.map((w) => [w.id, w]));
-    const categoryMap = new Map(categoriesList.map((c) => [c.id, c]));
-    const categoryNameMap = new Map(categoriesList.map((c) => [c.name, c]));
-
-    const mappedAssets: CatalogAssetItem[] = rawAssets.map((row: Record<string, unknown>) => {
-      const whId = (row.current_warehouse_id || row.warehouse_id || row.currentWarehouseId || '') as string;
-      const wh = warehouseMap.get(whId);
-      const catId = (row.category_id || row.categoryId || '') as string;
-      const catName = (row.category_name || row.categoryName || row.category || '') as string;
-      const cat = categoryMap.get(catId) || categoryNameMap.get(catName);
-
-      const qr = (row.qr_code || row.qrCode || '') as string;
-      const toolName = (row.tool_name || row.toolName || row.name || 'כלי עבודה') as string;
-      const brand = (row.brand || 'Zatout') as string;
-      const worker = (row.current_assigned_worker || row.currentAssignedWorker || null) as string | null;
-      const orderNum = (row.order_number || row.orderNumber || null) as string | null;
-      const resolvedCatName = cat?.name || catName || 'כללי';
-
-      return {
-        id: (row.id || '') as string,
-        qrCode: qr,
-        qr_code: qr,
-        status: (row.status || 'available') as AssetStatus,
-        condition: (row.condition || 'good') as 'excellent' | 'good' | 'needs_repair' | 'retired',
-        currentAssignedWorker: worker,
-        current_assigned_worker: worker,
-        warehouseId: whId,
-        currentWarehouseId: whId,
-        current_warehouse_id: whId,
-        warehouseName: wh?.name || (row.warehouse_name as string) || 'מחסן ראשי',
-        warehouse_name: wh?.name || (row.warehouse_name as string) || 'מחסן ראשי',
-        warehouseCode: wh?.code || (row.warehouse_code as string) || 'WH',
-        warehouse_code: wh?.code || (row.warehouse_code as string) || 'WH',
-        categoryId: cat?.id || catId,
-        category_id: cat?.id || catId,
-        categoryName: resolvedCatName,
-        category_name: resolvedCatName,
-        category: resolvedCatName,
-        toolName,
-        tool_name: toolName,
-        brand,
-        modelNumber: (row.model_number || row.modelNumber || null) as string | null,
-        model_number: (row.model_number || row.modelNumber || null) as string | null,
-        purchaseDate: (row.purchase_date || row.purchaseDate) as string | undefined,
-        purchaseCost: Number(row.purchase_cost || row.purchaseCost) || 2500,
-        orderNumber: orderNum,
-        order_number: orderNum,
-      };
-    });
-
-    const categoriesWithCount: CatalogCategory[] = categoriesList.map((cat) => ({
+    return {
       id: cat.id,
       name: cat.name,
       slug: cat.slug,
       icon: cat.icon,
-      toolCount: mappedAssets.filter(
-        (a) =>
-          a.category === cat.name ||
-          a.categoryName === cat.name ||
-          a.category_name === cat.name ||
-          a.categoryId === cat.id ||
-          a.category_id === cat.id
-      ).length,
-    }));
-
-    return {
-      categories: categoriesWithCount,
-      assets: mappedAssets,
-      warehouses: warehousesList,
-      selectedWarehouseId: warehouseId || 'all',
+      toolCount,
     };
-  } catch (err) {
-    console.error('getCatalogData exception, returning fallback:', err);
-    return getFallbackCatalog(warehouseId);
-  }
+  });
+
+  // Filter returned assets by warehouseId if specified
+  const filteredAssets =
+    warehouseId && warehouseId !== 'all'
+      ? allAssets.filter(
+          (a) =>
+            a.warehouseId === warehouseId ||
+            a.currentWarehouseId === warehouseId ||
+            a.current_warehouse_id === warehouseId
+        )
+      : allAssets;
+
+  return {
+    categories: categoriesWithCount,
+    assets: filteredAssets,
+    warehouses: warehousesList,
+    selectedWarehouseId: warehouseId || 'all',
+  };
 }
 
 /**

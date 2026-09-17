@@ -27,6 +27,7 @@ export interface FacilityAssetDistribution {
   warehouseName: string;
   warehouseCode: string;
   totalAssets: number;
+  totalTools?: number;
   available: number;
   checkedOut: number;
   maintenance: number;
@@ -129,7 +130,8 @@ export async function getPlantManagerAnalytics(): Promise<PlantManagerAnalyticsP
       const [assetsRes, warehousesRes, ledgerRes] = await Promise.all([
         supabase
           .from('assets')
-          .select('*, tool_models(name, brand, model_number, category_id), warehouses(name, code)'),
+          .select('*, tool_models(name, brand, model_number, category_id), warehouses(name, code)')
+          .limit(10000),
         supabase.from('warehouses').select('*').eq('is_active', true),
         supabase
           .from('custody_ledger')
@@ -235,6 +237,7 @@ export async function getPlantManagerAnalytics(): Promise<PlantManagerAnalyticsP
               warehouseName: w.name as string,
               warehouseCode: wCode || 'WH',
               totalAssets: matchedAssets.length,
+              totalTools: matchedAssets.length,
               available,
               checkedOut,
               maintenance,
@@ -318,7 +321,8 @@ export async function getStorekeeperOperations(
     try {
       let query = supabase
         .from('assets')
-        .select('*, tool_models(name, brand, model_number, category_id)');
+        .select('*, tool_models(name, brand, model_number, category_id)')
+        .limit(10000);
       if (!isAll) {
         query = query.eq('current_warehouse_id', selectedWhId);
       }

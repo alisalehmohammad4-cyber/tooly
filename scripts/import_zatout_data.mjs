@@ -194,25 +194,30 @@ function getCategorySlug(name) {
   return slugMap[s] || `cat-${Buffer.from(s).toString('hex').slice(0, 8)}`;
 }
 
-// Load .env.local if present
+// Load .env.local or .env if present
 function loadEnvLocal() {
-  const envPath = path.join(projectRoot, '.env.local');
   const env = { ...process.env };
-  if (fs.existsSync(envPath)) {
-    const content = fs.readFileSync(envPath, 'utf-8');
-    content.split(/\r?\n/).forEach((line) => {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) return;
-      const idx = trimmed.indexOf('=');
-      if (idx !== -1) {
-        const key = trimmed.slice(0, idx).trim();
-        let val = trimmed.slice(idx + 1).trim();
-        if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-          val = val.slice(1, -1);
+  const envFiles = ['.env.local', '.env'];
+  for (const file of envFiles) {
+    const envPath = path.join(projectRoot, file);
+    if (fs.existsSync(envPath)) {
+      const content = fs.readFileSync(envPath, 'utf-8');
+      content.split(/\r?\n/).forEach((line) => {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) return;
+        const idx = trimmed.indexOf('=');
+        if (idx !== -1) {
+          const key = trimmed.slice(0, idx).trim();
+          let val = trimmed.slice(idx + 1).trim();
+          if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+            val = val.slice(1, -1);
+          }
+          if (!env[key]) {
+            env[key] = val;
+          }
         }
-        env[key] = val;
-      }
-    });
+      });
+    }
   }
   return env;
 }
@@ -457,11 +462,10 @@ async function main() {
       );
       if (catErr) console.warn('[Supabase] Categories upsert notice:', catErr.message);
 
-      // Upsert assets in batches of 50
+      // Upsert assets in chunks of 50
       const BATCH_SIZE = 50;
       for (let i = 0; i < finalAssets.length; i += BATCH_SIZE) {
-        const batch = finalAssets.slice(i, i + BATCH_SIZE);
-        const dbPayload = batch.map((item) => ({
+        const chunk = finalAssets.slice(i, i + BATCH_SIZE).map((item) => ({
           id: item.id,
           qr_code: item.qrCode,
           serial_number: item.serialNumber,
@@ -474,15 +478,15 @@ async function main() {
           purchase_date: item.purchaseDate,
         }));
 
-        const { error: batchErr } = await supabase.from('assets').upsert(dbPayload, {
+        const { error } = await supabase.from('assets').upsert(chunk, {
           onConflict: 'qr_code',
         });
-        if (batchErr) {
-          console.warn(`[Supabase] Batch ${Math.floor(i / BATCH_SIZE) + 1} notice:`, batchErr.message);
+        if (error) {
+          console.error('Supabase Error:', error.message);
         }
       }
     } catch (err) {
-      console.warn('[Supabase] Ingestion error:', err.message);
+      console.error('Supabase Error:', err.message);
     }
   }
 

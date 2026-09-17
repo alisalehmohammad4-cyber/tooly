@@ -4,7 +4,6 @@ import { revalidatePath } from 'next/cache';
 import type { Warehouse, WarehouseType } from '@/types/domain';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import {
-  getMockWarehousesAdmin,
   addMockWarehouse,
   updateMockWarehouse,
   deleteMockWarehouse,
@@ -22,52 +21,100 @@ export interface WarehouseActionResult {
  * Retrieves all facilities and warehouses joined with live asset inventory metrics.
  */
 export async function getWarehousesAdminAction(): Promise<WarehouseAdminItem[]> {
+  let warehousesList: Array<{
+    id: string;
+    name: string;
+    code: string;
+    type?: WarehouseType;
+    address?: string | null;
+    isActive?: boolean;
+  }> = [];
+
+  let assetsList: Array<{
+    id?: string;
+    current_warehouse_id?: string | null;
+    currentWarehouseId?: string | null;
+    warehouse_id?: string | null;
+    warehouseId?: string | null;
+    warehouse_code?: string | null;
+    warehouseCode?: string | null;
+    status?: string;
+  }> = [];
+
   if (isSupabaseConfigured()) {
     try {
       const [whRes, assetsRes] = await Promise.all([
         supabase.from('warehouses').select('*').order('name', { ascending: true }),
-        supabase.from('assets').select('current_warehouse_id, status'),
+        supabase.from('assets').select('id, current_warehouse_id, status').limit(10000),
       ]);
 
       if (!whRes.error && whRes.data && whRes.data.length > 0) {
-        const rawAssets = assetsRes.data || [];
+        warehousesList = whRes.data.map((row: Record<string, unknown>) => ({
+          id: row.id as string,
+          name: row.name as string,
+          code: (row.code as string) || 'WH',
+          type: (row.type as WarehouseType) || 'central_warehouse',
+          address: (row.address as string) || null,
+          isActive: row.is_active !== false,
+        }));
+      }
 
-        return whRes.data.map((row: Record<string, unknown>) => {
-          const whId = row.id as string;
-          const whAssets = rawAssets.filter(
-            (a: Record<string, unknown>) => a.current_warehouse_id === whId
-          );
-          const availableCount = whAssets.filter(
-            (a: Record<string, unknown>) => a.status === 'available'
-          ).length;
-          const inUseCount = whAssets.filter(
-            (a: Record<string, unknown>) => a.status === 'checked_out'
-          ).length;
-          const maintenanceCount = whAssets.filter(
-            (a: Record<string, unknown>) => a.status === 'maintenance'
-          ).length;
-
-          return {
-            id: whId,
-            name: row.name as string,
-            code: (row.code as string) || 'WH',
-            type: (row.type as WarehouseType) || 'central_warehouse',
-            address: (row.address as string) || null,
-            isActive: row.is_active !== false,
-            toolCount: whAssets.length,
-            availableCount,
-            inUseCount,
-            maintenanceCount,
-          };
-        });
+      if (!assetsRes.error && assetsRes.data && assetsRes.data.length > 0) {
+        assetsList = assetsRes.data as typeof assetsList;
       }
     } catch (err) {
-      console.warn('[getWarehousesAdminAction] Supabase fallback to mockStore:', err);
+      console.warn('[getWarehousesAdminAction] Supabase error, falling back to mockStore:', err);
     }
   }
 
-  // Authoritative fallback synchronized with mockStore
-  return getMockWarehousesAdmin();
+  // Fallback to mockStore if empty from Supabase
+  if (warehousesList.length === 0) {
+    const { getMockWarehouses } = await import('@/lib/mockStore');
+    warehousesList = getMockWarehouses().map((w) => ({
+      id: w.id,
+      name: w.name,
+      code: w.code,
+      type: w.type,
+      address: w.address,
+      isActive: w.isActive,
+    }));
+  }
+
+  if (assetsList.length === 0) {
+    const { getMockAssets } = await import('@/lib/mockStore');
+    assetsList = getMockAssets() as typeof assetsList;
+  }
+
+  return warehousesList.map((wh) => {
+    const whAssets = assetsList.filter(
+      (a) =>
+        a.current_warehouse_id === wh.id ||
+        a.currentWarehouseId === wh.id ||
+        a.warehouse_id === wh.id ||
+        a.warehouseId === wh.id ||
+        (Boolean(wh.code) && (a.warehouse_code === wh.code || a.warehouseCode === wh.code))
+    );
+
+    const availableCount = whAssets.filter((a) => a.status === 'available').length;
+    const inUseCount = whAssets.filter((a) => a.status === 'checked_out').length;
+    const maintenanceCount = whAssets.filter(
+      (a) => a.status === 'maintenance' || a.status === 'needs_repair'
+    ).length;
+
+    return {
+      id: wh.id,
+      name: wh.name,
+      code: wh.code,
+      type: wh.type || 'central_warehouse',
+      address: wh.address || null,
+      isActive: wh.isActive !== false,
+      toolCount: whAssets.length,
+      totalTools: whAssets.length,
+      availableCount,
+      inUseCount,
+      maintenanceCount,
+    };
+  });
 }
 
 /**

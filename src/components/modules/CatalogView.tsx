@@ -98,7 +98,12 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
     if (!selectedWarehouseId || selectedWarehouseId === 'all') {
       return initialData.assets;
     }
-    return initialData.assets.filter((a) => a.warehouseId === selectedWarehouseId);
+    return initialData.assets.filter(
+      (a) =>
+        a.warehouseId === selectedWarehouseId ||
+        a.currentWarehouseId === selectedWarehouseId ||
+        a.current_warehouse_id === selectedWarehouseId
+    );
   }, [initialData.assets, selectedWarehouseId]);
 
   // Status counts for the pills within current warehouse selection
@@ -127,7 +132,14 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
   const categoriesWithCount = useMemo(() => {
     return initialData.categories.map((cat) => ({
       ...cat,
-      toolCount: statusFilteredAssets.filter((a) => a.categoryId === cat.id).length,
+      toolCount: statusFilteredAssets.filter(
+        (a) =>
+          a.category_name === cat.name ||
+          a.category === cat.name ||
+          a.categoryName === cat.name ||
+          a.categoryId === cat.id ||
+          a.category_id === cat.id
+      ).length,
     }));
   }, [initialData.categories, statusFilteredAssets]);
 
@@ -147,7 +159,15 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
     let list = statusFilteredAssets;
 
     if (activeCategoryId) {
-      list = list.filter((a) => a.categoryId === activeCategoryId);
+      list = list.filter(
+        (a) =>
+          a.categoryId === activeCategoryId ||
+          a.category_id === activeCategoryId ||
+          (activeCategory &&
+            (a.category_name === activeCategory.name ||
+              a.category === activeCategory.name ||
+              a.categoryName === activeCategory.name))
+      );
     }
 
     if (debouncedSearchQuery.trim()) {
@@ -155,7 +175,7 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
     }
 
     return list;
-  }, [statusFilteredAssets, activeCategoryId, debouncedSearchQuery]);
+  }, [statusFilteredAssets, activeCategoryId, activeCategory, debouncedSearchQuery]);
 
   const isSearching = debouncedSearchQuery.trim().length > 0;
   const showToolList = Boolean(activeCategoryId || isSearching);

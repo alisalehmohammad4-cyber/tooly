@@ -30,6 +30,7 @@ export interface WarehouseAdminItem {
   address?: string | null;
   isActive: boolean;
   toolCount: number;
+  totalTools?: number;
   availableCount: number;
   inUseCount: number;
   maintenanceCount: number;
@@ -164,6 +165,7 @@ export function getMockWarehousesAdmin(): WarehouseAdminItem[] {
       address: wh.address || null,
       isActive: wh.isActive ?? true,
       toolCount: whAssets.length,
+      totalTools: whAssets.length,
       availableCount,
       inUseCount,
       maintenanceCount,
@@ -40595,6 +40597,7 @@ export function getMockPlantManagerAnalytics(): PlantManagerAnalyticsPayload {
       warehouseName: wh.name,
       warehouseCode: wh.code,
       totalAssets: matchedAssets.length,
+      totalTools: matchedAssets.length,
       available,
       checkedOut,
       maintenance,
@@ -40853,11 +40856,11 @@ export function getMockCatalogData(warehouseId?: string): CatalogDataPayload {
     name: cat.name,
     slug: cat.slug,
     icon: cat.icon ?? null,
-    toolCount: catalogAssets.filter(
+    toolCount: assetsStore.filter(
       (a) =>
+        a.category_name === cat.name ||
         a.category === cat.name ||
         a.categoryName === cat.name ||
-        a.category_name === cat.name ||
         a.categoryId === cat.id ||
         a.category_id === cat.id
     ).length,

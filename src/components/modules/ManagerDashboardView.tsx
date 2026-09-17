@@ -1442,7 +1442,7 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                         <div className="flex items-center justify-between text-xs">
                           <span className="font-bold text-slate-700">סה&quot;כ כלים במתקן:</span>
                           <span className="font-black text-slate-900 bg-white px-2 py-0.5 rounded-lg border border-slate-200">
-                            {wh.toolCount} כלים
+                            {wh.totalTools ?? wh.toolCount} כלים
                           </span>
                         </div>
                         <div className="grid grid-cols-3 gap-1 text-[11px] pt-1 border-t border-slate-200/60 text-center font-bold">
