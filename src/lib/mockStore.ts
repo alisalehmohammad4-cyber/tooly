@@ -40992,6 +40992,35 @@ export function updateMockUserWarehouse(
   return { success: true, user };
 }
 
+export function updateMockUserRole(
+  userId: string,
+  role: 'storekeeper' | 'chief_operations'
+): { success: boolean; error?: string; user?: AppUser } {
+  const user = MOCK_USERS.find(
+    (u) => u.id === userId || u.username?.toLowerCase() === userId.toLowerCase()
+  );
+  if (!user) {
+    return { success: false, error: 'המשתמש לא נמצא במערכת' };
+  }
+  user.role = role;
+  return { success: true, user };
+}
+
+export function toggleMockUserActive(
+  userId: string,
+  isActive: boolean
+): { success: boolean; error?: string; user?: AppUser } {
+  const user = MOCK_USERS.find(
+    (u) => u.id === userId || u.username?.toLowerCase() === userId.toLowerCase()
+  );
+  if (!user) {
+    return { success: false, error: 'המשתמש לא נמצא במערכת' };
+  }
+  user.isActive = isActive;
+  return { success: true, user };
+}
+
+
 export function getMockUserByCredentials(identifier: string, secret?: string): AppUser | null {
   const cleanId = identifier.trim().toLowerCase();
   const cleanSecret = (secret || '').trim();

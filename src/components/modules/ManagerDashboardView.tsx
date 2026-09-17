@@ -95,6 +95,8 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
   const [newFullName, setNewFullName] = useState<string>('');
   const [newUsername, setNewUsername] = useState<string>('');
   const [newPinCode, setNewPinCode] = useState<string>('');
+  const [newEmail, setNewEmail] = useState<string>('');
+  const [newPhone, setNewPhone] = useState<string>('');
   const [newUserRole, setNewUserRole] = useState<'storekeeper' | 'chief_operations'>('storekeeper');
   const [newAssignedWarehouseId, setNewAssignedWarehouseId] = useState<string>(
     data.facilityDistribution[0]?.warehouseId || 'wh-main-01'
@@ -312,6 +314,8 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
         role: newUserRole,
         assignedWarehouseId:
           newUserRole === 'chief_operations' ? undefined : newAssignedWarehouseId,
+        email: newEmail,
+        phone: newPhone,
       });
 
       if (res.success) {
@@ -322,6 +326,8 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
         setNewFullName('');
         setNewUsername('');
         setNewPinCode('');
+        setNewEmail('');
+        setNewPhone('');
         setNewUserRole('storekeeper');
         setIsAddModalOpen(false);
         await loadStorekeepers();
@@ -1490,6 +1496,34 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                         </select>
                       )}
                     </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        אימייל ארגוני (אופציונלי):
+                      </label>
+                      <input
+                        type="email"
+                        value={newEmail}
+                        onChange={(e) => setNewEmail(e.target.value)}
+                        placeholder="לדוגמה: yaron@zatout.co.il"
+                        dir="ltr"
+                        className="w-full bg-white border border-purple-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-bold text-right focus:border-purple-600 focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        טלפון ליצירת קשר (אופציונלי):
+                      </label>
+                      <input
+                        type="tel"
+                        value={newPhone}
+                        onChange={(e) => setNewPhone(e.target.value)}
+                        placeholder="לדוגמה: 050-1234567"
+                        dir="ltr"
+                        className="w-full bg-white border border-purple-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-bold text-right focus:border-purple-600 focus:outline-none"
+                      />
+                    </div>
                   </div>
 
                   <div className="flex items-center justify-end gap-3 pt-2">
@@ -1614,7 +1648,10 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                               )}
                             </td>
                             <td className="p-3.5 font-mono text-slate-600" dir="ltr">
-                              {sk.username || '—'}
+                              <div>{sk.username || '—'}</div>
+                              {sk.email && (
+                                <div className="text-[10px] text-slate-400 truncate max-w-[150px]">{sk.email}</div>
+                              )}
                             </td>
                             <td className="p-3.5 font-mono font-bold text-purple-800" dir="ltr">
                               •••• ({sk.pinCode})

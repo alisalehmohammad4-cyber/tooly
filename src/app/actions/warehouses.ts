@@ -18,10 +18,29 @@ export interface WarehouseActionResult {
   warehouse?: Warehouse;
 }
 
+// Fast in-memory cache for high-frequency warehouse and tool inspections (30-second TTL)
+interface WarehouseCacheEntry<T> {
+  data: T;
+  expiresAt: number;
+}
+const WAREHOUSE_CACHE_TTL_MS = 30 * 1000;
+let adminWarehousesCache: WarehouseCacheEntry<WarehouseAdminItem[]> | null = null;
+const warehouseToolsCache = new Map<string, WarehouseCacheEntry<WarehouseToolItem[]>>();
+
+export async function invalidateWarehouseCache(): Promise<void> {
+  adminWarehousesCache = null;
+  warehouseToolsCache.clear();
+}
+
 /**
  * Retrieves all facilities and warehouses joined with live asset inventory metrics.
+ * Cached for 30 seconds to optimize executive dashboard performance.
  */
 export async function getWarehousesAdminAction(): Promise<WarehouseAdminItem[]> {
+  if (adminWarehousesCache && adminWarehousesCache.expiresAt > Date.now()) {
+    return adminWarehousesCache.data;
+  }
+
   let warehousesList: Array<{
     id: string;
     name: string;
@@ -45,7 +64,7 @@ export async function getWarehousesAdminAction(): Promise<WarehouseAdminItem[]> 
   if (isSupabaseConfigured()) {
     try {
       const [whRes, assetsRes] = await Promise.all([
-        supabase.from('warehouses').select('*').order('name', { ascending: true }),
+        supabase.from('warehouses').select('id, name, code, type, address, is_active').order('name', { ascending: true }),
         supabase.from('assets').select('id, current_warehouse_id, status').limit(10000),
       ]);
 
@@ -86,7 +105,7 @@ export async function getWarehousesAdminAction(): Promise<WarehouseAdminItem[]> 
     assetsList = getMockAssets() as typeof assetsList;
   }
 
-  return warehousesList.map((wh) => {
+  const results: WarehouseAdminItem[] = warehousesList.map((wh) => {
     const whAssets = assetsList.filter(
       (a) =>
         a.current_warehouse_id === wh.id ||
@@ -116,6 +135,13 @@ export async function getWarehousesAdminAction(): Promise<WarehouseAdminItem[]> 
       maintenanceCount,
     };
   });
+
+  adminWarehousesCache = {
+    data: results,
+    expiresAt: Date.now() + WAREHOUSE_CACHE_TTL_MS,
+  };
+
+  return results;
 }
 
 /**
@@ -184,6 +210,8 @@ export async function createWarehouseAction(input: {
 
   const finalWh = createdWarehouse || mockWh;
 
+  await invalidateWarehouseCache();
+
   return {
     success: true,
     message: `המתקן "${finalWh.name}" נוסף בהצלחה למערכת.`,
@@ -237,6 +265,8 @@ export async function updateWarehouseAction(
   }
 
   const updatedMock = updateMockWarehouse(id, patch);
+
+  await invalidateWarehouseCache();
 
   return {
     success: true,
@@ -327,6 +357,8 @@ export async function deleteWarehouseAction(targetId: string): Promise<Warehouse
           console.warn('[deleteWarehouseAction] revalidatePath warning:', e);
         }
 
+        await invalidateWarehouseCache();
+
         return {
           success: true,
           message: 'המחסן הוסר בהצלחה מהמערכת.',
@@ -353,6 +385,8 @@ export async function deleteWarehouseAction(targetId: string): Promise<Warehouse
     console.warn('[deleteWarehouseAction] revalidatePath warning:', e);
   }
 
+  await invalidateWarehouseCache();
+
   return {
     success: true,
     message: 'המחסן הוסר בהצלחה מהמערכת.',
@@ -376,6 +410,7 @@ export async function reconcileStockAction(input: {
   discrepancyNotes?: string;
 }): Promise<ReconcileStockResult> {
   const verifiedCount = input.verifiedAssetIds.length;
+  await invalidateWarehouseCache();
   return {
     success: true,
     message: `ספירת המלאי עבור המתקן אומתה ועודכנה בהצלחה (${verifiedCount} כלים אומתו).`,
@@ -406,6 +441,11 @@ export async function getWarehouseToolsAction(
     return [];
   }
 
+  const cached = warehouseToolsCache.get(cleanWhId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.data;
+  }
+
   let toolsList: WarehouseToolItem[] = [];
 
   if (isSupabaseConfigured()) {
@@ -425,7 +465,7 @@ export async function getWarehouseToolsAction(
       const [assetsRes, categoriesRes] = await Promise.all([
         supabase
           .from('assets')
-          .select('*')
+          .select('id, name, tool_name, qr_code, serial_number, category_id, category_name, status, current_assigned_worker, order_number')
           .or(`current_warehouse_id.eq.${targetWhId},warehouse_id.eq.${targetWhId}`)
           .limit(5000),
         supabase.from('categories').select('id, name'),
@@ -510,6 +550,11 @@ export async function getWarehouseToolsAction(
       order_number: a.orderNumber || a.order_number || null,
     }));
   }
+
+  warehouseToolsCache.set(cleanWhId, {
+    data: toolsList,
+    expiresAt: Date.now() + WAREHOUSE_CACHE_TTL_MS,
+  });
 
   return toolsList;
 }

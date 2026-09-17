@@ -139,6 +139,8 @@ export async function onboardAsset(rawInput: QuickOnboardInput): Promise<Onboard
       condition: input.condition,
     });
 
+    await invalidateCatalogCache();
+
     return {
       success: true,
       assetId: newAsset.id,
@@ -254,6 +256,8 @@ export async function onboardAsset(rawInput: QuickOnboardInput): Promise<Onboard
       gps: input.gps || null,
     });
 
+    await invalidateCatalogCache();
+
     return {
       success: true,
       assetId: newAsset.id,
@@ -319,13 +323,31 @@ export interface CatalogDataPayload {
   selectedWarehouseId?: string;
 }
 
+// Fast in-memory cache for high-frequency catalog & category requests (30-second TTL)
+interface CacheEntry<T> {
+  data: T;
+  expiresAt: number;
+}
+const CATALOG_CACHE_TTL_MS = 30 * 1000; // 30 seconds
+const catalogCache = new Map<string, CacheEntry<CatalogDataPayload>>();
+
+export async function invalidateCatalogCache(): Promise<void> {
+  catalogCache.clear();
+}
 
 /**
  * Queries all categories with live tool counts and assets.
  * Resolves warehouse and category names smoothly and enriches with catalog counts.
  * Filters returned assets by warehouseId if specified.
+ * Cached for 30s to maximize 60fps responsiveness across fleet of 1,016+ assets.
  */
 export async function getCatalogData(warehouseId?: string): Promise<CatalogDataPayload> {
+  const cacheKey = `catalog_${warehouseId || 'all'}`;
+  const cached = catalogCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.data;
+  }
+
   let warehousesList: Array<{ id: string; name: string; code: string }> = [];
   let categoriesList: Array<{ id: string; name: string; slug: string; icon: string | null }> = [];
   let allAssets: CatalogAssetItem[] = [];
@@ -335,7 +357,10 @@ export async function getCatalogData(warehouseId?: string): Promise<CatalogDataP
       const [warehousesRes, categoriesRes, assetsRes] = await Promise.all([
         supabase.from('warehouses').select('id, name, code').eq('is_active', true),
         supabase.from('categories').select('id, name, slug, icon').order('display_order', { ascending: true }),
-        supabase.from('assets').select('*').limit(10000),
+        supabase
+          .from('assets')
+          .select('id, qr_code, status, condition, current_assigned_worker, current_warehouse_id, warehouse_id, category_id, category_name, tool_name, brand, model_number, purchase_date, purchase_cost, order_number')
+          .limit(10000),
       ]);
 
       if (!warehousesRes.error && warehousesRes.data && warehousesRes.data.length > 0) {
@@ -480,12 +505,19 @@ export async function getCatalogData(warehouseId?: string): Promise<CatalogDataP
         )
       : allAssets;
 
-  return {
+  const result: CatalogDataPayload = {
     categories: categoriesWithCount,
     assets: filteredAssets,
     warehouses: warehousesList,
     selectedWarehouseId: warehouseId || 'all',
   };
+
+  catalogCache.set(cacheKey, {
+    data: result,
+    expiresAt: Date.now() + CATALOG_CACHE_TTL_MS,
+  });
+
+  return result;
 }
 
 /**

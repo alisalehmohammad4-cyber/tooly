@@ -108,6 +108,8 @@ export interface AppUser {
   role: UserRole;
   pinCode?: string;
   username?: string;
+  email?: string;
+  phone?: string;
   assignedWarehouseId?: string;
   assignedWarehouseName?: string;
   isActive?: boolean;

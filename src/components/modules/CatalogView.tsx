@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   Flame,
   Anchor,
@@ -31,6 +31,8 @@ import AssetActionModal from '@/components/modules/AssetActionModal';
 import ToolPassportModal from '@/components/modules/ToolPassportModal';
 import type { ScannedAssetDetails } from '@/app/actions/custody';
 import { matchesToolSearch } from '@/lib/search/toolDictionary';
+
+const PAGE_SIZE = 32;
 
 interface CatalogViewProps {
   initialData: CatalogDataPayload;
@@ -76,6 +78,10 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
   const [rawSearchQuery, setRawSearchQuery] = useState<string>('');
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState<string>('');
 
+  // Progressive slice rendering (32 items per chunk)
+  const [visibleCount, setVisibleCount] = useState<number>(PAGE_SIZE);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+
   // 3 Instant status toggle pills
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
 
@@ -92,6 +98,14 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
     }, 100);
     return () => clearTimeout(timer);
   }, [rawSearchQuery]);
+
+  // Reset progressive count to PAGE_SIZE when filters change (React render adjustment pattern)
+  const filterKey = `${debouncedSearchQuery}_${statusFilter}_${selectedWarehouseId}_${activeCategoryId || ''}`;
+  const [prevFilterKey, setPrevFilterKey] = useState<string>(filterKey);
+  if (prevFilterKey !== filterKey) {
+    setPrevFilterKey(filterKey);
+    setVisibleCount(PAGE_SIZE);
+  }
 
 
   // 1. Filter assets by selected warehouse
@@ -177,6 +191,31 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
 
     return list;
   }, [statusFilteredAssets, activeCategoryId, activeCategory, debouncedSearchQuery]);
+
+  // Progressive slice rendering: slice first visibleCount items for 60fps rendering
+  const visibleAssets = useMemo(() => {
+    return displayedAssets.slice(0, visibleCount);
+  }, [displayedAssets, visibleCount]);
+
+  // Infinite scroll observer: reveal next 32 items when sentinel enters viewport
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setVisibleCount((prev) => {
+            if (prev >= displayedAssets.length) return prev;
+            return Math.min(prev + PAGE_SIZE, displayedAssets.length);
+          });
+        }
+      },
+      { threshold: 0.1, rootMargin: '300px' }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [displayedAssets.length, visibleCount]);
 
   const isSearching = debouncedSearchQuery.trim().length > 0;
   const showToolList = Boolean(activeCategoryId || isSearching);
@@ -450,7 +489,7 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
             {/* Tool Cards List */}
             {displayedAssets.length > 0 && (
               <div className="space-y-3">
-                {displayedAssets.map((asset) => {
+                {visibleAssets.map((asset) => {
                   const isAvailable = asset.status === 'available';
                   const isCheckedOut = asset.status === 'checked_out';
                   const isMaintenance = asset.status === 'maintenance';
@@ -633,6 +672,39 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
                     </div>
                   );
                 })}
+              </div>
+            )}
+
+            {/* Progressive Loading & Infinite Scroll Sentinel */}
+            {displayedAssets.length > PAGE_SIZE && (
+              <div className="pt-2 pb-6 space-y-2 text-center">
+                {visibleCount < displayedAssets.length ? (
+                  <>
+                    <div ref={sentinelRef} className="h-8 flex items-center justify-center">
+                      <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                    </div>
+                    <div className="flex flex-col sm:flex-row items-center justify-center gap-2">
+                      <span className="text-xs font-bold text-slate-500">
+                        מציג {visibleAssets.length} מתוך {displayedAssets.length} כלים
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setVisibleCount((prev) =>
+                            Math.min(prev + PAGE_SIZE, displayedAssets.length)
+                          )
+                        }
+                        className="px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-800 text-xs font-black border border-blue-200 transition-all cursor-pointer shadow-2xs active:scale-95"
+                      >
+                        טען עוד 32 כלים
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold text-slate-500">
+                    ✓ נטענו כל {displayedAssets.length} הכלים
+                  </div>
+                )}
               </div>
             )}
           </div>

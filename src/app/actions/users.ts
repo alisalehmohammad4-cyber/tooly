@@ -1,7 +1,8 @@
 'use server';
 
+import { randomUUID } from 'crypto';
 import type { AppUser } from '@/types/domain';
-import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { isSupabaseConfigured, getSupabaseServerClient } from '@/lib/supabase';
 
 import {
   MOCK_USERS,
@@ -9,6 +10,8 @@ import {
   addMockUser,
   deleteMockUser,
   updateMockUserWarehouse,
+  updateMockUserRole,
+  toggleMockUserActive,
 } from '@/lib/mockStore';
 
 // Persistent in-memory user registry initialized with authoritative users
@@ -40,10 +43,12 @@ export async function authenticateUserAction(
   // 1. Live Supabase Authentication
   if (isSupabaseConfigured()) {
     try {
+      const serverClient = getSupabaseServerClient();
+
       // Ensure the authoritative admin user exists in Supabase app_users
       if (cleanIdLower === 'zatout01' || cleanId === '1952' || cleanSecret === '1952') {
         try {
-          await supabase.from('app_users').upsert(
+          await serverClient.from('app_users').upsert(
             {
               full_name: 'מנהל כללי (הנהלת מפעל)',
               username: 'Zatout01',
@@ -60,7 +65,7 @@ export async function authenticateUserAction(
 
       // Direct PIN matching via Supabase
       if (!cleanSecret && cleanId.length >= 4) {
-        const { data: dbUserByPin, error: pinErr } = await supabase
+        const { data: dbUserByPin, error: pinErr } = await serverClient
           .from('app_users')
           .select('*')
           .eq('pin_code', cleanId)
@@ -94,7 +99,7 @@ export async function authenticateUserAction(
       }
 
       // Username matching via Supabase
-      const { data: dbUserByName, error: uErr } = await supabase
+      const { data: dbUserByName, error: uErr } = await serverClient
         .from('app_users')
         .select('*')
         .ilike('username', cleanIdLower)
@@ -202,8 +207,89 @@ export async function authenticateUserAction(
 
 /**
  * Retrieves the list of enterprise operators (Chief Operations & Storekeepers) for the Manager Dashboard.
+ * Synchronizes with Supabase database when available, while ensuring local mock fallback stays intact.
  */
 export async function getStorekeepersListAction(): Promise<AppUser[]> {
+  if (isSupabaseConfigured()) {
+    try {
+      const serverClient = getSupabaseServerClient();
+
+      // 1. Try querying primary `users` table
+      const { data: usersData, error: usersErr } = await serverClient
+        .from('users')
+        .select('*');
+
+      if (!usersErr && usersData && usersData.length > 0) {
+        for (const row of usersData) {
+          const cleanEmail = row.email || '';
+          const fallbackUsername = cleanEmail ? cleanEmail.split('@')[0] : (row.username || String(row.id));
+          const mappedUser: AppUser = {
+            id: String(row.id),
+            fullName: row.name || row.full_name || 'משתמש מערכת',
+            username: row.username || fallbackUsername,
+            role: row.role || 'storekeeper',
+            email: row.email,
+            phone: row.phone,
+            assignedWarehouseId: row.assigned_warehouse_id,
+            assignedWarehouseName: row.assigned_warehouse_id
+              ? getWarehouseNameById(row.assigned_warehouse_id)
+              : undefined,
+            isActive: row.is_active !== false,
+          };
+          addMockUser(mappedUser);
+          const existIdx = USERS_STORE.findIndex(
+            (u) =>
+              u.id === mappedUser.id ||
+              (mappedUser.username && u.username?.toLowerCase() === mappedUser.username.toLowerCase())
+          );
+          if (existIdx !== -1) {
+            USERS_STORE[existIdx] = mappedUser;
+          } else {
+            USERS_STORE.push(mappedUser);
+          }
+        }
+      } else {
+        // 2. Fallback to `app_users` table
+        const { data: appUsersData, error: appErr } = await serverClient
+          .from('app_users')
+          .select('*');
+
+        if (!appErr && appUsersData && appUsersData.length > 0) {
+          for (const row of appUsersData) {
+            const mappedUser: AppUser = {
+              id: String(row.id),
+              fullName: row.full_name || 'משתמש מערכת',
+              username: row.username,
+              pinCode: row.pin_code,
+              role: row.role || 'storekeeper',
+              assignedWarehouseId: row.assigned_warehouse_id,
+              assignedWarehouseName:
+                row.assigned_warehouse_name ||
+                (row.assigned_warehouse_id
+                  ? getWarehouseNameById(row.assigned_warehouse_id)
+                  : undefined),
+              isActive: row.is_active !== false,
+              createdAt: row.created_at,
+            };
+            addMockUser(mappedUser);
+            const existIdx = USERS_STORE.findIndex(
+              (u) =>
+                u.id === mappedUser.id ||
+                (mappedUser.username && u.username?.toLowerCase() === mappedUser.username.toLowerCase())
+            );
+            if (existIdx !== -1) {
+              USERS_STORE[existIdx] = mappedUser;
+            } else {
+              USERS_STORE.push(mappedUser);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Could not fetch storekeepers from Supabase, using local store:', err);
+    }
+  }
+
   return USERS_STORE.filter(
     (u) =>
       u.role === 'storekeeper' ||
@@ -218,15 +304,19 @@ export interface CreateStorekeeperInput {
   pinCode: string;
   role?: 'storekeeper' | 'chief_operations';
   assignedWarehouseId?: string;
+  email?: string;
+  phone?: string;
 }
 
 /**
  * Creates a new Storekeeper or Chief Operations account (General Manager only).
+ * Writes persistently to Supabase `users` table ({ id, email, name, role, assigned_warehouse_id, phone, is_active: true }),
+ * mirrors to `app_users` and `profiles`, and keeps `MOCK_USERS` in sync.
  */
 export async function createStorekeeperAction(
   input: CreateStorekeeperInput
 ): Promise<{ success: boolean; error?: string; message?: string; user?: AppUser }> {
-  const { fullName, username, pinCode, role = 'storekeeper', assignedWarehouseId } = input;
+  const { fullName, username, pinCode, role = 'storekeeper', assignedWarehouseId, email, phone } = input;
 
   if (!fullName.trim() || fullName.trim().length < 2) {
     return { success: false, error: 'שם מלא חייב להכיל לפחות 2 תווים.' };
@@ -246,8 +336,10 @@ export async function createStorekeeperAction(
   }
 
   const cleanUsername = username.trim().toLowerCase();
+  const cleanPin = pinCode.trim();
+
   const existing = USERS_STORE.find(
-    (u) => u.username?.toLowerCase() === cleanUsername || u.pinCode === pinCode.trim()
+    (u) => u.username?.toLowerCase() === cleanUsername || u.pinCode === cleanPin
   );
 
   if (existing) {
@@ -260,50 +352,85 @@ export async function createStorekeeperAction(
   const warehouseName = isChief
     ? 'כלל המחסנים (All Depots)'
     : getWarehouseNameById(assignedWarehouseId!);
+  const assignedWarehouse = isChief ? null : (assignedWarehouseId || null);
+
+  const userId = randomUUID();
+  const userEmail = email?.trim() || `${cleanUsername}@zatout.co.il`;
+  const userPhone = phone?.trim() || null;
+  const userRole = isChief ? 'chief_operations' : role;
 
   const newUser: AppUser = {
-    id: `usr-${isChief ? 'co' : 'sk'}-${Date.now().toString(36)}`,
+    id: userId,
     fullName: isChief
       ? `${fullName.trim()} (אחראי ראשי)`
       : `${fullName.trim()} (מחסנאי מורשה)`,
     username: cleanUsername,
-    role: isChief ? 'chief_operations' : 'storekeeper',
-    pinCode: pinCode.trim(),
+    email: userEmail,
+    phone: userPhone || undefined,
+    role: userRole,
+    pinCode: cleanPin,
     assignedWarehouseId: isChief ? undefined : assignedWarehouseId,
     assignedWarehouseName: warehouseName,
     isActive: true,
     createdAt: new Date().toISOString(),
   };
 
+  // Synchronize local / fallback stores
   USERS_STORE.push(newUser);
   addMockUser(newUser);
 
-  // If Supabase is configured, also persist to app_users and profiles
+  // If Supabase is configured, write persistently using the server client (service role key or anon key)
   if (isSupabaseConfigured()) {
     try {
-      await supabase.from('app_users').insert({
-        id: newUser.id,
-        full_name: newUser.fullName,
-        username: newUser.username,
-        pin_code: newUser.pinCode,
+      const serverClient = getSupabaseServerClient();
+      const { error } = await serverClient.from('users').upsert({
+        id: userId,
+        email: userEmail,
+        name: newUser.fullName,
         role: newUser.role,
-        assigned_warehouse_id: newUser.assignedWarehouseId || null,
+        assigned_warehouse_id: assignedWarehouse,
+        phone: userPhone,
         is_active: true,
       });
-    } catch (err) {
-      console.warn('Could not mirror user to Supabase app_users:', err);
+
+      if (error) console.error('Error saving user to Supabase:', error.message);
+    } catch (err: unknown) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      console.error('Error saving user to Supabase:', error.message);
     }
 
+    // Secondary resilience: mirror to `app_users` (for PIN authentication)
     try {
-      await supabase.from('profiles').insert({
-        id: newUser.id,
+      const serverClient = getSupabaseServerClient();
+      await serverClient.from('app_users').upsert(
+        {
+          id: userId,
+          full_name: newUser.fullName,
+          username: cleanUsername,
+          pin_code: cleanPin,
+          role: newUser.role,
+          assigned_warehouse_id: assignedWarehouse,
+          assigned_warehouse_name: warehouseName,
+          is_active: true,
+        },
+        { onConflict: 'username' }
+      );
+    } catch (appUserErr) {
+      console.warn('Could not mirror user to Supabase app_users:', appUserErr);
+    }
+
+    // Mirror to `profiles` table if present
+    try {
+      const serverClient = getSupabaseServerClient();
+      await serverClient.from('profiles').upsert({
+        id: userId,
         full_name: newUser.fullName,
         role: newUser.role,
-        assigned_warehouse_id: newUser.assignedWarehouseId || null,
+        assigned_warehouse_id: assignedWarehouse,
         is_active: true,
       });
-    } catch (err) {
-      console.warn('Could not mirror user to Supabase profiles:', err);
+    } catch (profileErr) {
+      console.warn('Could not mirror user to Supabase profiles:', profileErr);
     }
   }
 
@@ -342,21 +469,12 @@ export async function deleteStorekeeperAction(
   // 1. Supabase deletion if configured
   if (isSupabaseConfigured()) {
     try {
-      await supabase
-        .from('app_users')
-        .delete()
-        .or(`id.eq.${userId},username.eq.${userId}`);
+      const serverClient = getSupabaseServerClient();
+      await serverClient.from('users').delete().eq('id', userId);
+      await serverClient.from('app_users').delete().or(`id.eq.${userId},username.eq.${userId}`);
+      await serverClient.from('profiles').delete().eq('id', userId);
     } catch (err) {
-      console.warn('Could not delete user from Supabase app_users:', err);
-    }
-
-    try {
-      await supabase
-        .from('profiles')
-        .delete()
-        .eq('id', userId);
-    } catch (err) {
-      console.warn('Could not delete user from Supabase profiles:', err);
+      console.warn('Could not delete user from Supabase:', err);
     }
   }
 
@@ -399,9 +517,33 @@ export async function updateUserRoleAction(
     user.assignedWarehouseName = getWarehouseNameById(assignedWarehouseId);
   }
 
+  // Sync mockStore
+  updateMockUserRole(userId, newRole);
+  if (assignedWarehouseId) {
+    updateMockUserWarehouse(userId, assignedWarehouseId);
+  }
+
   if (isSupabaseConfigured()) {
     try {
-      await supabase
+      const serverClient = getSupabaseServerClient();
+      await serverClient
+        .from('users')
+        .update({
+          role: user.role,
+          assigned_warehouse_id: user.assignedWarehouseId ?? null,
+        })
+        .eq('id', userId);
+
+      await serverClient
+        .from('app_users')
+        .update({
+          role: user.role,
+          assigned_warehouse_id: user.assignedWarehouseId ?? null,
+          assigned_warehouse_name: user.assignedWarehouseName ?? null,
+        })
+        .or(`id.eq.${userId},username.eq.${userId}`);
+
+      await serverClient
         .from('profiles')
         .update({
           role: user.role,
@@ -445,16 +587,21 @@ export async function reassignStorekeeperWarehouseAction(
 
   if (isSupabaseConfigured()) {
     try {
-      await supabase
-        .from('app_users')
+      const serverClient = getSupabaseServerClient();
+      await serverClient
+        .from('users')
         .update({ assigned_warehouse_id: newWarehouseId })
-        .or(`id.eq.${userId},username.eq.${userId}`);
-    } catch (err) {
-      console.warn('Could not mirror warehouse update to Supabase app_users:', err);
-    }
+        .eq('id', userId);
 
-    try {
-      await supabase
+      await serverClient
+        .from('app_users')
+        .update({
+          assigned_warehouse_id: newWarehouseId,
+          assigned_warehouse_name: warehouseName,
+        })
+        .or(`id.eq.${userId},username.eq.${userId}`);
+
+      await serverClient
         .from('profiles')
         .update({ assigned_warehouse_id: newWarehouseId })
         .eq('id', userId);
@@ -494,9 +641,23 @@ export async function toggleUserActiveAction(
 
   user.isActive = isActive;
 
+  // Sync with mockStore
+  toggleMockUserActive(userId, isActive);
+
   if (isSupabaseConfigured()) {
     try {
-      await supabase
+      const serverClient = getSupabaseServerClient();
+      await serverClient
+        .from('users')
+        .update({ is_active: isActive })
+        .eq('id', userId);
+
+      await serverClient
+        .from('app_users')
+        .update({ is_active: isActive })
+        .or(`id.eq.${userId},username.eq.${userId}`);
+
+      await serverClient
         .from('profiles')
         .update({ is_active: isActive })
         .eq('id', userId);

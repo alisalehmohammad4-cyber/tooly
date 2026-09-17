@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   X,
   Search,
@@ -23,6 +23,8 @@ import {
   type WarehouseToolItem,
 } from '@/app/actions/warehouses';
 
+const PAGE_SIZE = 32;
+
 interface WarehouseToolsModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -40,6 +42,11 @@ export default function WarehouseToolsModal({
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<StatusFilterType>('all');
+
+  // Progressive slice rendering state (32 items chunks)
+  const [visibleCount, setVisibleCount] = useState<number>(PAGE_SIZE);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
 
   // Load tools whenever the modal opens or the active warehouse changes
   const loadTools = useCallback(async (whId: string) => {
@@ -150,6 +157,39 @@ export default function WarehouseToolsModal({
       );
     });
   }, [tools, searchQuery, statusFilter]);
+
+  // Reset progressive count to PAGE_SIZE whenever query or filter changes (React render adjustment pattern)
+  const filterKey = `${searchQuery}_${statusFilter}_${warehouse?.id || ''}`;
+  const [prevFilterKey, setPrevFilterKey] = useState<string>(filterKey);
+  if (prevFilterKey !== filterKey) {
+    setPrevFilterKey(filterKey);
+    setVisibleCount(PAGE_SIZE);
+  }
+
+  // Progressive slice rendering: slice first visibleCount items for instant DOM rendering
+  const visibleTools = useMemo(() => {
+    return filteredTools.slice(0, visibleCount);
+  }, [filteredTools, visibleCount]);
+
+  // Infinite scroll observer: reveal next 32 items when sentinel enters modal scroll view
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setVisibleCount((prev) => {
+            if (prev >= filteredTools.length) return prev;
+            return Math.min(prev + PAGE_SIZE, filteredTools.length);
+          });
+        }
+      },
+      { root: scrollContainerRef.current, threshold: 0.1, rootMargin: '200px' }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [filteredTools.length, visibleCount]);
 
   if (!isOpen || !warehouse) return null;
 
@@ -341,7 +381,7 @@ export default function WarehouseToolsModal({
         {/* ============================================================ */}
         {/* SCROLLABLE TOOLS LIST / TABLE                                */}
         {/* ============================================================ */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-2.5 min-h-[300px]">
+        <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-2.5 min-h-[300px]">
           {isLoading ? (
             <div className="py-20 text-center space-y-3">
               <Loader2 className="w-9 h-9 animate-spin text-purple-600 mx-auto" />
@@ -389,7 +429,7 @@ export default function WarehouseToolsModal({
               </div>
 
               {/* Tools Items */}
-              {filteredTools.map((tool) => {
+              {visibleTools.map((tool) => {
                 const isCheckedOut =
                   tool.status === 'checked_out' || tool.status === 'in_use';
                 const isMaintenance =
@@ -495,6 +535,39 @@ export default function WarehouseToolsModal({
                   </div>
                 );
               })}
+
+              {/* Progressive Loading & Infinite Scroll Sentinel */}
+              {filteredTools.length > PAGE_SIZE && (
+                <div className="pt-2 pb-4 space-y-2 text-center">
+                  {visibleCount < filteredTools.length ? (
+                    <>
+                      <div ref={sentinelRef} className="h-7 flex items-center justify-center">
+                        <Loader2 className="w-5 h-5 animate-spin text-purple-600" />
+                      </div>
+                      <div className="flex flex-col sm:flex-row items-center justify-center gap-2">
+                        <span className="text-xs font-bold text-slate-500">
+                          מציג {visibleTools.length} מתוך {filteredTools.length} כלים
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setVisibleCount((prev) =>
+                              Math.min(prev + PAGE_SIZE, filteredTools.length)
+                            )
+                          }
+                          className="px-3 py-1.5 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-800 text-xs font-black border border-purple-200 transition-all cursor-pointer shadow-2xs active:scale-95"
+                        >
+                          טען עוד 32 כלים
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold text-slate-500">
+                      ✓ הוצגו כל {filteredTools.length} הכלים במתקן
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
