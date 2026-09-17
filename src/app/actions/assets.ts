@@ -259,16 +259,28 @@ export interface CatalogCategory {
 export interface CatalogAssetItem {
   id: string;
   qrCode: string;
+  qr_code?: string;
   status: AssetStatus;
   condition: 'excellent' | 'good' | 'needs_repair' | 'retired';
   currentAssignedWorker: string | null;
+  current_assigned_worker?: string | null;
   warehouseId: string;
+  currentWarehouseId?: string;
+  current_warehouse_id?: string;
   warehouseName: string;
+  warehouse_name?: string;
   warehouseCode: string;
+  warehouse_code?: string;
   categoryId: string;
+  category_id?: string;
+  categoryName?: string;
+  category_name?: string;
+  category?: string;
   toolName: string;
+  tool_name?: string;
   brand: string;
   modelNumber: string | null;
+  model_number?: string | null;
   purchaseDate?: string;
   purchaseCost?: number;
   warrantyUntil?: string;
@@ -277,6 +289,8 @@ export interface CatalogAssetItem {
   isLocked?: boolean;
   lockReason?: string;
   reservation?: AssetReservation | null;
+  orderNumber?: string | null;
+  order_number?: string | null;
 }
 
 export interface CatalogDataPayload {
@@ -291,7 +305,8 @@ function getFallbackCatalog(warehouseId?: string): CatalogDataPayload {
 }
 
 /**
- * Queries all categories with tool counts and assets joined with tool models and warehouses.
+ * Queries all categories with tool counts and assets directly.
+ * Does not require inner joins on tool_models; resolves warehouse and category names smoothly.
  * Filters by warehouseId if specified.
  */
 export async function getCatalogData(warehouseId?: string): Promise<CatalogDataPayload> {
@@ -305,26 +320,8 @@ export async function getCatalogData(warehouseId?: string): Promise<CatalogDataP
       supabase.from('categories').select('id, name, slug, icon').order('display_order', { ascending: true }),
     ]);
 
-    let assetQuery = supabase.from('assets').select(`
-      id,
-      qr_code,
-      status,
-      condition,
-      current_assigned_worker,
-      current_warehouse_id,
-      tool_models:tool_model_id (
-        id,
-        name,
-        brand,
-        model_number,
-        category_id
-      ),
-      warehouses:current_warehouse_id (
-        id,
-        name,
-        code
-      )
-    `);
+    // Query assets directly without requiring inner join on tool_models
+    let assetQuery = supabase.from('assets').select('*');
 
     if (warehouseId && warehouseId !== 'all') {
       assetQuery = assetQuery.eq('current_warehouse_id', warehouseId);
@@ -336,8 +333,8 @@ export async function getCatalogData(warehouseId?: string): Promise<CatalogDataP
       warehousesRes.error ||
       categoriesRes.error ||
       assetErr ||
-      !categoriesRes.data ||
-      categoriesRes.data.length === 0
+      !rawAssets ||
+      rawAssets.length === 0
     ) {
       console.warn('Using fallback catalog data due to empty database or query error');
       return getFallbackCatalog(warehouseId);
@@ -346,50 +343,69 @@ export async function getCatalogData(warehouseId?: string): Promise<CatalogDataP
     const warehousesList = warehousesRes.data ?? [];
     const categoriesList = categoriesRes.data ?? [];
 
-    interface RawJoinedAssetRow {
-      id: string;
-      qr_code: string;
-      status: AssetStatus;
-      condition: 'excellent' | 'good' | 'needs_repair' | 'retired';
-      current_assigned_worker: string | null;
-      current_warehouse_id: string;
-      tool_models: {
-        id: string;
-        name: string;
-        brand: string;
-        model_number: string | null;
-        category_id: string;
-      } | null;
-      warehouses: {
-        id: string;
-        name: string;
-        code: string;
-      } | null;
-    }
+    const warehouseMap = new Map(warehousesList.map((w) => [w.id, w]));
+    const categoryMap = new Map(categoriesList.map((c) => [c.id, c]));
+    const categoryNameMap = new Map(categoriesList.map((c) => [c.name, c]));
 
-    const mappedAssets: CatalogAssetItem[] = (
-      (rawAssets as unknown as RawJoinedAssetRow[]) ?? []
-    ).map((row) => ({
-      id: row.id,
-      qrCode: row.qr_code,
-      status: row.status,
-      condition: row.condition,
-      currentAssignedWorker: row.current_assigned_worker,
-      warehouseId: row.current_warehouse_id,
-      warehouseName: row.warehouses?.name || 'Unknown Warehouse',
-      warehouseCode: row.warehouses?.code || 'N/A',
-      categoryId: row.tool_models?.category_id || '',
-      toolName: row.tool_models?.name || 'Unknown Tool',
-      brand: row.tool_models?.brand || 'Standard',
-      modelNumber: row.tool_models?.model_number || null,
-    }));
+    const mappedAssets: CatalogAssetItem[] = rawAssets.map((row: Record<string, unknown>) => {
+      const whId = (row.current_warehouse_id || row.warehouse_id || row.currentWarehouseId || '') as string;
+      const wh = warehouseMap.get(whId);
+      const catId = (row.category_id || row.categoryId || '') as string;
+      const catName = (row.category_name || row.categoryName || row.category || '') as string;
+      const cat = categoryMap.get(catId) || categoryNameMap.get(catName);
+
+      const qr = (row.qr_code || row.qrCode || '') as string;
+      const toolName = (row.tool_name || row.toolName || row.name || 'כלי עבודה') as string;
+      const brand = (row.brand || 'Zatout') as string;
+      const worker = (row.current_assigned_worker || row.currentAssignedWorker || null) as string | null;
+      const orderNum = (row.order_number || row.orderNumber || null) as string | null;
+      const resolvedCatName = cat?.name || catName || 'כללי';
+
+      return {
+        id: (row.id || '') as string,
+        qrCode: qr,
+        qr_code: qr,
+        status: (row.status || 'available') as AssetStatus,
+        condition: (row.condition || 'good') as 'excellent' | 'good' | 'needs_repair' | 'retired',
+        currentAssignedWorker: worker,
+        current_assigned_worker: worker,
+        warehouseId: whId,
+        currentWarehouseId: whId,
+        current_warehouse_id: whId,
+        warehouseName: wh?.name || (row.warehouse_name as string) || 'מחסן ראשי',
+        warehouse_name: wh?.name || (row.warehouse_name as string) || 'מחסן ראשי',
+        warehouseCode: wh?.code || (row.warehouse_code as string) || 'WH',
+        warehouse_code: wh?.code || (row.warehouse_code as string) || 'WH',
+        categoryId: cat?.id || catId,
+        category_id: cat?.id || catId,
+        categoryName: resolvedCatName,
+        category_name: resolvedCatName,
+        category: resolvedCatName,
+        toolName,
+        tool_name: toolName,
+        brand,
+        modelNumber: (row.model_number || row.modelNumber || null) as string | null,
+        model_number: (row.model_number || row.modelNumber || null) as string | null,
+        purchaseDate: (row.purchase_date || row.purchaseDate) as string | undefined,
+        purchaseCost: Number(row.purchase_cost || row.purchaseCost) || 2500,
+        orderNumber: orderNum,
+        order_number: orderNum,
+      };
+    });
 
     const categoriesWithCount: CatalogCategory[] = categoriesList.map((cat) => ({
       id: cat.id,
       name: cat.name,
       slug: cat.slug,
       icon: cat.icon,
-      toolCount: mappedAssets.filter((a) => a.categoryId === cat.id).length,
+      toolCount: mappedAssets.filter(
+        (a) =>
+          a.category === cat.name ||
+          a.categoryName === cat.name ||
+          a.category_name === cat.name ||
+          a.categoryId === cat.id ||
+          a.category_id === cat.id
+      ).length,
     }));
 
     return {
@@ -404,9 +420,6 @@ export async function getCatalogData(warehouseId?: string): Promise<CatalogDataP
   }
 }
 
-/**
- * Detects the highest existing tag/QR serial number matching the prefix
- * across database assets and mock store, and returns the next sequential number.
 /**
  * Detects the highest sequential tag number in either live Supabase or mock store.
  * e.g., across all ZR- codes (like ZR-282, ZR-1098) -> returns max + 1 (1099).

@@ -196,6 +196,6 @@ export async function getAuditHistory(
 
 export async function appendAuditHistoryEntry(entry: AuditHistoryRecord): Promise<void> {
   // Recorded into synchronized history store
-  const { MOCK_AUDIT_LOGS } = await import('@/lib/mockStore');
-  MOCK_AUDIT_LOGS.unshift(entry);
+  const { appendMockAuditRecord } = await import('@/lib/mockStore');
+  appendMockAuditRecord(entry);
 }

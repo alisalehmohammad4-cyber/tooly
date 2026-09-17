@@ -22,16 +22,24 @@ import {
 export interface ScannedAssetDetails {
   id: string;
   qrCode: string;
+  qr_code?: string;
   nfcUid?: string;
   status: AssetStatus;
   condition: 'excellent' | 'good' | 'needs_repair' | 'retired';
   currentAssignedWorker: string | null;
+  current_assigned_worker?: string | null;
   currentWarehouseId: string;
+  current_warehouse_id?: string;
+  warehouseId?: string;
   warehouseName: string;
+  warehouse_name?: string;
   warehouseCode: string;
+  warehouse_code?: string;
   toolName: string;
+  tool_name?: string;
   brand: string;
   modelNumber: string | null;
+  model_number?: string | null;
   version: number;
   expectedReturnDate?: string | null;
   accessories?: AssetAccessories | null;
@@ -44,6 +52,11 @@ export interface ScannedAssetDetails {
   isLocked?: boolean;
   lockReason?: string;
   reservation?: AssetReservation | null;
+  orderNumber?: string | null;
+  order_number?: string | null;
+  category?: string;
+  categoryName?: string;
+  category_name?: string;
 }
 
 export type CustodyActionResult =

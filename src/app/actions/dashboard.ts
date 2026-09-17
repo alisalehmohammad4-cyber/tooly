@@ -205,34 +205,44 @@ export async function getPlantManagerAnalytics(): Promise<PlantManagerAnalyticsP
         }
 
         // Facility distribution
-        const whMap: Record<string, FacilityAssetDistribution> = {};
-        (warehousesRes.data || []).forEach((w: Record<string, unknown>) => {
-          whMap[w.id as string] = {
-            warehouseId: w.id as string,
-            warehouseName: w.name as string,
-            warehouseCode: (w.code as string) || 'WH',
-            totalAssets: 0,
-            available: 0,
-            checkedOut: 0,
-            maintenance: 0,
-            utilizationRate: 0,
-          };
-        });
+        const facilityDistribution: FacilityAssetDistribution[] = (warehousesRes.data || []).map(
+          (w: Record<string, unknown>) => {
+            const wId = w.id as string;
+            const wCode = (w.code as string) || '';
+            const matchedAssets = rawAssets.filter((row: Record<string, unknown>) => {
+              const rowWhId =
+                (row.current_warehouse_id as string) ||
+                (row.currentWarehouseId as string) ||
+                (row.warehouse_id as string) ||
+                (row.warehouseId as string);
+              const rowWhCode = (row.warehouse_code as string) || (row.warehouseCode as string) || '';
+              return rowWhId === wId || (Boolean(wCode) && rowWhCode === wCode);
+            });
 
-        rawAssets.forEach((row: Record<string, unknown>) => {
-          const wId = row.current_warehouse_id as string;
-          if (whMap[wId]) {
-            whMap[wId].totalAssets++;
-            if (row.status === 'available') whMap[wId].available++;
-            else if (row.status === 'checked_out') whMap[wId].checkedOut++;
-            else if (row.status === 'maintenance') whMap[wId].maintenance++;
+            const checkedOut = matchedAssets.filter(
+              (r: Record<string, unknown>) => r.status === 'checked_out'
+            ).length;
+            const available = matchedAssets.filter(
+              (r: Record<string, unknown>) => r.status === 'available'
+            ).length;
+            const maintenance = matchedAssets.filter(
+              (r: Record<string, unknown>) =>
+                r.status === 'maintenance' || r.status === 'needs_repair'
+            ).length;
+
+            return {
+              warehouseId: wId,
+              warehouseName: w.name as string,
+              warehouseCode: wCode || 'WH',
+              totalAssets: matchedAssets.length,
+              available,
+              checkedOut,
+              maintenance,
+              utilizationRate:
+                matchedAssets.length > 0 ? Math.round((checkedOut / matchedAssets.length) * 100) : 0,
+            };
           }
-        });
-
-        const facilityDistribution = Object.values(whMap).map((f) => ({
-          ...f,
-          utilizationRate: f.totalAssets > 0 ? Math.round((f.checkedOut / f.totalAssets) * 100) : 0,
-        }));
+        );
 
         const totalAssets = rawAssets.length;
         const complianceRate =

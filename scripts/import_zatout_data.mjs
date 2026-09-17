@@ -378,19 +378,32 @@ async function main() {
     finalAssets.push({
       id: `ast-${originalTaskId}`,
       qrCode,
+      qr_code: qrCode,
       serialNumber,
+      serial_number: serialNumber,
       toolName: name,
+      tool_name: name,
       brand: extractBrand(name),
       modelNumber: null,
+      model_number: null,
       categoryId: cat.id,
+      category_id: cat.id,
       categoryName: cat.name,
+      category_name: cat.name,
+      category: cat.name,
       warehouseId: wh.id,
+      currentWarehouseId: wh.id,
+      current_warehouse_id: wh.id,
       warehouseName: wh.name,
+      warehouse_name: wh.name,
       warehouseCode: wh.code,
+      warehouse_code: wh.code,
       status,
       condition,
       currentAssignedWorker: workerRaw || null,
+      current_assigned_worker: workerRaw || null,
       workerPhone: null,
+      worker_phone: null,
       version: 1,
       purchaseCost: 2500,
       purchaseDate: '2026-01-15',
@@ -399,6 +412,7 @@ async function main() {
       isLocked: false,
       originalTaskId,
       orderNumber: orderNumber || null,
+      order_number: orderNumber || null,
     });
   }
 
@@ -495,7 +509,7 @@ async function main() {
 
     // Replace MOCK_ASSETS
     updatedContent = updatedContent.replace(
-      /export const MOCK_ASSETS: UnifiedAssetItem\[\] =[\s\S]*?;\r?\n\r?\n(\/\/ 4\. Authoritative Audit History Records)/,
+      /export const MOCK_ASSETS: UnifiedAssetItem\[\] =[\s\S]*?;\r?\n\r?\n(function generateInitialAuditRecords|\/\/ 4\. Authoritative Audit History Records)/,
       `export const MOCK_ASSETS: UnifiedAssetItem[] = ${mockAssetsString};\n\n$1`
     );
 
