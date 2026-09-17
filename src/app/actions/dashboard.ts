@@ -297,10 +297,11 @@ export async function getStorekeeperOperations(
 ): Promise<StorekeeperOperationsPayload> {
   const fallbackWarehouses = getFallbackWarehouses();
   const isAll = warehouseId === 'all' || warehouseId === 'ALL';
-  const selectedWhId = isAll ? 'all' : (warehouseId || fallbackWarehouses[0]?.id || 'wh-main-01');
+  const selectedWhId = isAll ? 'all' : (warehouseId || fallbackWarehouses[0]?.id || 'all');
   const currentWh = isAll
     ? { id: 'all', name: 'כלל המחסנים (All Depots)', code: 'ALL' }
-    : (fallbackWarehouses.find((w) => w.id === selectedWhId) || fallbackWarehouses[0]);
+    : (fallbackWarehouses.find((w) => w.id === selectedWhId) ||
+       fallbackWarehouses[0] || { id: selectedWhId || 'all', name: 'כלל המחסנים (All Depots)', code: 'ALL' });
 
   // If Supabase is connected, attempt dynamic query
   if (isSupabaseConfigured()) {

@@ -35,35 +35,10 @@ export interface WarehouseAdminItem {
   maintenanceCount: number;
 }
 
-// 1. Authoritative Standardized Warehouses (100% Hebrew)
-export const MOCK_WAREHOUSES: Warehouse[] = [
-  {
-    id: 'wh-main-01',
-    name: "מחסן מרכזי - אגף א'",
-    code: 'CDB-01',
-    type: 'central_warehouse',
-    address: 'חיפה - מתחם תעשייה צפון',
-    isActive: true,
-  },
-  {
-    id: 'wh-site-02',
-    name: "אתר בנייה - מכולה ב'",
-    code: 'SCB-02',
-    type: 'site_container',
-    address: 'תל אביב - מגדל שלום',
-    isActive: true,
-  },
-  {
-    id: 'wh-van-03',
-    name: 'רכב שירות נייד 05',
-    code: 'MSV-05',
-    type: 'service_van',
-    address: 'פריסה ארצית - ניידת 05',
-    isActive: true,
-  },
-];
+// 1. Authoritative Standardized Warehouses (Empty for Production Operation)
+export const MOCK_WAREHOUSES: Warehouse[] = [];
 
-const warehousesStore: Warehouse[] = MOCK_WAREHOUSES;
+const warehousesStore: Warehouse[] = [];
 
 export function getMockWarehouses(includeInactive = false): Warehouse[] {
   if (includeInactive) return [...warehousesStore];
@@ -113,7 +88,10 @@ export function updateMockWarehouse(
   id: string,
   patch: Partial<Warehouse>
 ): Warehouse | null {
-  const wh = warehousesStore.find((w) => w.id === id);
+  const cleanId = (id || '').trim();
+  const wh = warehousesStore.find(
+    (w) => w.id === cleanId || (w.code && w.code.toUpperCase() === cleanId.toUpperCase())
+  );
   if (!wh) return null;
   if (patch.name !== undefined) wh.name = patch.name.trim();
   if (patch.code !== undefined) wh.code = patch.code.trim().toUpperCase();
@@ -123,7 +101,7 @@ export function updateMockWarehouse(
 
   if (patch.name || patch.code) {
     assetsStore.forEach((a) => {
-      if (a.warehouseId === id) {
+      if (a.warehouseId === wh.id || (wh.code && a.warehouseCode === wh.code)) {
         if (patch.name) a.warehouseName = patch.name.trim();
         if (patch.code) a.warehouseCode = patch.code.trim().toUpperCase();
       }
@@ -133,8 +111,21 @@ export function updateMockWarehouse(
   return wh;
 }
 
-export function deleteMockWarehouse(id: string): { success: boolean; error?: string } {
-  const toolsInWarehouse = assetsStore.filter((a) => a.warehouseId === id);
+export function deleteMockWarehouse(targetId: string): { success: boolean; error?: string } {
+  const cleanId = (targetId || '').trim();
+  const targetWh = warehousesStore.find(
+    (w) => w.id === cleanId || (w.code && w.code.toUpperCase() === cleanId.toUpperCase())
+  );
+  if (!targetWh) {
+    return { success: false, error: 'המתקן לא נמצא במערכת.' };
+  }
+
+  const toolsInWarehouse = assetsStore.filter(
+    (a) =>
+      a.warehouseId === targetWh.id ||
+      a.warehouseId === targetWh.code ||
+      (targetWh.code && a.warehouseCode?.toUpperCase() === targetWh.code.toUpperCase())
+  );
   if (toolsInWarehouse.length > 0) {
     return {
       success: false,
@@ -142,12 +133,10 @@ export function deleteMockWarehouse(id: string): { success: boolean; error?: str
     };
   }
 
-  const idx = warehousesStore.findIndex((w) => w.id === id);
-  if (idx === -1) {
-    return { success: false, error: 'המתקן לא נמצא במערכת.' };
+  const idx = warehousesStore.findIndex((w) => w.id === targetWh.id);
+  if (idx !== -1) {
+    warehousesStore.splice(idx, 1);
   }
-
-  warehousesStore.splice(idx, 1);
   return { success: true };
 }
 
@@ -159,16 +148,6 @@ export const MOCK_CATEGORIES: Category[] = [
   { id: 'cat-drill', name: 'קידוח והברגה', slug: 'drilling', icon: 'drill', displayOrder: 4 },
   { id: 'cat-meas', name: 'מדידה ופילוס', slug: 'measurement', icon: 'ruler', displayOrder: 5 },
 ];
-
-// Helper to calculate relative timestamp
-const hoursAgo = (hours: number) => new Date(Date.now() - hours * 3600 * 1000).toISOString();
-const daysAgo = (days: number) => new Date(Date.now() - days * 86400 * 1000).toISOString();
-const daysFromNow = (days: number) => new Date(Date.now() + days * 86400 * 1000).toISOString();
-const todayAtHour = (hour: number) => {
-  const d = new Date();
-  d.setHours(hour, 0, 0, 0);
-  return d.toISOString();
-};
 
 export interface UnifiedAssetItem {
   id: string;
@@ -201,596 +180,16 @@ export interface UnifiedAssetItem {
   } | null;
 }
 
-// 3. Authoritative Unified Assets (18 tools with consistent valuations and states)
-export const MOCK_ASSETS: UnifiedAssetItem[] = [
-  // --- ריתוך והלחמה (cat-weld) ---
-  {
-    id: 'ast-wld-01',
-    qrCode: 'TOOL-WLD-001',
-    toolName: 'רתכת משולבת Multimatic 220 AC/DC TIG/MIG',
-    brand: 'Miller',
-    modelNumber: '907757',
-    categoryId: 'cat-weld',
-    warehouseId: 'wh-main-01',
-    warehouseName: "מחסן מרכזי - אגף א'",
-    warehouseCode: 'CDB-01',
-    status: 'available',
-    condition: 'excellent',
-    currentAssignedWorker: null,
-    workerPhone: null,
-    version: 1,
-    purchaseCost: 8450,
-    purchaseDate: '2024-01-15',
-    warrantyUntil: '2026-01-15',
-    safetyInspectionDue: '2026-12-31',
-    isLocked: false,
-    accessories: { batteriesCount: 0, hasCharger: true, hasCase: true },
-  },
-  {
-    id: 'ast-wld-02',
-    qrCode: 'TOOL-WLD-002',
-    toolName: 'רתכת Power MIG 210 MP Multi-Process',
-    brand: 'Lincoln Electric',
-    modelNumber: 'K3963-1',
-    categoryId: 'cat-weld',
-    warehouseId: 'wh-site-02',
-    warehouseName: "אתר בנייה - מכולה ב'",
-    warehouseCode: 'SCB-02',
-    status: 'checked_out',
-    condition: 'good',
-    currentAssignedWorker: 'קרלוס מנדס',
-    workerPhone: '050-1122334',
-    version: 2,
-    purchaseCost: 6200,
-    purchaseDate: '2023-05-10',
-    warrantyUntil: '2025-05-10',
-    safetyInspectionDue: '2026-11-20',
-    isLocked: false,
-    expectedReturnDate: daysAgo(1), // Overdue by 1 day
-    accessories: { batteriesCount: 0, hasCharger: true, hasCase: false },
-  },
-  {
-    id: 'ast-wld-03',
-    qrCode: 'TOOL-WLD-003',
-    toolName: 'רתכת מקצועית Rebel EMP 205ic Multi-Material',
-    brand: 'ESAB',
-    modelNumber: '0558102553',
-    categoryId: 'cat-weld',
-    warehouseId: 'wh-main-01',
-    warehouseName: "מחסן מרכזי - אגף א'",
-    warehouseCode: 'CDB-01',
-    status: 'maintenance',
-    condition: 'needs_repair',
-    currentAssignedWorker: null,
-    workerPhone: null,
-    version: 1,
-    purchaseCost: 9100,
-    purchaseDate: '2023-09-01',
-    warrantyUntil: '2025-09-01',
-    safetyInspectionDue: '2026-03-01',
-    isLocked: false,
-    accessories: { batteriesCount: 0, hasCharger: false, hasCase: true },
-  },
+// 3. Authoritative Unified Assets (Empty for Production Operation)
+export const MOCK_ASSETS: UnifiedAssetItem[] = [];
 
-  // --- הרמה ושינוע (cat-lift) ---
-  {
-    id: 'ast-lft-01',
-    qrCode: 'TOOL-LFT-010',
-    toolName: 'כננת הרמה חשמלית 2 טון Lodestar Chain Hoist',
-    brand: 'CM (Columbus McKinnon)',
-    modelNumber: 'LDS-2000',
-    categoryId: 'cat-lift',
-    warehouseId: 'wh-main-01',
-    warehouseName: "מחסן מרכזי - אגף א'",
-    warehouseCode: 'CDB-01',
-    status: 'available',
-    condition: 'excellent',
-    currentAssignedWorker: null,
-    workerPhone: null,
-    version: 1,
-    purchaseCost: 4800,
-    purchaseDate: '2024-03-10',
-    warrantyUntil: '2026-03-10',
-    safetyInspectionDue: '2026-10-15',
-    isLocked: false,
-  },
-  {
-    id: 'ast-lft-02',
-    qrCode: 'TOOL-LFT-011',
-    toolName: 'כננת מנוף ידנית 1.5 טון LB Lever Puller',
-    brand: 'Harrington',
-    modelNumber: 'LB015',
-    categoryId: 'cat-lift',
-    warehouseId: 'wh-site-02',
-    warehouseName: "אתר בנייה - מכולה ב'",
-    warehouseCode: 'SCB-02',
-    status: 'checked_out',
-    condition: 'good',
-    currentAssignedWorker: 'מרקוס ואנס',
-    workerPhone: '058-7766554',
-    version: 2,
-    purchaseCost: 3900,
-    purchaseDate: '2023-08-12',
-    warrantyUntil: '2025-08-12',
-    safetyInspectionDue: '2026-09-01',
-    isLocked: false,
-    expectedReturnDate: todayAtHour(18), // Due today
-    accessories: { batteriesCount: 0, hasCharger: false, hasCase: false },
-  },
-  {
-    id: 'ast-lft-03',
-    qrCode: 'TOOL-LFT-012',
-    toolName: 'רצועת עיגון והרמה מעגלית 5 טון Endless Sling',
-    brand: 'Kito Rigging',
-    modelNumber: 'EN-5000',
-    categoryId: 'cat-lift',
-    warehouseId: 'wh-van-03',
-    warehouseName: 'רכב שירות נייד 05',
-    warehouseCode: 'MSV-05',
-    status: 'available',
-    condition: 'good',
-    currentAssignedWorker: null,
-    workerPhone: null,
-    version: 1,
-    purchaseCost: 1200,
-    purchaseDate: '2024-04-05',
-    warrantyUntil: '2025-04-05',
-    safetyInspectionDue: '2026-12-01',
-    isLocked: false,
-  },
-
-  // --- חיתוך וניסור (cat-cut) ---
-  {
-    id: 'ast-cut-01',
-    qrCode: 'TOOL-CUT-020',
-    toolName: 'מסור שורף נייד 14 אינץ 15A Portable Cut-Off',
-    brand: 'Makita',
-    modelNumber: 'LW1401',
-    categoryId: 'cat-cut',
-    warehouseId: 'wh-main-01',
-    warehouseName: "מחסן מרכזי - אגף א'",
-    warehouseCode: 'CDB-01',
-    status: 'available',
-    condition: 'excellent',
-    currentAssignedWorker: null,
-    workerPhone: null,
-    version: 1,
-    purchaseCost: 2850,
-    purchaseDate: '2023-11-05',
-    warrantyUntil: '2025-11-05',
-    safetyInspectionDue: daysAgo(15), // EXPIRED safety inspection!
-    isLocked: false,
-  },
-  {
-    id: 'ast-cut-02',
-    qrCode: 'TOOL-CUT-021',
-    toolName: 'מסור סרט נטען 20V MAX Deep Cut Band Saw',
-    brand: 'DeWalt',
-    modelNumber: 'DCS374B',
-    categoryId: 'cat-cut',
-    warehouseId: 'wh-van-03',
-    warehouseName: 'רכב שירות נייד 05',
-    warehouseCode: 'MSV-05',
-    status: 'checked_out',
-    condition: 'good',
-    currentAssignedWorker: 'סאמי אל-חסן',
-    workerPhone: '054-9876543',
-    version: 3,
-    purchaseCost: 3400,
-    purchaseDate: '2024-02-14',
-    warrantyUntil: '2027-02-14',
-    safetyInspectionDue: '2026-11-15',
-    isLocked: false,
-    expectedReturnDate: daysAgo(3), // Overdue by 3 days
-    accessories: { batteriesCount: 2, hasCharger: true, hasCase: true },
-  },
-  {
-    id: 'ast-cut-03',
-    qrCode: 'TOOL-CUT-022',
-    toolName: 'מסור עגול למתכת M18 FUEL 8-Inch Circular Saw',
-    brand: 'Milwaukee',
-    modelNumber: '2982-20',
-    categoryId: 'cat-cut',
-    warehouseId: 'wh-site-02',
-    warehouseName: "אתר בנייה - מכולה ב'",
-    warehouseCode: 'SCB-02',
-    status: 'maintenance',
-    condition: 'needs_repair',
-    currentAssignedWorker: null,
-    workerPhone: null,
-    version: 1,
-    purchaseCost: 2600,
-    purchaseDate: '2023-10-01',
-    warrantyUntil: '2025-10-01',
-    safetyInspectionDue: '2026-07-20',
-    isLocked: false,
-  },
-  {
-    id: 'ast-cut-04',
-    qrCode: 'TOOL-CUT-023',
-    toolName: 'חותך שיש וגרניט מקצועי Heavy Duty 1250W',
-    brand: 'Bosch',
-    modelNumber: 'GDC 140',
-    categoryId: 'cat-cut',
-    warehouseId: 'wh-main-01',
-    warehouseName: "מחסן מרכזי - אגף א'",
-    warehouseCode: 'CDB-01',
-    status: 'available',
-    condition: 'good',
-    currentAssignedWorker: null,
-    workerPhone: null,
-    version: 1,
-    purchaseCost: 1750,
-    purchaseDate: '2024-05-18',
-    warrantyUntil: '2026-05-18',
-    safetyInspectionDue: '2027-01-10',
-    isLocked: false,
-  },
-
-  // --- קידוח והברגה (cat-drill) ---
-  {
-    id: 'ast-drl-01',
-    qrCode: 'TOOL-DRL-030',
-    toolName: 'פטישון כבד TE 70-ATC/AVR SDS-Max Rotary Hammer',
-    brand: 'Hilti',
-    modelNumber: 'TE-70-ATC',
-    categoryId: 'cat-drill',
-    warehouseId: 'wh-main-01',
-    warehouseName: "מחסן מרכזי - אגף א'",
-    warehouseCode: 'CDB-01',
-    status: 'available',
-    condition: 'excellent',
-    currentAssignedWorker: null,
-    workerPhone: null,
-    version: 1,
-    purchaseCost: 5200,
-    purchaseDate: '2023-12-01',
-    warrantyUntil: '2025-12-01',
-    safetyInspectionDue: '2026-10-30',
-    isLocked: false,
-  },
-  {
-    id: 'ast-drl-02',
-    qrCode: 'TOOL-DRL-031',
-    toolName: 'מברגת פטיש M18 FUEL 1/2" Hammer Drill/Driver',
-    brand: 'Milwaukee',
-    modelNumber: '2904-20',
-    categoryId: 'cat-drill',
-    warehouseId: 'wh-site-02',
-    warehouseName: "אתר בנייה - מכולה ב'",
-    warehouseCode: 'SCB-02',
-    status: 'checked_out',
-    condition: 'good',
-    currentAssignedWorker: 'טארק מנצור',
-    workerPhone: '052-3344556',
-    version: 2,
-    purchaseCost: 1950,
-    purchaseDate: '2024-01-20',
-    warrantyUntil: '2026-01-20',
-    safetyInspectionDue: '2026-08-15',
-    isLocked: false,
-    expectedReturnDate: daysAgo(2), // Overdue by 2 days
-    accessories: { batteriesCount: 2, hasCharger: true, hasCase: true },
-  },
-  {
-    id: 'ast-drl-03',
-    qrCode: 'TOOL-DRL-032',
-    toolName: 'פטישון עוצמתי 60V MAX 1-7/8" SDS-MAX',
-    brand: 'DeWalt',
-    modelNumber: 'DCH733X2',
-    categoryId: 'cat-drill',
-    warehouseId: 'wh-main-01',
-    warehouseName: "מחסן מרכזי - אגף א'",
-    warehouseCode: 'CDB-01',
-    status: 'checked_out',
-    condition: 'good',
-    currentAssignedWorker: 'דוד כהן',
-    workerPhone: '053-4455667',
-    version: 1,
-    purchaseCost: 4300,
-    purchaseDate: '2024-03-01',
-    warrantyUntil: '2026-03-01',
-    safetyInspectionDue: '2026-12-15',
-    isLocked: false,
-    expectedReturnDate: todayAtHour(17), // Due today
-    accessories: { batteriesCount: 2, hasCharger: true, hasCase: true },
-  },
-  {
-    id: 'ast-drl-04',
-    qrCode: 'TOOL-DRL-033',
-    toolName: 'פטישון קל Bulldog Xtreme 1-Inch SDS-Plus',
-    brand: 'Bosch',
-    modelNumber: 'GBH2-28L',
-    categoryId: 'cat-drill',
-    warehouseId: 'wh-van-03',
-    warehouseName: 'רכב שירות נייד 05',
-    warehouseCode: 'MSV-05',
-    status: 'available',
-    condition: 'good',
-    currentAssignedWorker: null,
-    workerPhone: null,
-    version: 1,
-    purchaseCost: 1600,
-    purchaseDate: '2024-06-10',
-    warrantyUntil: '2026-06-10',
-    safetyInspectionDue: '2027-02-01',
-    isLocked: false,
-  },
-
-  // --- מדידה ופילוס (cat-meas) ---
-  {
-    id: 'ast-mea-01',
-    qrCode: 'TOOL-MEA-040',
-    toolName: 'מערכת פילוס לייזר סיבובי Rugby 610 Rotary Laser',
-    brand: 'Leica Geosystems',
-    modelNumber: '6005983',
-    categoryId: 'cat-meas',
-    warehouseId: 'wh-main-01',
-    warehouseName: "מחסן מרכזי - אגף א'",
-    warehouseCode: 'CDB-01',
-    status: 'available',
-    condition: 'excellent',
-    currentAssignedWorker: null,
-    workerPhone: null,
-    version: 1,
-    purchaseCost: 6500,
-    purchaseDate: '2023-11-20',
-    warrantyUntil: '2025-11-20',
-    safetyInspectionDue: '2026-11-01',
-    isLocked: true,
-    lockReason: 'נעילה מנהלתית - נדרש כיול לייזר במעבדה מוסמכת',
-  },
-  {
-    id: 'ast-mea-02',
-    qrCode: 'TOOL-MEA-041',
-    toolName: 'מולטימטר תעשייתי מתקדם 87V True-RMS Multimeter',
-    brand: 'Fluke',
-    modelNumber: 'FLUKE-87-5',
-    categoryId: 'cat-meas',
-    warehouseId: 'wh-van-03',
-    warehouseName: 'רכב שירות נייד 05',
-    warehouseCode: 'MSV-05',
-    status: 'checked_out',
-    condition: 'good',
-    currentAssignedWorker: 'זאיד אל-נג\'אר',
-    workerPhone: '050-9943302',
-    version: 2,
-    purchaseCost: 3100,
-    purchaseDate: '2023-07-15',
-    warrantyUntil: '2026-07-15',
-    safetyInspectionDue: '2026-10-01',
-    isLocked: false,
-    expectedReturnDate: daysFromNow(2),
-  },
-  {
-    id: 'ast-mea-03',
-    qrCode: 'TOOL-MEA-042',
-    toolName: 'מד מרחק לייזר דיגיטלי GLM 165-40 Blaze Pro',
-    brand: 'Bosch',
-    modelNumber: 'GLM165-40',
-    categoryId: 'cat-meas',
-    warehouseId: 'wh-site-02',
-    warehouseName: "אתר בנייה - מכולה ב'",
-    warehouseCode: 'SCB-02',
-    status: 'available',
-    condition: 'good',
-    currentAssignedWorker: null,
-    workerPhone: null,
-    version: 1,
-    purchaseCost: 850,
-    purchaseDate: '2024-04-22',
-    warrantyUntil: '2026-04-22',
-    safetyInspectionDue: '2027-04-01',
-    isLocked: false,
-  },
-  {
-    id: 'ast-mea-04',
-    qrCode: 'TOOL-MEA-043',
-    toolName: 'קליבר דיגיטלי מדויק 8-Inch AOS Digimatic IP67',
-    brand: 'Mitutoyo',
-    modelNumber: '500-753-20',
-    categoryId: 'cat-meas',
-    warehouseId: 'wh-main-01',
-    warehouseName: "מחסן מרכזי - אגף א'",
-    warehouseCode: 'CDB-01',
-    status: 'maintenance',
-    condition: 'needs_repair',
-    currentAssignedWorker: null,
-    workerPhone: null,
-    version: 1,
-    purchaseCost: 1400,
-    purchaseDate: '2023-04-10',
-    warrantyUntil: '2025-04-10',
-    safetyInspectionDue: '2026-04-01',
-    isLocked: false,
-  },
-];
-
-// 4. Authoritative Audit History Records (100% Hebrew)
-export const MOCK_AUDIT_LOGS: AuditHistoryRecord[] = [
-  {
-    id: 'aud-101',
-    assetId: 'ast-wld-02',
-    qrCode: 'TOOL-WLD-002',
-    toolName: 'רתכת Power MIG 210 MP Multi-Process',
-    brand: 'Lincoln Electric',
-    modelNumber: 'K3963-1',
-    action: 'CHECKOUT',
-    performedBy: 'יוסי כהן (מנהל עבודה)',
-    targetWorker: 'קרלוס מנדס',
-    workerPhone: '050-1122334',
-    condition: 'good',
-    warehouseId: 'wh-site-02',
-    warehouseName: "אתר בנייה - מכולה ב'",
-    warehouseCode: 'SCB-02',
-    notes: 'ניפוק לריתוך עמודי קונסטרוקציה אגף דרומי.',
-    createdAt: hoursAgo(25),
-    expectedReturnDate: daysAgo(1),
-    gps: { lat: 32.0853, lng: 34.7818 },
-  },
-  {
-    id: 'aud-102',
-    assetId: 'ast-lft-02',
-    qrCode: 'TOOL-LFT-011',
-    toolName: 'כננת מנוף ידנית 1.5 טון LB Lever Puller',
-    brand: 'Harrington',
-    modelNumber: 'LB015',
-    action: 'CHECKOUT',
-    performedBy: 'יוסי כהן (מנהל עבודה)',
-    targetWorker: 'מרקוס ואנס',
-    workerPhone: '058-7766554',
-    condition: 'good',
-    warehouseId: 'wh-site-02',
-    warehouseName: "אתר בנייה - מכולה ב'",
-    warehouseCode: 'SCB-02',
-    notes: 'הרמת צנרת ראשית קומה 4.',
-    createdAt: hoursAgo(4),
-    expectedReturnDate: todayAtHour(18),
-    gps: { lat: 32.794, lng: 34.9896 },
-  },
-  {
-    id: 'aud-103',
-    assetId: 'ast-wld-03',
-    qrCode: 'TOOL-WLD-003',
-    toolName: 'רתכת מקצועית Rebel EMP 205ic Multi-Material',
-    brand: 'ESAB',
-    modelNumber: '0558102553',
-    action: 'MAINTENANCE_FLAG',
-    performedBy: 'אבי לוי (טכנאי שירות)',
-    targetWorker: null,
-    workerPhone: null,
-    condition: 'needs_repair',
-    warehouseId: 'wh-main-01',
-    warehouseName: "מחסן מרכזי - אגף א'",
-    warehouseCode: 'CDB-01',
-    notes: 'מנוע הזנת חוט נתקע ומקצר תחת עומס. הועבר לבדיקת מעבדה.',
-    createdAt: hoursAgo(6),
-    gps: { lat: 31.7683, lng: 35.2137 },
-    damageReport: {
-      isDamaged: true,
-      damageType: 'burned_motor',
-      estimatedCost: 650,
-      chargeParty: 'company',
-      notes: 'מנוע הזנת חוט התחמם ונשרף. דורש החלפת סלילים מקוריים.',
-    },
-  },
-  {
-    id: 'aud-104',
-    assetId: 'ast-cut-02',
-    qrCode: 'TOOL-CUT-021',
-    toolName: 'מסור סרט נטען 20V MAX Deep Cut Band Saw',
-    brand: 'DeWalt',
-    modelNumber: 'DCS374B',
-    action: 'CHECKOUT',
-    performedBy: 'דני לוי (מנהל פרויקט)',
-    targetWorker: 'סאמי אל-חסן',
-    workerPhone: '054-9876543',
-    condition: 'good',
-    warehouseId: 'wh-van-03',
-    warehouseName: 'רכב שירות נייד 05',
-    warehouseCode: 'MSV-05',
-    notes: 'חיתוך תעלות מיזוג אוויר בגג המבנה.',
-    createdAt: hoursAgo(80),
-    expectedReturnDate: daysAgo(3),
-    gps: { lat: 31.2529, lng: 34.7915 },
-  },
-  {
-    id: 'aud-105',
-    assetId: 'ast-lft-03',
-    qrCode: 'TOOL-LFT-012',
-    toolName: 'רצועת עיגון והרמה מעגלית 5 טון Endless Sling',
-    brand: 'Kito Rigging',
-    modelNumber: 'EN-5000',
-    action: 'TRANSFER_RECEIVE',
-    performedBy: 'יוסי לוי (מחסנאי)',
-    targetWorker: null,
-    workerPhone: null,
-    condition: 'good',
-    warehouseId: 'wh-van-03',
-    warehouseName: 'רכב שירות נייד 05',
-    warehouseCode: 'MSV-05',
-    notes: 'העברה ממחסן מרכזי למילוי מלאי ברכב שירות שטח.',
-    createdAt: hoursAgo(8),
-  },
-  {
-    id: 'aud-106',
-    assetId: 'ast-wld-01',
-    qrCode: 'TOOL-WLD-001',
-    toolName: 'רתכת משולבת Multimatic 220 AC/DC TIG/MIG',
-    brand: 'Miller',
-    modelNumber: '907757',
-    action: 'CHECKIN',
-    performedBy: 'יוסי לוי (מחסנאי)',
-    targetWorker: null,
-    workerPhone: null,
-    condition: 'excellent',
-    warehouseId: 'wh-main-01',
-    warehouseName: "מחסן מרכזי - אגף א'",
-    warehouseCode: 'CDB-01',
-    notes: 'הוחזר לאחר פרויקט צנרת. נוקה ונבדק תקין.',
-    createdAt: hoursAgo(10),
-  },
-  {
-    id: 'aud-107',
-    assetId: 'ast-drl-02',
-    qrCode: 'TOOL-DRL-031',
-    toolName: 'מברגת פטיש M18 FUEL 1/2" Hammer Drill/Driver',
-    brand: 'Milwaukee',
-    modelNumber: '2904-20',
-    action: 'CHECKOUT',
-    performedBy: 'יוסי כהן (מנהל עבודה)',
-    targetWorker: 'טארק מנצור',
-    workerPhone: '052-3344556',
-    condition: 'good',
-    warehouseId: 'wh-site-02',
-    warehouseName: "אתר בנייה - מכולה ב'",
-    warehouseCode: 'SCB-02',
-    notes: 'עיגון תעלות חשמל במבנה ראשי.',
-    createdAt: hoursAgo(50),
-    expectedReturnDate: daysAgo(2),
-  },
-  {
-    id: 'aud-108',
-    assetId: 'ast-mea-02',
-    qrCode: 'TOOL-MEA-041',
-    toolName: 'מולטימטר תעשייתי מתקדם 87V True-RMS Multimeter',
-    brand: 'Fluke',
-    modelNumber: 'FLUKE-87-5',
-    action: 'CHECKOUT',
-    performedBy: 'יוסי כהן (מנהל עבודה)',
-    targetWorker: 'זאיד אל-נג\'אר',
-    workerPhone: '050-9943302',
-    condition: 'good',
-    warehouseId: 'wh-van-03',
-    warehouseName: 'רכב שירות נייד 05',
-    warehouseCode: 'MSV-05',
-    notes: 'בדיקת בידוד מנועים בתחנת כוח משנית.',
-    createdAt: hoursAgo(12),
-    expectedReturnDate: daysFromNow(2),
-  },
-  {
-    id: 'aud-109',
-    assetId: 'ast-drl-01',
-    qrCode: 'TOOL-DRL-030',
-    toolName: 'פטישון כבד TE 70-ATC/AVR SDS-Max Rotary Hammer',
-    brand: 'Hilti',
-    modelNumber: 'TE-70-ATC',
-    action: 'ONBOARD',
-    performedBy: 'ישראל ישראלי (רשם ציוד)',
-    targetWorker: null,
-    workerPhone: null,
-    condition: 'excellent',
-    warehouseId: 'wh-main-01',
-    warehouseName: "מחסן מרכזי - אגף א'",
-    warehouseCode: 'CDB-01',
-    notes: 'רכש חדש, קידוד QR והכנסה ראשונית למלאי.',
-    createdAt: daysAgo(2),
-  },
-];
+// 4. Authoritative Audit History Records (Empty for Production Operation)
+export const MOCK_AUDIT_LOGS: AuditHistoryRecord[] = [];
 
 // In-memory persistent arrays for local dev/preview
-const assetsStore: UnifiedAssetItem[] = [...MOCK_ASSETS];
-const historyStore: AuditHistoryRecord[] = [...MOCK_AUDIT_LOGS];
+const assetsStore: UnifiedAssetItem[] = [];
+const historyStore: AuditHistoryRecord[] = [];
+export const auditStore: AuditHistoryRecord[] = historyStore;
 
 /**
  * Get all assets from the unified mock store.
@@ -894,7 +293,9 @@ export function mutateMockAsset(
 
   // Update warehouse name/code if warehouseId changed
   if (mutation.warehouseId) {
-    const wh = MOCK_WAREHOUSES.find((w) => w.id === mutation.warehouseId);
+    const wh = warehousesStore.find(
+      (w) => w.id === mutation.warehouseId || w.code === mutation.warehouseId
+    );
     if (wh) {
       asset.warehouseName = wh.name;
       asset.warehouseCode = wh.code;
@@ -930,6 +331,8 @@ export function mutateMockAsset(
   return getMockAssetByQr(asset.qrCode);
 }
 
+const daysFromNow = (days: number) => new Date(Date.now() + days * 86400 * 1000).toISOString();
+
 /**
  * Onboards a brand new tool into the mock store.
  */
@@ -945,7 +348,15 @@ export function addMockAsset(newAsset: {
   performedBy?: string;
 }): ScannedAssetDetails {
   const wh =
-    MOCK_WAREHOUSES.find((w) => w.id === newAsset.warehouseId) || MOCK_WAREHOUSES[0];
+    warehousesStore.find((w) => w.id === newAsset.warehouseId || w.code === newAsset.warehouseId) ||
+    warehousesStore[0] || {
+      id: newAsset.warehouseId || 'wh-default',
+      name: 'מחסן ראשי',
+      code: 'WH-01',
+      type: 'central_warehouse' as WarehouseType,
+      address: null,
+      isActive: true,
+    };
 
   const asset: UnifiedAssetItem = {
     id: `ast-${Date.now()}`,
@@ -1024,7 +435,7 @@ export function getMockPlantManagerAnalytics(): PlantManagerAnalyticsPayload {
     }
   > = {};
 
-  MOCK_WAREHOUSES.forEach((wh) => {
+  warehousesStore.forEach((wh) => {
     whMap[wh.id] = {
       warehouseId: wh.id,
       warehouseName: wh.name,
@@ -1127,14 +538,6 @@ export function getMockPlantManagerAnalytics(): PlantManagerAnalyticsPayload {
     }
   });
 
-  if (monthlyDamageCost === 0) {
-    monthlyDamageCost = 3150;
-    companyTotal = 1650;
-    workerTotal = 650;
-    subcontractorTotal = 850;
-    damageIncidentCount = 4;
-  }
-
   return {
     totalFleetValue,
     depreciation: {
@@ -1179,7 +582,8 @@ export function getMockStorekeeperOperations(
   const isAll = !warehouseId || warehouseId === 'all' || warehouseId.toLowerCase() === 'all';
   const currentWh = isAll
     ? { id: 'all', name: 'כלל המחסנים (All Depots)', code: 'ALL' }
-    : (MOCK_WAREHOUSES.find((w) => w.id === warehouseId) || MOCK_WAREHOUSES[0]);
+    : (warehousesStore.find((w) => w.id === warehouseId || w.code === warehouseId) ||
+       warehousesStore[0] || { id: warehouseId || 'all', name: 'כלל המחסנים (All Depots)', code: 'ALL' });
 
   const now = Date.now();
   const startOfToday = new Date();
@@ -1236,18 +640,21 @@ export function getMockStorekeeperOperations(
   });
 
   // Calculate low stock per category for this facility
-  const lowStockAlerts = MOCK_CATEGORIES.map((cat) => {
-    const availInCat = whAssets.filter(
-      (a) => a.categoryId === cat.id && a.status === 'available'
-    ).length;
-    return {
-      categoryId: cat.id,
-      categoryName: cat.name,
-      availableCount: availInCat,
-      minStockThreshold: 2,
-      status: (availInCat < 2 ? 'critical' : 'low') as 'critical' | 'low',
-    };
-  }).filter((alert) => alert.availableCount <= alert.minStockThreshold);
+  const lowStockAlerts =
+    whAssets.length === 0
+      ? []
+      : MOCK_CATEGORIES.map((cat) => {
+          const availInCat = whAssets.filter(
+            (a) => a.categoryId === cat.id && a.status === 'available'
+          ).length;
+          return {
+            categoryId: cat.id,
+            categoryName: cat.name,
+            availableCount: availInCat,
+            minStockThreshold: 2,
+            status: (availInCat < 2 ? 'critical' : 'low') as 'critical' | 'low',
+          };
+        }).filter((alert) => alert.availableCount <= alert.minStockThreshold);
 
   return {
     warehouse: currentWh,
@@ -1341,11 +748,11 @@ export function getMockAuditHistory(filters?: AuditHistoryFilters): AuditHistory
   };
 }
 
-// 5. Authoritative System Users (3-Tier Enterprise Management Hierarchy)
+// 5. Authoritative System Users (Authentic General Manager user only)
 export const MOCK_USERS: AppUser[] = [
   {
     id: 'usr-gm-01',
-    fullName: 'מנהל כללי (מנכ"ל והנהלה)',
+    fullName: 'מנהל כללי',
     username: 'Zatout01',
     role: 'general_manager',
     pinCode: '1952',
@@ -1353,39 +760,6 @@ export const MOCK_USERS: AppUser[] = [
     assignedWarehouseName: 'כלל המפעל והפרויקטים',
     isActive: true,
     createdAt: '2023-11-01T10:00:00.000Z',
-  },
-  {
-    id: 'usr-co-01',
-    fullName: 'דן רוזן (אחראי תפעול ראשי)',
-    username: 'dan',
-    role: 'chief_operations',
-    pinCode: '2026',
-    assignedWarehouseId: undefined,
-    assignedWarehouseName: 'כלל המחסנים (All Depots)',
-    isActive: true,
-    createdAt: '2023-12-15T08:00:00.000Z',
-  },
-  {
-    id: 'usr-sk-01',
-    fullName: 'יוסי כהן (מחסנאי ראשי חיפה)',
-    username: 'yossi',
-    role: 'storekeeper',
-    pinCode: '1111',
-    assignedWarehouseId: 'wh-main-01',
-    assignedWarehouseName: "מחסן מרכזי - אגף א'",
-    isActive: true,
-    createdAt: '2024-01-01T08:00:00.000Z',
-  },
-  {
-    id: 'usr-sk-02',
-    fullName: 'אבי לוי (מחסנאי אתר מגדל שלום)',
-    username: 'avi',
-    role: 'storekeeper',
-    pinCode: '1234',
-    assignedWarehouseId: 'wh-site-02',
-    assignedWarehouseName: "אתר בנייה - מכולה ב'",
-    isActive: true,
-    createdAt: '2024-02-15T09:30:00.000Z',
   },
 ];
 

@@ -29,7 +29,10 @@ import {
   Plus,
   TrendingDown,
   FileText,
+  Package,
+  Layers,
 } from 'lucide-react';
+import Link from 'next/link';
 import type { PlantManagerAnalyticsPayload } from '@/app/actions/dashboard';
 import type { AppUser } from '@/types/domain';
 import type { WarehouseAdminItem } from '@/lib/mockStore';
@@ -141,9 +144,15 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
     return () => clearTimeout(timer);
   }, [activeTab, loadStorekeepers, loadWarehouses]);
 
-  // Handle warehouse deletion with strict safety check
-  const handleDeleteWarehouse = async (wh: WarehouseAdminItem) => {
-    if (wh.toolCount > 0) {
+  // Handle warehouse deletion with strict safety check & optimistic UI update
+  const handleDeleteWarehouse = async (target: string | WarehouseAdminItem) => {
+    const id = typeof target === 'string' ? target : target.id;
+    const wh =
+      typeof target === 'string'
+        ? warehousesList.find((w) => w.id === id || w.code === id)
+        : target;
+
+    if (wh && wh.toolCount > 0) {
       setFeedbackMessage({
         text: 'לא ניתן למחוק מחסן המכיל כלי עבודה פעילים. יש להעביר את הכלים תחילה',
         type: 'error',
@@ -151,18 +160,23 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
       return;
     }
 
+    const displayName = wh?.name ? `"${wh.name}" (${wh.code})` : 'המבוקש';
     if (
       !confirm(
-        `האם אתה בטוח שברצונך למחוק את המחסן "${wh.name}" (${wh.code})? פעולה זו אינה ניתנת לביטול.`
+        `האם אתה בטוח שברצונך למחוק את המחסן ${displayName}? פעולה זו אינה ניתנת לביטול.`
       )
     ) {
       return;
     }
 
-    setDeletingWarehouseId(wh.id);
+    setDeletingWarehouseId(id);
     try {
-      const res = await deleteWarehouseAction(wh.id);
+      const res = await deleteWarehouseAction(id);
       if (res.success) {
+        // Optimistic UI update: immediately filter out the deleted warehouse from the local state list
+        setWarehousesList((prev) =>
+          prev.filter((w) => w.id !== id && (!wh?.code || w.code !== wh.code))
+        );
         setFeedbackMessage({
           text: res.message || 'המחסן הוסר בהצלחה מהמערכת.',
           type: 'success',
@@ -554,6 +568,39 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
         {/* ============================================================ */}
         {activeTab === 'analytics' && (
           <div className="space-y-6 animate-in fade-in duration-200">
+            {/* Zero State Alert for Live Production */}
+            {data.utilization.totalAssets === 0 && (
+              <div className="p-6 rounded-2xl bg-amber-50/90 border-2 border-amber-200 text-center space-y-3 shadow-sm">
+                <div className="w-12 h-12 mx-auto rounded-2xl bg-amber-100 text-amber-800 flex items-center justify-center border border-amber-200">
+                  <Package className="w-6 h-6" />
+                </div>
+                <div className="space-y-1">
+                  <h3 className="text-base font-black text-amber-950">
+                    אין עדיין כלים רשומים במערכת - התחל בקליטת כלי חדש
+                  </h3>
+                  <p className="text-xs text-amber-800/90 max-w-md mx-auto">
+                    המערכת אופסה למצב ייצור פעיל. קלוט כלי עבודה חדשים כדי להתחיל מעקב מלא, ניהול מלאי והקצאות לשטח.
+                  </p>
+                </div>
+                <div className="pt-1 flex flex-wrap justify-center gap-2">
+                  <Link
+                    href="/"
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-black shadow transition-all active:scale-95"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>התחל בקליטת כלי חדש</span>
+                  </Link>
+                  <Link
+                    href="/catalog"
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white hover:bg-amber-100 text-amber-900 border border-amber-300 text-xs font-black shadow-sm transition-all active:scale-95"
+                  >
+                    <Layers className="w-4 h-4" />
+                    <span>צפייה בקטלוג</span>
+                  </Link>
+                </div>
+              </div>
+            )}
+
             {/* 5 STRATEGIC BI CARDS */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
               {/* Card 1: Total Fleet Valuation */}
@@ -1428,7 +1475,7 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
 
                       <button
                         type="button"
-                        onClick={() => handleDeleteWarehouse(wh)}
+                        onClick={() => handleDeleteWarehouse(wh.id)}
                         disabled={deletingWarehouseId === wh.id}
                         className="px-3 py-1.5 rounded-xl text-xs font-bold bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95 disabled:opacity-50"
                       >

@@ -1,5 +1,6 @@
 'use server';
 
+import { revalidatePath } from 'next/cache';
 import type { Warehouse, WarehouseType } from '@/types/domain';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import {
@@ -200,44 +201,108 @@ export async function updateWarehouseAction(
  * Deletes a facility / warehouse safely.
  * Rejects with a strict Hebrew error if any active tools belong to the facility.
  */
-export async function deleteWarehouseAction(warehouseId: string): Promise<WarehouseActionResult> {
-  const id = warehouseId;
-  // 1. Safety Check: Verify if any assets are currently inside this warehouse
+export async function deleteWarehouseAction(targetId: string): Promise<WarehouseActionResult> {
+  const cleanTarget = (targetId || '').trim();
+  if (!cleanTarget) {
+    return { success: false, error: 'מזהה מתקן לא תקין.' };
+  }
+
+  // 1. If Supabase is configured:
   if (isSupabaseConfigured()) {
     try {
-      const { data: toolsInWh, error } = await supabase
-        .from('assets')
-        .select('id')
-        .eq('current_warehouse_id', id)
-        .limit(1);
+      // Query warehouse by matching either id = targetId OR code = targetId
+      let { data: wh, error: findError } = await supabase
+        .from('warehouses')
+        .select('id, name, code')
+        .or(`id.eq.${cleanTarget},code.eq.${cleanTarget}`)
+        .maybeSingle();
 
-      if (!error && toolsInWh && toolsInWh.length > 0) {
+      // If .or failed (e.g. UUID format constraint when cleanTarget is a code), fallback to code match
+      if (findError) {
+        console.warn('[deleteWarehouseAction] Supabase .or search warning:', findError.message);
+        const { data: whByCode, error: codeError } = await supabase
+          .from('warehouses')
+          .select('id, name, code')
+          .eq('code', cleanTarget)
+          .maybeSingle();
+        if (!codeError && whByCode) {
+          wh = whByCode;
+          findError = null;
+        }
+      }
+
+      // If found in Supabase:
+      if (wh) {
+        // Safety check: check if any tools are assigned to this warehouse
+        const { count, error: countError } = await supabase
+          .from('assets')
+          .select('*', { count: 'exact', head: true })
+          .eq('current_warehouse_id', wh.id);
+
+        if (countError) {
+          console.warn('[deleteWarehouseAction] Supabase asset count error:', countError.message);
+        }
+
+        if (count !== null && count > 0) {
+          return {
+            success: false,
+            error: 'לא ניתן למחוק מחסן המכיל כלי עבודה פעילים. יש להעביר את הכלים תחילה',
+          };
+        }
+
+        // If empty: delete the record
+        const { error: deleteError } = await supabase
+          .from('warehouses')
+          .delete()
+          .eq('id', wh.id);
+
+        if (deleteError) {
+          console.error('[deleteWarehouseAction] Supabase delete error:', deleteError.message);
+          return {
+            success: false,
+            error: `שגיאה במחיקת המחסן ממסד הנתונים: ${deleteError.message}`,
+          };
+        }
+
+        // Also remove it from mockStore.ts if present
+        deleteMockWarehouse(wh.id);
+        if (wh.code) {
+          deleteMockWarehouse(wh.code);
+        }
+        deleteMockWarehouse(cleanTarget);
+
+        // Revalidate /dashboard/manager and /dashboard/warehouse
+        try {
+          revalidatePath('/dashboard/manager');
+          revalidatePath('/dashboard/warehouse');
+        } catch (e) {
+          console.warn('[deleteWarehouseAction] revalidatePath warning:', e);
+        }
+
         return {
-          success: false,
-          error: 'לא ניתן למחוק מחסן המכיל כלי עבודה פעילים. יש להעביר את הכלים תחילה',
+          success: true,
+          message: 'המחסן הוסר בהצלחה מהמערכת.',
         };
       }
     } catch (err) {
-      console.warn('[deleteWarehouseAction] Supabase check error:', err);
+      console.warn('[deleteWarehouseAction] Supabase error, falling back to mockStore:', err);
     }
   }
 
-  // Check mock store safety
-  const mockRes = deleteMockWarehouse(id);
+  // Fallback to mockStore
+  const mockRes = deleteMockWarehouse(cleanTarget);
   if (!mockRes.success) {
     return {
       success: false,
-      error: mockRes.error || 'לא ניתן למחוק מחסן המכיל כלי עבודה פעילים. יש להעביר את הכלים תחילה',
+      error: mockRes.error || 'המתקן לא נמצא במערכת.',
     };
   }
 
-  // If empty, delete from Supabase or soft-delete
-  if (isSupabaseConfigured()) {
-    try {
-      await supabase.from('warehouses').delete().eq('id', id);
-    } catch (err) {
-      console.warn('[deleteWarehouseAction] Supabase delete error:', err);
-    }
+  try {
+    revalidatePath('/dashboard/manager');
+    revalidatePath('/dashboard/warehouse');
+  } catch (e) {
+    console.warn('[deleteWarehouseAction] revalidatePath warning:', e);
   }
 
   return {

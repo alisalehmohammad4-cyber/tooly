@@ -18,7 +18,7 @@ export interface SyncQueueItem<T = unknown> {
 }
 
 const DB_NAME = 'tooly_offline_db';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 const STORE_CACHED_ASSETS = 'cached_assets';
 const STORE_SYNC_QUEUE = 'sync_queue';
@@ -40,6 +40,7 @@ export function getOfflineDb(): Promise<IDBDatabase> {
 
       request.onupgradeneeded = (event) => {
         const db = (event.target as IDBOpenDBRequest).result;
+        const oldVersion = event.oldVersion;
 
         // 1. Cached Assets Store
         let assetStore: IDBObjectStore;
@@ -59,18 +60,51 @@ export function getOfflineDb(): Promise<IDBDatabase> {
         }
 
         // 2. Offline Sync Queue Store
+        let syncStore: IDBObjectStore;
         if (!db.objectStoreNames.contains(STORE_SYNC_QUEUE)) {
-          const syncStore = db.createObjectStore(STORE_SYNC_QUEUE, {
+          syncStore = db.createObjectStore(STORE_SYNC_QUEUE, {
             keyPath: 'id',
           });
           syncStore.createIndex('status', 'status', { unique: false });
           syncStore.createIndex('timestamp', 'timestamp', { unique: false });
           syncStore.createIndex('type', 'type', { unique: false });
+        } else {
+          syncStore = (event.target as IDBOpenDBRequest).transaction!.objectStore(STORE_SYNC_QUEUE);
+        }
+
+        // Production Reset: Purge demo records from cache and sync queue on upgrade to v3
+        if (oldVersion < 3) {
+          try {
+            assetStore.clear();
+            syncStore.clear();
+          } catch (err) {
+            console.warn('Error clearing legacy demo cache during DB upgrade:', err);
+          }
         }
       };
 
       request.onsuccess = () => {
-        resolve(request.result);
+        const db = request.result;
+
+        // Automatic client cleanup check for Production Reset
+        if (typeof window !== 'undefined') {
+          const PURGE_KEY = 'tooly_prod_reset_v3_purged';
+          if (!localStorage.getItem(PURGE_KEY)) {
+            try {
+              const tx = db.transaction([STORE_CACHED_ASSETS, STORE_SYNC_QUEUE], 'readwrite');
+              tx.objectStore(STORE_CACHED_ASSETS).clear();
+              tx.objectStore(STORE_SYNC_QUEUE).clear();
+              tx.oncomplete = () => {
+                localStorage.setItem(PURGE_KEY, 'true');
+                window.dispatchEvent(new CustomEvent('tooly-sync-queue-updated'));
+              };
+            } catch {
+              localStorage.setItem(PURGE_KEY, 'true');
+            }
+          }
+        }
+
+        resolve(db);
       };
 
       request.onerror = () => {
@@ -465,4 +499,30 @@ export async function clearSyncQueue(): Promise<void> {
   } catch (err) {
     console.warn('Error clearing sync queue:', err);
   }
+}
+
+/**
+ * Clears all cached assets from IndexedDB.
+ */
+export async function clearCachedAssets(): Promise<void> {
+  if (typeof window === 'undefined') return;
+  try {
+    const db = await getOfflineDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_CACHED_ASSETS, 'readwrite');
+      const store = tx.objectStore(STORE_CACHED_ASSETS);
+      const req = store.clear();
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  } catch (err) {
+    console.warn('Error clearing cached assets:', err);
+  }
+}
+
+/**
+ * Purges both cached assets and offline sync queue for a complete client reset.
+ */
+export async function purgeAllOfflineData(): Promise<void> {
+  await Promise.all([clearCachedAssets(), clearSyncQueue()]);
 }
