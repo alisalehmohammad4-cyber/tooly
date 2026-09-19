@@ -61,12 +61,15 @@ import {
 import WarehouseFormModal from '@/components/modules/WarehouseFormModal';
 import WarehouseToolsModal from '@/components/modules/WarehouseToolsModal';
 import AppLayout from '@/components/layout/AppLayout';
+import { useAuth } from '@/context/AuthContext';
 
 interface ManagerDashboardViewProps {
   data: PlantManagerAnalyticsPayload;
 }
 
 export default function ManagerDashboardView({ data }: ManagerDashboardViewProps) {
+  const { currentOrganization } = useAuth();
+
   // Main Tab Navigation: Warehouses vs Storekeepers vs Executive BI Analytics
   const [activeTab, setActiveTab] = useState<'warehouses' | 'users' | 'analytics'>('warehouses');
 
@@ -131,27 +134,27 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
   const loadStorekeepers = useCallback(async () => {
     setIsLoadingStorekeepers(true);
     try {
-      const list = await getStorekeepersListAction();
+      const list = await getStorekeepersListAction(currentOrganization?.id);
       setStorekeepers(list);
     } catch (err) {
       console.warn('Error loading storekeepers:', err);
     } finally {
       setIsLoadingStorekeepers(false);
     }
-  }, []);
+  }, [currentOrganization]);
 
   // Load warehouses list
   const loadWarehouses = useCallback(async () => {
     setIsLoadingWarehouses(true);
     try {
-      const list = await getWarehousesAdminAction();
+      const list = await getWarehousesAdminAction(currentOrganization?.id);
       setWarehousesList(list);
     } catch (err) {
       console.warn('Error loading warehouses:', err);
     } finally {
       setIsLoadingWarehouses(false);
     }
-  }, []);
+  }, [currentOrganization]);
 
   // Fetch data whenever tabs change or on mount
   useEffect(() => {
@@ -324,6 +327,7 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
           newUserRole === 'chief_operations' ? undefined : effectiveAssignedWarehouseId,
         email: newEmail,
         phone: newPhone,
+        organizationId: currentOrganization?.id,
       });
 
       if (res.success) {

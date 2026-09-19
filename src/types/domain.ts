@@ -1,3 +1,12 @@
+export interface Organization {
+  id: string;
+  name: string;
+  slug: string;
+  serialPrefix: string;
+  defaultCurrency: string;
+  logoUrl?: string;
+}
+
 export type WarehouseType = 'central_warehouse' | 'site_container' | 'service_van';
 
 export interface Warehouse {
@@ -7,6 +16,7 @@ export interface Warehouse {
   type?: WarehouseType;
   address?: string | null;
   isActive?: boolean;
+  organizationId?: string;
 }
 
 export interface Category {
@@ -15,6 +25,7 @@ export interface Category {
   slug: string;
   icon?: string | null;
   displayOrder?: number;
+  organizationId?: string;
 }
 
 export interface ToolModel {
@@ -24,6 +35,7 @@ export interface ToolModel {
   brand: string;
   modelNumber: string | null;
   isSerialized: boolean;
+  organizationId?: string;
 }
 
 export type AssetStatus =
@@ -78,6 +90,7 @@ export interface Asset {
   status: AssetStatus;
   condition: AssetCondition;
   version: number;
+  organizationId?: string;
   expectedReturnDate?: string | null;
   accessories?: {
     batteriesCount: number;
@@ -113,6 +126,43 @@ export interface AppUser {
   assignedWarehouseId?: string;
   assignedWarehouseName?: string;
   isActive?: boolean;
+  organizationId?: string;
   createdAt?: string;
+}
+
+export interface AuditHistoryRecord {
+  id: string;
+  assetId: string;
+  qrCode: string;
+  toolName: string;
+  brand: string;
+  modelNumber: string | null;
+  action:
+    | 'CHECKOUT'
+    | 'CHECKIN'
+    | 'TRANSFER_RECEIVE'
+    | 'MAINTENANCE_FLAG'
+    | 'ONBOARD'
+    | 'LOCK_STATUS'
+    | 'SAFETY_INSPECTION';
+  performedBy: string;
+  targetWorker: string | null;
+  workerPhone: string | null;
+  condition: 'excellent' | 'good' | 'needs_repair' | 'retired' | null;
+  warehouseId: string | null;
+  warehouseName: string;
+  warehouseCode: string;
+  notes: string | null;
+  createdAt: string;
+  organizationId?: string;
+  expectedReturnDate?: string | null;
+  signatureData?: string | null;
+  accessoriesSnapshot?: {
+    batteriesCount: number;
+    hasCharger: boolean;
+    hasCase: boolean;
+  } | null;
+  gps?: GpsCoordinates | null;
+  damageReport?: DamageReport | null;
 }
 

@@ -12,7 +12,10 @@ import {
   getMockAssets,
   getNextAvailableMockTagNumber,
   isLegacyEnglishCategory,
+  DEFAULT_ORGANIZATION,
 } from '@/lib/mockStore';
+
+const DEFAULT_ORGANIZATION_ID = DEFAULT_ORGANIZATION.id;
 
 export interface OnboardFormData {
   warehouses: Array<{ id: string; name: string; code: string }>;
@@ -27,11 +30,15 @@ export type OnboardAssetResult =
  * Queries and returns active warehouses and categories ordered by display_order.
  * Strictly filters out legacy English demo categories.
  */
-export async function getOnboardFormData(): Promise<OnboardFormData> {
+export async function getOnboardFormData(organizationId?: string): Promise<OnboardFormData> {
+  const orgId = organizationId || DEFAULT_ORGANIZATION_ID;
+
   if (!isSupabaseConfigured()) {
     return {
-      warehouses: getMockWarehouses().map((w) => ({ id: w.id, name: w.name, code: w.code })),
-      categories: MOCK_CATEGORIES.filter((c) => !isLegacyEnglishCategory(c)).map((c) => ({
+      warehouses: getMockWarehouses(orgId).map((w) => ({ id: w.id, name: w.name, code: w.code })),
+      categories: MOCK_CATEGORIES.filter(
+        (c) => !isLegacyEnglishCategory(c) && (!c.organizationId || c.organizationId === orgId)
+      ).map((c) => ({
         id: c.id,
         name: c.name,
         slug: c.slug,
@@ -44,10 +51,12 @@ export async function getOnboardFormData(): Promise<OnboardFormData> {
     supabase
       .from('warehouses')
       .select('id, name, code')
-      .eq('is_active', true),
+      .eq('is_active', true)
+      .or(`organization_id.eq.${orgId},organization_id.is.null`),
     supabase
       .from('categories')
       .select('id, name, slug, icon')
+      .or(`organization_id.eq.${orgId},organization_id.is.null`)
       .order('display_order', { ascending: true }),
   ]);
 
@@ -70,7 +79,9 @@ export async function getOnboardFormData(): Promise<OnboardFormData> {
     categories:
       rawCategories.length > 0
         ? rawCategories
-        : MOCK_CATEGORIES.filter((c) => !isLegacyEnglishCategory(c)).map((c) => ({
+        : MOCK_CATEGORIES.filter(
+            (c) => !isLegacyEnglishCategory(c) && (!c.organizationId || c.organizationId === orgId)
+          ).map((c) => ({
             id: c.id,
             name: c.name,
             slug: c.slug,
@@ -82,20 +93,22 @@ export async function getOnboardFormData(): Promise<OnboardFormData> {
 /**
  * Checks whether a QR code is already registered in the assets table.
  */
-export async function checkQrCodeExists(qrCode: string): Promise<boolean> {
+export async function checkQrCodeExists(qrCode: string, organizationId?: string): Promise<boolean> {
   const sanitizedQr = qrCode.trim();
   if (!sanitizedQr) {
     return false;
   }
+  const orgId = organizationId || DEFAULT_ORGANIZATION_ID;
 
   if (!isSupabaseConfigured()) {
-    return Boolean(getMockAssetByQr(sanitizedQr));
+    return Boolean(getMockAssetByQr(sanitizedQr, orgId));
   }
 
   const { data, error } = await supabase
     .from('assets')
     .select('id')
     .eq('qr_code', sanitizedQr)
+    .or(`organization_id.eq.${orgId},organization_id.is.null`)
     .maybeSingle();
 
   if (error) {
@@ -109,7 +122,12 @@ export async function checkQrCodeExists(qrCode: string): Promise<boolean> {
 /**
  * Validates and enrolls an asset into the system.
  */
-export async function onboardAsset(rawInput: QuickOnboardInput): Promise<OnboardAssetResult> {
+export async function onboardAsset(
+  rawInput: QuickOnboardInput,
+  organizationId?: string
+): Promise<OnboardAssetResult> {
+  const orgId = organizationId || DEFAULT_ORGANIZATION_ID;
+
   // 1. Validate input schema
   const parsed = QuickOnboardSchema.safeParse(rawInput);
   if (!parsed.success) {
@@ -120,7 +138,7 @@ export async function onboardAsset(rawInput: QuickOnboardInput): Promise<Onboard
   const input = parsed.data;
 
   if (!isSupabaseConfigured()) {
-    const exists = Boolean(getMockAssetByQr(input.qrCode));
+    const exists = Boolean(getMockAssetByQr(input.qrCode, orgId));
     if (exists) {
       return {
         success: false,
@@ -137,6 +155,7 @@ export async function onboardAsset(rawInput: QuickOnboardInput): Promise<Onboard
       brand: input.brand,
       modelNumber: input.modelNumber || undefined,
       condition: input.condition,
+      organizationId: orgId,
     });
 
     await invalidateCatalogCache();
@@ -149,7 +168,7 @@ export async function onboardAsset(rawInput: QuickOnboardInput): Promise<Onboard
 
   try {
     // 2. Check if QR code is already registered
-    const exists = await checkQrCodeExists(input.qrCode);
+    const exists = await checkQrCodeExists(input.qrCode, orgId);
     if (exists) {
       return {
         success: false,
@@ -165,6 +184,7 @@ export async function onboardAsset(rawInput: QuickOnboardInput): Promise<Onboard
       .eq('category_id', input.categoryId)
       .eq('name', input.toolName)
       .eq('brand', input.brand)
+      .or(`organization_id.eq.${orgId},organization_id.is.null`)
       .maybeSingle();
 
     if (findModelError) {
@@ -185,6 +205,7 @@ export async function onboardAsset(rawInput: QuickOnboardInput): Promise<Onboard
           brand: input.brand,
           model_number: input.modelNumber || null,
           is_serialized: true,
+          organization_id: orgId,
         })
         .select('id')
         .single();
@@ -209,6 +230,7 @@ export async function onboardAsset(rawInput: QuickOnboardInput): Promise<Onboard
         status: 'available',
         condition: input.condition,
         version: 1,
+        organization_id: orgId,
       })
       .select('id')
       .single();
@@ -254,6 +276,7 @@ export async function onboardAsset(rawInput: QuickOnboardInput): Promise<Onboard
       notes: 'רישום כלי ראשוני במערכת',
       createdAt: new Date().toISOString(),
       gps: input.gps || null,
+      organizationId: orgId,
     });
 
     await invalidateCatalogCache();
@@ -341,8 +364,12 @@ export async function invalidateCatalogCache(): Promise<void> {
  * Filters returned assets by warehouseId if specified.
  * Cached for 30s to maximize 60fps responsiveness across fleet of 1,016+ assets.
  */
-export async function getCatalogData(warehouseId?: string): Promise<CatalogDataPayload> {
-  const cacheKey = `catalog_${warehouseId || 'all'}`;
+export async function getCatalogData(
+  warehouseId?: string,
+  organizationId?: string
+): Promise<CatalogDataPayload> {
+  const orgId = organizationId || DEFAULT_ORGANIZATION_ID;
+  const cacheKey = `catalog_${orgId}_${warehouseId || 'all'}`;
   const cached = catalogCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.data;
@@ -355,11 +382,22 @@ export async function getCatalogData(warehouseId?: string): Promise<CatalogDataP
   if (isSupabaseConfigured()) {
     try {
       const [warehousesRes, categoriesRes, assetsRes] = await Promise.all([
-        supabase.from('warehouses').select('id, name, code').eq('is_active', true),
-        supabase.from('categories').select('id, name, slug, icon').order('display_order', { ascending: true }),
+        supabase
+          .from('warehouses')
+          .select('id, name, code')
+          .eq('is_active', true)
+          .or(`organization_id.eq.${orgId},organization_id.is.null`),
+        supabase
+          .from('categories')
+          .select('id, name, slug, icon')
+          .or(`organization_id.eq.${orgId},organization_id.is.null`)
+          .order('display_order', { ascending: true }),
         supabase
           .from('assets')
-          .select('id, qr_code, status, condition, current_assigned_worker, current_warehouse_id, warehouse_id, category_id, category_name, tool_name, brand, model_number, purchase_date, purchase_cost, order_number')
+          .select(
+            'id, qr_code, status, condition, current_assigned_worker, current_warehouse_id, warehouse_id, category_id, category_name, tool_name, brand, model_number, purchase_date, purchase_cost, order_number'
+          )
+          .or(`organization_id.eq.${orgId},organization_id.is.null`)
           .limit(10000),
       ]);
 
@@ -375,22 +413,40 @@ export async function getCatalogData(warehouseId?: string): Promise<CatalogDataP
         const warehouseMap = new Map(warehousesList.map((w) => [w.id, w]));
         const categoryMap = new Map(categoriesList.map((c) => [c.id, c]));
         const categoryNameMap = new Map(categoriesList.map((c) => [c.name, c]));
-        const mockAssetMap = new Map(getMockAssets().map((a) => [a.qrCode, a]));
+        const mockAssetMap = new Map(getMockAssets(orgId).map((a) => [a.qrCode, a]));
 
         allAssets = (assetsRes.data as Record<string, unknown>[]).map((row) => {
           const qr = (row.qr_code || row.qrCode || '') as string;
           const mockFallback = mockAssetMap.get(qr);
 
-          const whId = (row.current_warehouse_id || row.warehouse_id || row.currentWarehouseId || mockFallback?.currentWarehouseId || '') as string;
+          const whId = (row.current_warehouse_id ||
+            row.warehouse_id ||
+            row.currentWarehouseId ||
+            mockFallback?.currentWarehouseId ||
+            '') as string;
           const wh = warehouseMap.get(whId);
           const catId = (row.category_id || row.categoryId || mockFallback?.categoryId || '') as string;
-          const catName = (row.category_name || row.categoryName || row.category || mockFallback?.categoryName || '') as string;
+          const catName = (row.category_name ||
+            row.categoryName ||
+            row.category ||
+            mockFallback?.categoryName ||
+            '') as string;
           const cat = categoryMap.get(catId) || categoryNameMap.get(catName);
 
-          const toolName = (row.tool_name || row.toolName || row.name || mockFallback?.toolName || 'כלי עבודה') as string;
+          const toolName = (row.tool_name ||
+            row.toolName ||
+            row.name ||
+            mockFallback?.toolName ||
+            'כלי עבודה') as string;
           const brand = (row.brand || mockFallback?.brand || 'Zatout') as string;
-          const worker = (row.current_assigned_worker || row.currentAssignedWorker || mockFallback?.currentAssignedWorker || null) as string | null;
-          const orderNum = (row.order_number || row.orderNumber || mockFallback?.orderNumber || null) as string | null;
+          const worker = (row.current_assigned_worker ||
+            row.currentAssignedWorker ||
+            mockFallback?.currentAssignedWorker ||
+            null) as string | null;
+          const orderNum = (row.order_number ||
+            row.orderNumber ||
+            mockFallback?.orderNumber ||
+            null) as string | null;
           const resolvedCatName = cat?.name || catName || mockFallback?.categoryName || 'ציוד כללי';
 
           return {
@@ -398,16 +454,24 @@ export async function getCatalogData(warehouseId?: string): Promise<CatalogDataP
             qrCode: qr,
             qr_code: qr,
             status: (row.status || mockFallback?.status || 'available') as AssetStatus,
-            condition: (row.condition || mockFallback?.condition || 'good') as 'excellent' | 'good' | 'needs_repair' | 'retired',
+            condition: (row.condition || mockFallback?.condition || 'good') as
+              | 'excellent'
+              | 'good'
+              | 'needs_repair'
+              | 'retired',
             currentAssignedWorker: worker,
             current_assigned_worker: worker,
             warehouseId: whId,
             currentWarehouseId: whId,
             current_warehouse_id: whId,
-            warehouseName: wh?.name || mockFallback?.warehouseName || (row.warehouse_name as string) || 'מחסן ראשי',
-            warehouse_name: wh?.name || mockFallback?.warehouseName || (row.warehouse_name as string) || 'מחסן ראשי',
-            warehouseCode: wh?.code || mockFallback?.warehouseCode || (row.warehouse_code as string) || 'WH',
-            warehouse_code: wh?.code || mockFallback?.warehouseCode || (row.warehouse_code as string) || 'WH',
+            warehouseName:
+              wh?.name || mockFallback?.warehouseName || (row.warehouse_name as string) || 'מחסן ראשי',
+            warehouse_name:
+              wh?.name || mockFallback?.warehouseName || (row.warehouse_name as string) || 'מחסן ראשי',
+            warehouseCode:
+              wh?.code || mockFallback?.warehouseCode || (row.warehouse_code as string) || 'WH',
+            warehouse_code:
+              wh?.code || mockFallback?.warehouseCode || (row.warehouse_code as string) || 'WH',
             categoryId: cat?.id || catId,
             category_id: cat?.id || catId,
             categoryName: resolvedCatName,
@@ -416,10 +480,19 @@ export async function getCatalogData(warehouseId?: string): Promise<CatalogDataP
             toolName,
             tool_name: toolName,
             brand,
-            modelNumber: (row.model_number || row.modelNumber || mockFallback?.modelNumber || null) as string | null,
-            model_number: (row.model_number || row.modelNumber || mockFallback?.modelNumber || null) as string | null,
-            purchaseDate: (row.purchase_date || row.purchaseDate || mockFallback?.purchaseDate) as string | undefined,
-            purchaseCost: Number(row.purchase_cost || row.purchaseCost || mockFallback?.purchaseCost) || 2500,
+            modelNumber: (row.model_number ||
+              row.modelNumber ||
+              mockFallback?.modelNumber ||
+              null) as string | null,
+            model_number: (row.model_number ||
+              row.modelNumber ||
+              mockFallback?.modelNumber ||
+              null) as string | null,
+            purchaseDate: (row.purchase_date ||
+              row.purchaseDate ||
+              mockFallback?.purchaseDate) as string | undefined,
+            purchaseCost:
+              Number(row.purchase_cost || row.purchaseCost || mockFallback?.purchaseCost) || 2500,
             orderNumber: orderNum,
             order_number: orderNum,
           };
@@ -432,10 +505,12 @@ export async function getCatalogData(warehouseId?: string): Promise<CatalogDataP
 
   // Fallback to mockStore if empty
   if (warehousesList.length === 0) {
-    warehousesList = getMockWarehouses().map((w) => ({ id: w.id, name: w.name, code: w.code }));
+    warehousesList = getMockWarehouses(orgId).map((w) => ({ id: w.id, name: w.name, code: w.code }));
   }
   if (categoriesList.length === 0) {
-    categoriesList = MOCK_CATEGORIES.filter((c) => !isLegacyEnglishCategory(c)).map((c) => ({
+    categoriesList = MOCK_CATEGORIES.filter(
+      (c) => !isLegacyEnglishCategory(c) && (!c.organizationId || c.organizationId === orgId)
+    ).map((c) => ({
       id: c.id,
       name: c.name,
       slug: c.slug,
@@ -443,7 +518,7 @@ export async function getCatalogData(warehouseId?: string): Promise<CatalogDataP
     }));
   }
   if (allAssets.length === 0) {
-    allAssets = getMockAssets().map((a) => ({
+    allAssets = getMockAssets(orgId).map((a) => ({
       id: a.id,
       qrCode: a.qrCode || a.qr_code || '',
       qr_code: a.qrCode || a.qr_code || '',
@@ -476,7 +551,6 @@ export async function getCatalogData(warehouseId?: string): Promise<CatalogDataP
   }
 
   // 2. Compute toolCount for EACH category:
-  // Count of assets where asset.category_name === cat.name || asset.category === cat.name
   const categoriesWithCount: CatalogCategory[] = categoriesList.map((cat) => {
     const toolCount = allAssets.filter(
       (asset) =>
@@ -525,13 +599,15 @@ export async function getCatalogData(warehouseId?: string): Promise<CatalogDataP
  * e.g., across all ZR- codes (like ZR-282, ZR-1098) -> returns max + 1 (1099).
  */
 export async function getNextAvailableTagNumberAction(
-  prefix: string = 'ZR-'
+  prefix: string = 'ZR-',
+  organizationId?: string
 ): Promise<number> {
+  const orgId = organizationId || DEFAULT_ORGANIZATION_ID;
   const cleanPrefix = prefix.trim().toUpperCase();
   let maxNumber = 0;
 
   // 1. Check mock store assets (contains all 1016 imported Excel assets, max 1098)
-  const mockNext = getNextAvailableMockTagNumber(cleanPrefix);
+  const mockNext = getNextAvailableMockTagNumber(cleanPrefix, orgId);
   if (mockNext > 1) {
     maxNumber = Math.max(maxNumber, mockNext - 1);
   }
@@ -544,6 +620,7 @@ export async function getNextAvailableTagNumberAction(
       const { data, error } = await supabase
         .from('assets')
         .select('qr_code')
+        .or(`organization_id.eq.${orgId},organization_id.is.null`)
         .ilike('qr_code', prefixPattern);
 
       if (!error && data && data.length > 0) {

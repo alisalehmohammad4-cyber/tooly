@@ -12,7 +12,10 @@ import {
   updateMockUserWarehouse,
   updateMockUserRole,
   toggleMockUserActive,
+  DEFAULT_ORGANIZATION,
 } from '@/lib/mockStore';
+
+const DEFAULT_ORGANIZATION_ID = DEFAULT_ORGANIZATION.id;
 
 // Persistent in-memory user registry initialized with authoritative users
 const USERS_STORE: AppUser[] = [...MOCK_USERS];
@@ -209,7 +212,9 @@ export async function authenticateUserAction(
  * Retrieves the list of enterprise operators (Chief Operations & Storekeepers) for the Manager Dashboard.
  * Synchronizes with Supabase database when available, while ensuring local mock fallback stays intact.
  */
-export async function getStorekeepersListAction(): Promise<AppUser[]> {
+export async function getStorekeepersListAction(organizationId?: string): Promise<AppUser[]> {
+  const orgId = organizationId || DEFAULT_ORGANIZATION_ID;
+
   // Sync all mock users into USERS_STORE
   for (const mockUser of MOCK_USERS) {
     if (!USERS_STORE.some((u) => u.id === mockUser.id)) {
@@ -224,7 +229,8 @@ export async function getStorekeepersListAction(): Promise<AppUser[]> {
       // 1. Try querying primary `users` table
       const { data: usersData, error: usersErr } = await serverClient
         .from('users')
-        .select('*');
+        .select('*')
+        .or(`organization_id.eq.${orgId},organization_id.is.null`);
 
       if (!usersErr && usersData && usersData.length > 0) {
         for (const row of usersData) {
@@ -237,6 +243,7 @@ export async function getStorekeepersListAction(): Promise<AppUser[]> {
             role: row.role || 'storekeeper',
             email: row.email,
             phone: row.phone,
+            organizationId: (row.organization_id as string) || orgId,
             assignedWarehouseId: row.assigned_warehouse_id,
             assignedWarehouseName: row.assigned_warehouse_id
               ? getWarehouseNameById(row.assigned_warehouse_id)
@@ -259,7 +266,8 @@ export async function getStorekeepersListAction(): Promise<AppUser[]> {
         // 2. Try fallback to `profiles` table
         const { data: profilesData, error: profilesErr } = await serverClient
           .from('profiles')
-          .select('*');
+          .select('*')
+          .or(`organization_id.eq.${orgId},organization_id.is.null`);
 
         if (!profilesErr && profilesData && profilesData.length > 0) {
           for (const row of profilesData) {
@@ -272,6 +280,7 @@ export async function getStorekeepersListAction(): Promise<AppUser[]> {
               role: row.role || 'storekeeper',
               email: row.email,
               phone: row.phone,
+              organizationId: (row.organization_id as string) || orgId,
               assignedWarehouseId: row.assigned_warehouse_id,
               assignedWarehouseName: row.assigned_warehouse_id
                 ? getWarehouseNameById(row.assigned_warehouse_id)
@@ -294,7 +303,8 @@ export async function getStorekeepersListAction(): Promise<AppUser[]> {
           // 3. Fallback to `app_users` table
           const { data: appUsersData, error: appErr } = await serverClient
             .from('app_users')
-            .select('*');
+            .select('*')
+            .or(`organization_id.eq.${orgId},organization_id.is.null`);
 
           if (!appErr && appUsersData && appUsersData.length > 0) {
             for (const row of appUsersData) {
@@ -304,6 +314,7 @@ export async function getStorekeepersListAction(): Promise<AppUser[]> {
                 username: row.username,
                 pinCode: row.pin_code,
                 role: row.role || 'storekeeper',
+                organizationId: (row.organization_id as string) || orgId,
                 assignedWarehouseId: row.assigned_warehouse_id,
                 assignedWarehouseName:
                   row.assigned_warehouse_name ||
@@ -335,11 +346,12 @@ export async function getStorekeepersListAction(): Promise<AppUser[]> {
 
   return USERS_STORE.filter(
     (u) =>
-      u.role === 'storekeeper' ||
-      u.role === 'chief_operations' ||
-      u.role === 'supervisor' ||
-      u.role === 'general_manager' ||
-      u.role === 'admin'
+      (!organizationId || !u.organizationId || u.organizationId === organizationId) &&
+      (u.role === 'storekeeper' ||
+        u.role === 'chief_operations' ||
+        u.role === 'supervisor' ||
+        u.role === 'general_manager' ||
+        u.role === 'admin')
   );
 }
 
@@ -351,17 +363,19 @@ export interface CreateStorekeeperInput {
   assignedWarehouseId?: string;
   email?: string;
   phone?: string;
+  organizationId?: string;
 }
 
 /**
  * Creates a new Storekeeper or Chief Operations account (General Manager only).
- * Writes persistently to Supabase `users` table ({ id, email, name, role, assigned_warehouse_id, phone, is_active: true }),
+ * Writes persistently to Supabase `users` table ({ id, email, name, role, assigned_warehouse_id, phone, is_active: true, organization_id }),
  * mirrors to `profiles` and `app_users`, and appends to `MOCK_USERS` in `src/lib/mockStore.ts`.
  */
 export async function createStorekeeperAction(
   input: CreateStorekeeperInput
 ): Promise<{ success: boolean; error?: string; message?: string; user?: AppUser }> {
-  const { fullName, username, pinCode, role = 'storekeeper', assignedWarehouseId, email, phone } = input;
+  const { fullName, username, pinCode, role = 'storekeeper', assignedWarehouseId, email, phone, organizationId } = input;
+  const orgId = organizationId || DEFAULT_ORGANIZATION_ID;
 
   if (!fullName.trim() || fullName.trim().length < 2) {
     return { success: false, error: 'שם מלא חייב להכיל לפחות 2 תווים.' };
@@ -384,7 +398,9 @@ export async function createStorekeeperAction(
   const cleanPin = pinCode.trim();
 
   const existing = USERS_STORE.find(
-    (u) => u.username?.toLowerCase() === cleanUsername || u.pinCode === cleanPin
+    (u) =>
+      (!orgId || !u.organizationId || u.organizationId === orgId) &&
+      (u.username?.toLowerCase() === cleanUsername || u.pinCode === cleanPin)
   );
 
   if (existing) {
@@ -412,6 +428,7 @@ export async function createStorekeeperAction(
     phone: userPhone || undefined,
     role: userRole,
     pinCode: cleanPin,
+    organizationId: orgId,
     assignedWarehouseId: isChief ? undefined : assignedWarehouseId,
     assignedWarehouseName: warehouseName,
     isActive: true,
@@ -448,6 +465,7 @@ export async function createStorekeeperAction(
         assigned_warehouse_id: assignedWarehouse,
         phone: userPhone,
         is_active: true,
+        organization_id: orgId,
       });
 
       if (error) console.error('Error saving user to Supabase:', error.message);
@@ -463,6 +481,7 @@ export async function createStorekeeperAction(
           assigned_warehouse_id: assignedWarehouse,
           phone: userPhone,
           is_active: true,
+          organization_id: orgId,
         });
         if (profileError) console.error('Error saving user to Supabase:', profileError.message);
       }
@@ -484,6 +503,7 @@ export async function createStorekeeperAction(
           assigned_warehouse_id: assignedWarehouse,
           assigned_warehouse_name: warehouseName,
           is_active: true,
+          organization_id: orgId,
         },
         { onConflict: 'username' }
       );
@@ -502,6 +522,7 @@ export async function createStorekeeperAction(
         role: newUser.role,
         assigned_warehouse_id: assignedWarehouse,
         is_active: true,
+        organization_id: orgId,
       });
     } catch {
       // Non-critical mirror
@@ -517,8 +538,17 @@ export async function createStorekeeperAction(
   };
 }
 
-export const createUserAction = createStorekeeperAction;
-export const onboardUserAction = createStorekeeperAction;
+export async function createUserAction(
+  input: CreateStorekeeperInput
+): Promise<{ success: boolean; error?: string; message?: string; user?: AppUser }> {
+  return createStorekeeperAction(input);
+}
+
+export async function onboardUserAction(
+  input: CreateStorekeeperInput
+): Promise<{ success: boolean; error?: string; message?: string; user?: AppUser }> {
+  return createStorekeeperAction(input);
+}
 
 /**
  * Deletes a storekeeper or operator from the system (General Manager only).

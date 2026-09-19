@@ -57,6 +57,8 @@ export interface ScannedAssetDetails {
   category?: string;
   categoryName?: string;
   category_name?: string;
+  organizationId?: string;
+  organization_id?: string;
 }
 
 export type CustodyActionResult =

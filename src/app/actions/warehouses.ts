@@ -9,7 +9,10 @@ import {
   deleteMockWarehouse,
   type WarehouseAdminItem,
   isLegacyEnglishCategory,
+  DEFAULT_ORGANIZATION,
 } from '@/lib/mockStore';
+
+const DEFAULT_ORGANIZATION_ID = DEFAULT_ORGANIZATION.id;
 
 export interface WarehouseActionResult {
   success: boolean;
@@ -24,21 +27,25 @@ interface WarehouseCacheEntry<T> {
   expiresAt: number;
 }
 const WAREHOUSE_CACHE_TTL_MS = 30 * 1000;
-let adminWarehousesCache: WarehouseCacheEntry<WarehouseAdminItem[]> | null = null;
+const adminWarehousesCache = new Map<string, WarehouseCacheEntry<WarehouseAdminItem[]>>();
 const warehouseToolsCache = new Map<string, WarehouseCacheEntry<WarehouseToolItem[]>>();
 
 export async function invalidateWarehouseCache(): Promise<void> {
-  adminWarehousesCache = null;
+  adminWarehousesCache.clear();
   warehouseToolsCache.clear();
 }
 
 /**
  * Retrieves all facilities and warehouses joined with live asset inventory metrics.
- * Cached for 30 seconds to optimize executive dashboard performance.
+ * Scoped by organization and cached for 30 seconds to optimize executive dashboard performance.
  */
-export async function getWarehousesAdminAction(): Promise<WarehouseAdminItem[]> {
-  if (adminWarehousesCache && adminWarehousesCache.expiresAt > Date.now()) {
-    return adminWarehousesCache.data;
+export async function getWarehousesAdminAction(
+  organizationId?: string
+): Promise<WarehouseAdminItem[]> {
+  const orgId = organizationId || DEFAULT_ORGANIZATION_ID;
+  const cached = adminWarehousesCache.get(orgId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.data;
   }
 
   let warehousesList: Array<{
@@ -48,6 +55,7 @@ export async function getWarehousesAdminAction(): Promise<WarehouseAdminItem[]> 
     type?: WarehouseType;
     address?: string | null;
     isActive?: boolean;
+    organizationId?: string;
   }> = [];
 
   let assetsList: Array<{
@@ -59,13 +67,23 @@ export async function getWarehousesAdminAction(): Promise<WarehouseAdminItem[]> 
     warehouse_code?: string | null;
     warehouseCode?: string | null;
     status?: string;
+    organization_id?: string;
+    organizationId?: string;
   }> = [];
 
   if (isSupabaseConfigured()) {
     try {
       const [whRes, assetsRes] = await Promise.all([
-        supabase.from('warehouses').select('id, name, code, type, address, is_active').order('name', { ascending: true }),
-        supabase.from('assets').select('id, current_warehouse_id, status').limit(10000),
+        supabase
+          .from('warehouses')
+          .select('id, name, code, type, address, is_active, organization_id')
+          .or(`organization_id.eq.${orgId},organization_id.is.null`)
+          .order('name', { ascending: true }),
+        supabase
+          .from('assets')
+          .select('id, current_warehouse_id, status, organization_id')
+          .or(`organization_id.eq.${orgId},organization_id.is.null`)
+          .limit(10000),
       ]);
 
       if (!whRes.error && whRes.data && whRes.data.length > 0) {
@@ -76,6 +94,7 @@ export async function getWarehousesAdminAction(): Promise<WarehouseAdminItem[]> 
           type: (row.type as WarehouseType) || 'central_warehouse',
           address: (row.address as string) || null,
           isActive: row.is_active !== false,
+          organizationId: (row.organization_id as string) || orgId,
         }));
       }
 
@@ -90,19 +109,20 @@ export async function getWarehousesAdminAction(): Promise<WarehouseAdminItem[]> 
   // Fallback to mockStore if empty from Supabase
   if (warehousesList.length === 0) {
     const { getMockWarehouses } = await import('@/lib/mockStore');
-    warehousesList = getMockWarehouses().map((w) => ({
+    warehousesList = getMockWarehouses(true, orgId).map((w) => ({
       id: w.id,
       name: w.name,
       code: w.code,
       type: w.type,
       address: w.address,
       isActive: w.isActive,
+      organizationId: w.organizationId || orgId,
     }));
   }
 
   if (assetsList.length === 0) {
     const { getMockAssets } = await import('@/lib/mockStore');
-    assetsList = getMockAssets() as typeof assetsList;
+    assetsList = getMockAssets(orgId) as typeof assetsList;
   }
 
   const results: WarehouseAdminItem[] = warehousesList.map((wh) => {
@@ -128,6 +148,7 @@ export async function getWarehousesAdminAction(): Promise<WarehouseAdminItem[]> 
       type: wh.type || 'central_warehouse',
       address: wh.address || null,
       isActive: wh.isActive !== false,
+      organizationId: wh.organizationId || orgId,
       toolCount: whAssets.length,
       totalTools: whAssets.length,
       availableCount,
@@ -136,10 +157,10 @@ export async function getWarehousesAdminAction(): Promise<WarehouseAdminItem[]> 
     };
   });
 
-  adminWarehousesCache = {
+  adminWarehousesCache.set(orgId, {
     data: results,
     expiresAt: Date.now() + WAREHOUSE_CACHE_TTL_MS,
-  };
+  });
 
   return results;
 }
@@ -147,12 +168,16 @@ export async function getWarehousesAdminAction(): Promise<WarehouseAdminItem[]> 
 /**
  * Creates a new facility / warehouse in the system.
  */
-export async function createWarehouseAction(input: {
-  name: string;
-  code: string;
-  type: WarehouseType;
-  address?: string;
-}): Promise<WarehouseActionResult> {
+export async function createWarehouseAction(
+  input: {
+    name: string;
+    code: string;
+    type: WarehouseType;
+    address?: string;
+  },
+  organizationId?: string
+): Promise<WarehouseActionResult> {
+  const orgId = organizationId || DEFAULT_ORGANIZATION_ID;
   const cleanName = input.name.trim();
   const cleanCode = input.code.trim().toUpperCase();
 
@@ -179,6 +204,7 @@ export async function createWarehouseAction(input: {
           type,
           address: input.address?.trim() || null,
           is_active: true,
+          organization_id: orgId,
         })
         .select('*')
         .single();
@@ -191,6 +217,7 @@ export async function createWarehouseAction(input: {
           type: data.type,
           address: data.address,
           isActive: data.is_active,
+          organizationId: data.organization_id || orgId,
         };
       } else if (error) {
         console.warn('[createWarehouseAction] Supabase insert error:', error.message);
@@ -206,6 +233,7 @@ export async function createWarehouseAction(input: {
     code: cleanCode,
     type,
     address: input.address,
+    organizationId: orgId,
   });
 
   const finalWh = createdWarehouse || mockWh;
@@ -434,14 +462,17 @@ export interface WarehouseToolItem {
  * Supports both Supabase persistence and unified mockStore fallback.
  */
 export async function getWarehouseToolsAction(
-  warehouseId: string
+  warehouseId: string,
+  organizationId?: string
 ): Promise<WarehouseToolItem[]> {
   const cleanWhId = (warehouseId || '').trim();
   if (!cleanWhId) {
     return [];
   }
 
-  const cached = warehouseToolsCache.get(cleanWhId);
+  const orgId = organizationId || DEFAULT_ORGANIZATION_ID;
+  const cacheKey = `${orgId}_${cleanWhId}`;
+  const cached = warehouseToolsCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.data;
   }
@@ -455,6 +486,7 @@ export async function getWarehouseToolsAction(
       const { data: wh } = await supabase
         .from('warehouses')
         .select('id, code')
+        .or(`organization_id.eq.${orgId},organization_id.is.null`)
         .or(`id.eq.${cleanWhId},code.eq.${cleanWhId}`)
         .maybeSingle();
 
@@ -465,10 +497,16 @@ export async function getWarehouseToolsAction(
       const [assetsRes, categoriesRes] = await Promise.all([
         supabase
           .from('assets')
-          .select('id, name, tool_name, qr_code, serial_number, category_id, category_name, status, current_assigned_worker, order_number')
+          .select(
+            'id, name, tool_name, qr_code, serial_number, category_id, category_name, status, current_assigned_worker, order_number'
+          )
+          .or(`organization_id.eq.${orgId},organization_id.is.null`)
           .or(`current_warehouse_id.eq.${targetWhId},warehouse_id.eq.${targetWhId}`)
           .limit(5000),
-        supabase.from('categories').select('id, name'),
+        supabase
+          .from('categories')
+          .select('id, name')
+          .or(`organization_id.eq.${orgId},organization_id.is.null`),
       ]);
 
       if (!assetsRes.error && assetsRes.data && assetsRes.data.length > 0) {
@@ -508,12 +546,12 @@ export async function getWarehouseToolsAction(
   // Fallback to mockStore if empty or Supabase not configured
   if (toolsList.length === 0) {
     const { getMockAssets, getMockWarehouses } = await import('@/lib/mockStore');
-    const mockWhs = getMockWarehouses(true);
+    const mockWhs = getMockWarehouses(true, orgId);
     const targetWh = mockWhs.find(
       (w) => w.id === cleanWhId || (w.code && w.code.toUpperCase() === cleanWhId.toUpperCase())
     );
 
-    const allAssets = getMockAssets();
+    const allAssets = getMockAssets(orgId);
     const filtered = allAssets.filter((a) => {
       const matchDirect =
         a.current_warehouse_id === cleanWhId ||
@@ -551,7 +589,7 @@ export async function getWarehouseToolsAction(
     }));
   }
 
-  warehouseToolsCache.set(cleanWhId, {
+  warehouseToolsCache.set(cacheKey, {
     data: toolsList,
     expiresAt: Date.now() + WAREHOUSE_CACHE_TTL_MS,
   });

@@ -22,6 +22,7 @@ import {
   getWarehouseToolsAction,
   type WarehouseToolItem,
 } from '@/app/actions/warehouses';
+import { useAuth } from '@/context/AuthContext';
 
 const PAGE_SIZE = 32;
 
@@ -38,6 +39,7 @@ export default function WarehouseToolsModal({
   onClose,
   warehouse,
 }: WarehouseToolsModalProps) {
+  const { currentOrganization } = useAuth();
   const [tools, setTools] = useState<WarehouseToolItem[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -52,7 +54,7 @@ export default function WarehouseToolsModal({
   const loadTools = useCallback(async (whId: string) => {
     setIsLoading(true);
     try {
-      const result = await getWarehouseToolsAction(whId);
+      const result = await getWarehouseToolsAction(whId, currentOrganization?.id);
       setTools(result);
     } catch (err) {
       console.warn('Error fetching warehouse tools:', err);
@@ -60,7 +62,7 @@ export default function WarehouseToolsModal({
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [currentOrganization]);
 
   useEffect(() => {
     if (isOpen && warehouse?.id) {

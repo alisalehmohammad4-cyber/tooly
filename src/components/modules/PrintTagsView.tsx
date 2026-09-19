@@ -18,6 +18,7 @@ import {
 import AppLayout from '@/components/layout/AppLayout';
 import { getNextAvailableTagNumberAction } from '@/app/actions/assets';
 import { getAssetDetailsByQr, type ScannedAssetDetails } from '@/app/actions/custody';
+import { useAuth } from '@/context/AuthContext';
 
 interface TagItem {
   serial: string;
@@ -31,14 +32,16 @@ type PrintMode = 'batch' | 'reprint';
 type LabelFormat = 'tsc' | 'a4';
 
 export default function PrintTagsView() {
+  const { currentOrganization } = useAuth();
+
   // Mode selection: Tab A (Batch) vs Tab B (Reprint)
   const [activeTab, setActiveTab] = useState<PrintMode>('batch');
 
   // Label format: TSC thermal roll 60x30 mm [Default] vs A4 office sheet
   const [labelFormat, setLabelFormat] = useState<LabelFormat>('tsc');
 
-  // Tab A: Batch Config State
-  const [prefix, setPrefix] = useState<string>('ZR-');
+  // Tab A: Batch Config State (Default prefix from currentOrganization)
+  const [prefix, setPrefix] = useState<string>(() => currentOrganization?.serialPrefix || 'ZR-');
   const [startNumber, setStartNumber] = useState<number>(1099);
   const [suggestedStartNumber, setSuggestedStartNumber] = useState<number | null>(1099);
   const [quantity, setQuantity] = useState<number>(24);
@@ -47,13 +50,17 @@ export default function PrintTagsView() {
   const [companyName, setCompanyName] = useState<string>(() => {
     if (typeof window !== 'undefined') {
       try {
-        return localStorage.getItem('tooly_company_name') || 'TOOLY';
+        return (
+          localStorage.getItem('tooly_company_name') ||
+          currentOrganization?.name ||
+          'TOOLY'
+        );
       } catch (err) {
         console.warn('Error reading tooly_company_name from localStorage:', err);
-        return 'TOOLY';
+        return currentOrganization?.name || 'TOOLY';
       }
     }
-    return 'TOOLY';
+    return currentOrganization?.name || 'TOOLY';
   });
 
   // Tab B: Reprint Damaged Label State
@@ -85,7 +92,7 @@ export default function PrintTagsView() {
 
     const fetchNextSequentialNumber = async () => {
       try {
-        const nextNum = await getNextAvailableTagNumberAction(prefix);
+        const nextNum = await getNextAvailableTagNumberAction(prefix, currentOrganization?.id);
 
         // Check local storage for offline / last printed fallback
         let lastPrinted = 0;
@@ -117,7 +124,7 @@ export default function PrintTagsView() {
     return () => {
       isCurrent = false;
     };
-  }, [prefix]);
+  }, [prefix, currentOrganization?.id]);
 
   // Compute batch list of serials: strictly ${prefix}${num} without extra zero-padding
   const batchSerials = useMemo(() => {
@@ -534,7 +541,7 @@ export default function PrintTagsView() {
                   type="text"
                   value={prefix}
                   onChange={(e) => setPrefix(e.target.value)}
-                  placeholder="ZR-"
+                  placeholder={currentOrganization?.serialPrefix || 'ZR-'}
                   className="w-full min-h-[48px] bg-white text-blue-950 font-mono font-bold text-base px-3.5 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none uppercase shadow-sm"
                   dir="ltr"
                 />

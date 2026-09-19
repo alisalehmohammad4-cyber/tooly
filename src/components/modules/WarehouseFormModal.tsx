@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import type { Warehouse, WarehouseType } from '@/types/domain';
 import { createWarehouseAction, updateWarehouseAction } from '@/app/actions/warehouses';
+import { useAuth } from '@/context/AuthContext';
 
 interface WarehouseFormModalProps {
   isOpen: boolean;
@@ -28,6 +29,7 @@ export default function WarehouseFormModal({
   onSaved,
   initialData,
 }: WarehouseFormModalProps) {
+  const { currentOrganization } = useAuth();
   const isEditing = Boolean(initialData);
 
   const [name, setName] = useState<string>('');
@@ -99,12 +101,15 @@ export default function WarehouseFormModal({
           setErrorMessage(res.error || 'שגיאה בעדכון פרטי המתקן');
         }
       } else {
-        const res = await createWarehouseAction({
-          name: cleanName,
-          code: cleanCode,
-          type,
-          address: address.trim() || undefined,
-        });
+        const res = await createWarehouseAction(
+          {
+            name: cleanName,
+            code: cleanCode,
+            type,
+            address: address.trim() || undefined,
+          },
+          currentOrganization?.id
+        );
 
         if (res.success && res.warehouse) {
           onSaved(res.warehouse);

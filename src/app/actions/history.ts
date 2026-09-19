@@ -30,6 +30,7 @@ export interface AuditHistoryRecord {
   warehouseCode: string;
   notes: string | null;
   createdAt: string;
+  organizationId?: string;
   expectedReturnDate?: string | null;
   signatureData?: string | null;
   accessoriesSnapshot?: {

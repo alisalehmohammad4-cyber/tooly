@@ -5,7 +5,10 @@ import {
   getMockPlantManagerAnalytics,
   getMockStorekeeperOperations,
   getMockWarehouses,
+  DEFAULT_ORGANIZATION,
 } from '@/lib/mockStore';
+
+const DEFAULT_ORGANIZATION_ID = DEFAULT_ORGANIZATION.id;
 
 export interface FleetUtilization {
   totalAssets: number;
@@ -119,23 +122,33 @@ export interface StorekeeperOperationsPayload {
 }
 
 // Fallback dataset for instant preview and offline development
-const getFallbackWarehouses = () => getMockWarehouses();
+const getFallbackWarehouses = (orgId?: string) => getMockWarehouses(false, orgId);
 
 /**
  * Retrieves executive analytics and safety compliance data for Factory & Plant Managers.
  */
-export async function getPlantManagerAnalytics(): Promise<PlantManagerAnalyticsPayload> {
+export async function getPlantManagerAnalytics(
+  organizationId?: string
+): Promise<PlantManagerAnalyticsPayload> {
+  const orgId = organizationId || DEFAULT_ORGANIZATION_ID;
+
   if (isSupabaseConfigured()) {
     try {
       const [assetsRes, warehousesRes, ledgerRes] = await Promise.all([
         supabase
           .from('assets')
           .select('*, tool_models(name, brand, model_number, category_id), warehouses(name, code)')
+          .or(`organization_id.eq.${orgId},organization_id.is.null`)
           .limit(10000),
-        supabase.from('warehouses').select('*').eq('is_active', true),
+        supabase
+          .from('warehouses')
+          .select('*')
+          .eq('is_active', true)
+          .or(`organization_id.eq.${orgId},organization_id.is.null`),
         supabase
           .from('custody_ledger')
           .select('*')
+          .or(`organization_id.eq.${orgId},organization_id.is.null`)
           .gte('created_at', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()),
       ]);
 
@@ -299,16 +312,18 @@ export async function getPlantManagerAnalytics(): Promise<PlantManagerAnalyticsP
   }
 
   // Fallback unified dataset for instant rich presentation and offline preview
-  return getMockPlantManagerAnalytics();
+  return getMockPlantManagerAnalytics(orgId);
 }
 
 /**
  * Retrieves day-to-day warehouse operations, shift schedules, and overdue contact links for Storekeepers.
  */
 export async function getStorekeeperOperations(
-  warehouseId?: string
+  warehouseId?: string,
+  organizationId?: string
 ): Promise<StorekeeperOperationsPayload> {
-  const fallbackWarehouses = getFallbackWarehouses();
+  const orgId = organizationId || DEFAULT_ORGANIZATION_ID;
+  const fallbackWarehouses = getFallbackWarehouses(orgId);
   const isAll = warehouseId === 'all' || warehouseId === 'ALL';
   const selectedWhId = isAll ? 'all' : (warehouseId || fallbackWarehouses[0]?.id || 'all');
   const currentWh = isAll
@@ -322,6 +337,7 @@ export async function getStorekeeperOperations(
       let query = supabase
         .from('assets')
         .select('*, tool_models(name, brand, model_number, category_id)')
+        .or(`organization_id.eq.${orgId},organization_id.is.null`)
         .limit(10000);
       if (!isAll) {
         query = query.eq('current_warehouse_id', selectedWhId);
@@ -411,5 +427,5 @@ export async function getStorekeeperOperations(
   }
 
   // Fallback operational data for storekeeper derived strictly from unified store
-  return getMockStorekeeperOperations(selectedWhId);
+  return getMockStorekeeperOperations(selectedWhId, orgId);
 }

@@ -1,4 +1,4 @@
-import type { Category, Warehouse, WarehouseType, AssetCondition, AssetStatus, AppUser } from '@/types/domain';
+import type { Category, Warehouse, WarehouseType, AssetCondition, AssetStatus, AppUser, Organization } from '@/types/domain';
 import type {
   PlantManagerAnalyticsPayload,
   StorekeeperOperationsPayload,
@@ -22,6 +22,14 @@ import {
   pickBestAssetMatch,
 } from '@/lib/search/toolDictionary';
 
+export const DEFAULT_ORGANIZATION: Organization = {
+  id: '00000000-0000-0000-0000-000000000001',
+  name: 'Sami Zatout Production',
+  slug: 'zatout',
+  serialPrefix: 'ZR-',
+  defaultCurrency: 'ILS',
+};
+
 export interface WarehouseAdminItem {
   id: string;
   name: string;
@@ -34,6 +42,7 @@ export interface WarehouseAdminItem {
   availableCount: number;
   inUseCount: number;
   maintenanceCount: number;
+  organizationId?: string;
 }
 
 // 1. Authoritative Standardized Warehouses (Empty for Production Operation)
@@ -136,21 +145,43 @@ export const MOCK_WAREHOUSES: Warehouse[] = [
   }
 ];
 
-const warehousesStore: Warehouse[] = [...MOCK_WAREHOUSES];
-
-export function getMockWarehouses(includeInactive = false): Warehouse[] {
-  if (includeInactive) return [...warehousesStore];
-  return warehousesStore.filter((w) => w.isActive !== false);
+// Associate mock warehouses with DEFAULT_ORGANIZATION
+for (const w of MOCK_WAREHOUSES) {
+  if (!w.organizationId) {
+    w.organizationId = DEFAULT_ORGANIZATION.id;
+  }
 }
 
-export function getMockWarehousesAdmin(): WarehouseAdminItem[] {
-  return warehousesStore.map((wh) => {
+const warehousesStore: Warehouse[] = [...MOCK_WAREHOUSES];
+
+export function getMockWarehouses(
+  includeInactiveOrOrgId: boolean | string = false,
+  organizationId?: string
+): Warehouse[] {
+  let includeInactive = false;
+  let orgId = organizationId;
+  if (typeof includeInactiveOrOrgId === 'string') {
+    orgId = includeInactiveOrOrgId;
+  } else {
+    includeInactive = includeInactiveOrOrgId;
+  }
+  let list = includeInactive ? [...warehousesStore] : warehousesStore.filter((w) => w.isActive !== false);
+  if (orgId) {
+    list = list.filter((w) => !w.organizationId || w.organizationId === orgId);
+  }
+  return list;
+}
+
+export function getMockWarehousesAdmin(organizationId?: string): WarehouseAdminItem[] {
+  const warehouses = getMockWarehouses(true, organizationId);
+  return warehouses.map((wh) => {
     const whAssets = assetsStore.filter(
       (a) =>
-        a.currentWarehouseId === wh.id ||
-        a.current_warehouse_id === wh.id ||
-        a.warehouseId === wh.id ||
-        a.warehouseCode === wh.code
+        (!organizationId || !a.organizationId || a.organizationId === organizationId) &&
+        (a.currentWarehouseId === wh.id ||
+          a.current_warehouse_id === wh.id ||
+          a.warehouseId === wh.id ||
+          a.warehouseCode === wh.code)
     );
     const availableCount = whAssets.filter((a) => a.status === 'available').length;
     const inUseCount = whAssets.filter((a) => a.status === 'checked_out').length;
@@ -169,6 +200,7 @@ export function getMockWarehousesAdmin(): WarehouseAdminItem[] {
       availableCount,
       inUseCount,
       maintenanceCount,
+      organizationId: wh.organizationId || DEFAULT_ORGANIZATION.id,
     };
   });
 }
@@ -178,6 +210,7 @@ export function addMockWarehouse(input: {
   code: string;
   type: WarehouseType;
   address?: string | null;
+  organizationId?: string;
 }): Warehouse {
   const newWh: Warehouse = {
     id: `wh-${input.code.toLowerCase().replace(/[^a-z0-9]/g, '-') || Date.now().toString(36)}`,
@@ -186,6 +219,7 @@ export function addMockWarehouse(input: {
     type: input.type,
     address: input.address?.trim() || null,
     isActive: true,
+    organizationId: input.organizationId || DEFAULT_ORGANIZATION.id,
   };
   warehousesStore.push(newWh);
   return newWh;
@@ -586,6 +620,8 @@ export interface UnifiedAssetItem {
   originalTaskId?: string;
   orderNumber?: string | null;
   order_number?: string | null;
+  organizationId?: string;
+  organization_id?: string;
 }
 
 // 3. Authoritative Unified Assets (Empty for Production Operation)
@@ -40263,12 +40299,22 @@ function generateInitialAuditRecords(assets: UnifiedAssetItem[]): AuditHistoryRe
       warehouseCode: asset.warehouseCode || asset.warehouse_code || 'WH',
       notes,
       createdAt: itemTime,
+      organizationId: DEFAULT_ORGANIZATION.id,
       expectedReturnDate: asset.expectedReturnDate,
       accessoriesSnapshot: asset.accessories,
     });
   });
 
   return records.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+// Associate all mock assets and categories with DEFAULT_ORGANIZATION
+for (const a of MOCK_ASSETS) {
+  if (!a.organizationId) a.organizationId = DEFAULT_ORGANIZATION.id;
+  if (!a.organization_id) a.organization_id = DEFAULT_ORGANIZATION.id;
+}
+for (const c of MOCK_CATEGORIES) {
+  if (!c.organizationId) c.organizationId = DEFAULT_ORGANIZATION.id;
 }
 
 // 4. Authoritative Audit History Records (Populated automatically from assets)
@@ -40280,14 +40326,23 @@ const historyStore: AuditHistoryRecord[] = [...MOCK_AUDIT_LOGS];
 export const auditStore: AuditHistoryRecord[] = historyStore;
 
 export function appendMockAuditRecord(entry: AuditHistoryRecord): void {
-  historyStore.unshift(entry);
-  MOCK_AUDIT_LOGS.unshift(entry);
+  const entryWithOrg: AuditHistoryRecord = {
+    ...entry,
+    organizationId: entry.organizationId || DEFAULT_ORGANIZATION.id,
+  };
+  historyStore.unshift(entryWithOrg);
+  MOCK_AUDIT_LOGS.unshift(entryWithOrg);
 }
 
 /**
- * Get all assets from the unified mock store.
+ * Get all assets from the unified mock store, optionally scoped by organizationId.
  */
-export function getMockAssets(): UnifiedAssetItem[] {
+export function getMockAssets(organizationId?: string): UnifiedAssetItem[] {
+  if (organizationId) {
+    return assetsStore.filter(
+      (a) => !a.organizationId || a.organizationId === organizationId || a.organization_id === organizationId
+    );
+  }
   return assetsStore;
 }
 
@@ -40331,6 +40386,7 @@ function toScannedAssetDetails(asset: UnifiedAssetItem): ScannedAssetDetails {
     categoryName: catName,
     category_name: catName,
     category: catName,
+    organizationId: asset.organizationId || DEFAULT_ORGANIZATION.id,
   };
 }
 
@@ -40430,6 +40486,7 @@ export function mutateMockAsset(
       warehouseCode: asset.warehouseCode,
       notes: auditDetails.notes || null,
       createdAt: new Date().toISOString(),
+      organizationId: asset.organizationId || DEFAULT_ORGANIZATION.id,
       expectedReturnDate: asset.expectedReturnDate,
       signatureData: auditDetails.signatureData,
       accessoriesSnapshot: asset.accessories,
@@ -40456,6 +40513,7 @@ export function addMockAsset(newAsset: {
   modelNumber?: string;
   condition: AssetCondition;
   performedBy?: string;
+  organizationId?: string;
 }): ScannedAssetDetails {
   const wh =
     warehousesStore.find((w) => w.id === newAsset.warehouseId || w.code === newAsset.warehouseId) ||
@@ -40484,6 +40542,8 @@ export function addMockAsset(newAsset: {
     currentAssignedWorker: null,
     workerPhone: null,
     version: 1,
+    organizationId: (newAsset as { organizationId?: string }).organizationId || DEFAULT_ORGANIZATION.id,
+    organization_id: (newAsset as { organizationId?: string }).organizationId || DEFAULT_ORGANIZATION.id,
     purchaseCost: 2500, // Reasonable standard valuation for newly enrolled tools
     purchaseDate: new Date().toISOString().split('T')[0],
     warrantyUntil: daysFromNow(730).split('T')[0],
@@ -40510,6 +40570,7 @@ export function addMockAsset(newAsset: {
     warehouseCode: asset.warehouseCode,
     notes: 'רישום כלי חדש במערכת באמצעות סורק מהיר',
     createdAt: new Date().toISOString(),
+    organizationId: (newAsset as { organizationId?: string }).organizationId || DEFAULT_ORGANIZATION.id,
   });
 
   return getMockAssetByQr(asset.qrCode)!;
@@ -40519,7 +40580,7 @@ export function addMockAsset(newAsset: {
  * Calculates Plant Manager Analytics strictly and dynamically from the unified store.
  * Zero discrepancies between total valuation and individual asset purchase costs.
  */
-export function getMockPlantManagerAnalytics(): PlantManagerAnalyticsPayload {
+export function getMockPlantManagerAnalytics(organizationId?: string): PlantManagerAnalyticsPayload {
   const now = Date.now();
   let totalFleetValue = 0;
   let inUse = 0;
@@ -40545,7 +40606,11 @@ export function getMockPlantManagerAnalytics(): PlantManagerAnalyticsPayload {
     }
   > = {};
 
-  warehousesStore.forEach((wh) => {
+  const activeWarehouses = organizationId
+    ? warehousesStore.filter((wh) => !wh.organizationId || wh.organizationId === organizationId)
+    : warehousesStore;
+
+  activeWarehouses.forEach((wh) => {
     whMap[wh.id] = {
       warehouseId: wh.id,
       warehouseName: wh.name,
@@ -40557,7 +40622,13 @@ export function getMockPlantManagerAnalytics(): PlantManagerAnalyticsPayload {
     };
   });
 
-  assetsStore.forEach((asset) => {
+  const activeAssets = organizationId
+    ? assetsStore.filter(
+        (a) => !a.organizationId || a.organizationId === organizationId || a.organization_id === organizationId
+      )
+    : assetsStore;
+
+  activeAssets.forEach((asset) => {
     totalFleetValue += asset.purchaseCost;
 
     if (asset.status === 'checked_out') inUse++;
@@ -40601,8 +40672,8 @@ export function getMockPlantManagerAnalytics(): PlantManagerAnalyticsPayload {
     }
   });
 
-  const facilityDistribution = warehousesStore.map((wh) => {
-    const matchedAssets = assetsStore.filter(
+  const facilityDistribution = activeWarehouses.map((wh) => {
+    const matchedAssets = activeAssets.filter(
       (asset) =>
         asset.currentWarehouseId === wh.id ||
         asset.current_warehouse_id === wh.id ||
@@ -40711,13 +40782,18 @@ export function getMockPlantManagerAnalytics(): PlantManagerAnalyticsPayload {
  * Directly corresponds to the selected warehouse's assets.
  */
 export function getMockStorekeeperOperations(
-  warehouseId?: string
+  warehouseId?: string,
+  organizationId?: string
 ): StorekeeperOperationsPayload {
   const isAll = !warehouseId || warehouseId === 'all' || warehouseId.toLowerCase() === 'all';
+  const activeWarehouses = organizationId
+    ? warehousesStore.filter((w) => !w.organizationId || w.organizationId === organizationId)
+    : warehousesStore;
+
   const currentWh = isAll
     ? { id: 'all', name: 'כלל המחסנים (All Depots)', code: 'ALL' }
-    : (warehousesStore.find((w) => w.id === warehouseId || w.code === warehouseId) ||
-       warehousesStore[0] || { id: warehouseId || 'all', name: 'כלל המחסנים (All Depots)', code: 'ALL' });
+    : (activeWarehouses.find((w) => w.id === warehouseId || w.code === warehouseId) ||
+       activeWarehouses[0] || { id: warehouseId || 'all', name: 'כלל המחסנים (All Depots)', code: 'ALL' });
 
   const now = Date.now();
   const startOfToday = new Date();
@@ -40731,10 +40807,16 @@ export function getMockStorekeeperOperations(
   let checkedOutCount = 0;
   let quarantinedCount = 0;
 
+  const activeAssets = organizationId
+    ? assetsStore.filter(
+        (a) => !a.organizationId || a.organizationId === organizationId || a.organization_id === organizationId
+      )
+    : assetsStore;
+
   // Filter tools belonging to this facility matching currentWarehouseId or current_warehouse_id
   const whAssets = isAll
-    ? assetsStore
-    : assetsStore.filter(
+    ? activeAssets
+    : activeAssets.filter(
         (a) =>
           a.currentWarehouseId === currentWh.id ||
           a.current_warehouse_id === currentWh.id ||
@@ -40806,7 +40888,7 @@ export function getMockStorekeeperOperations(
 
   return {
     warehouse: currentWh,
-    allWarehouses: getMockWarehouses(),
+    allWarehouses: getMockWarehouses(false, organizationId),
     returnsDueToday,
     overdueAssets: overdueAssets.sort((a, b) => b.daysOverdue - a.daysOverdue),
     lowStockAlerts,
@@ -40819,17 +40901,23 @@ export function getMockStorekeeperOperations(
 /**
  * Calculates Catalog Data strictly and dynamically from the unified store.
  */
-export function getMockCatalogData(warehouseId?: string): CatalogDataPayload {
+export function getMockCatalogData(warehouseId?: string, organizationId?: string): CatalogDataPayload {
+  const activeAssets = organizationId
+    ? assetsStore.filter(
+        (a) => !a.organizationId || a.organizationId === organizationId || a.organization_id === organizationId
+      )
+    : assetsStore;
+
   const filteredAssets =
     warehouseId && warehouseId !== 'all'
-      ? assetsStore.filter(
+      ? activeAssets.filter(
           (a) =>
             a.currentWarehouseId === warehouseId ||
             a.current_warehouse_id === warehouseId ||
             a.warehouseId === warehouseId ||
             a.warehouseCode === warehouseId
         )
-      : assetsStore;
+      : activeAssets;
 
   const catalogAssets: CatalogAssetItem[] = filteredAssets.map((a) => {
     const whId = a.currentWarehouseId || a.current_warehouse_id || a.warehouseId;
@@ -40879,7 +40967,7 @@ export function getMockCatalogData(warehouseId?: string): CatalogDataPayload {
     name: cat.name,
     slug: cat.slug,
     icon: cat.icon ?? null,
-    toolCount: assetsStore.filter(
+    toolCount: activeAssets.filter(
       (a) =>
         a.category_name === cat.name ||
         a.category === cat.name ||
@@ -40892,7 +40980,7 @@ export function getMockCatalogData(warehouseId?: string): CatalogDataPayload {
   return {
     categories,
     assets: catalogAssets,
-    warehouses: getMockWarehouses(),
+    warehouses: getMockWarehouses(false, organizationId),
     selectedWarehouseId: warehouseId || 'all',
   };
 }
@@ -40900,8 +40988,12 @@ export function getMockCatalogData(warehouseId?: string): CatalogDataPayload {
 /**
  * Retrieves audit history filtered from the unified history store.
  */
-export function getMockAuditHistory(filters?: AuditHistoryFilters): AuditHistoryPayload {
+export function getMockAuditHistory(filters?: AuditHistoryFilters, organizationId?: string): AuditHistoryPayload {
   let items = [...historyStore];
+
+  if (organizationId) {
+    items = items.filter((item) => !item.organizationId || item.organizationId === organizationId);
+  }
 
   if (filters?.action && filters.action !== 'all') {
     items = items.filter((item) => item.action === filters.action);
@@ -40927,7 +41019,7 @@ export function getMockAuditHistory(filters?: AuditHistoryFilters): AuditHistory
   return {
     records: items,
     totalCount: items.length,
-    warehouses: getMockWarehouses(),
+    warehouses: getMockWarehouses(false, organizationId),
   };
 }
 
@@ -40942,24 +41034,34 @@ export const MOCK_USERS: AppUser[] = [
     assignedWarehouseId: undefined,
     assignedWarehouseName: 'כלל המפעל והפרויקטים',
     isActive: true,
+    organizationId: DEFAULT_ORGANIZATION.id,
     createdAt: '2023-11-01T10:00:00.000Z',
   },
 ];
 
-export function getMockUsers(): AppUser[] {
+export function getMockUsers(organizationId?: string): AppUser[] {
+  if (organizationId) {
+    return MOCK_USERS.filter((u) => !u.organizationId || u.organizationId === organizationId);
+  }
   return [...MOCK_USERS];
 }
 
 export function addMockUser(user: AppUser): AppUser {
+  const userWithOrg: AppUser = {
+    ...user,
+    organizationId: user.organizationId || DEFAULT_ORGANIZATION.id,
+  };
   const existingIdx = MOCK_USERS.findIndex(
-    (u) => u.id === user.id || (user.username && u.username?.toLowerCase() === user.username.toLowerCase())
+    (u) =>
+      u.id === userWithOrg.id ||
+      (userWithOrg.username && u.username?.toLowerCase() === userWithOrg.username.toLowerCase())
   );
   if (existingIdx !== -1) {
-    MOCK_USERS[existingIdx] = { ...user };
+    MOCK_USERS[existingIdx] = { ...userWithOrg };
   } else {
-    MOCK_USERS.push({ ...user });
+    MOCK_USERS.push({ ...userWithOrg });
   }
-  return user;
+  return userWithOrg;
 }
 
 export function deleteMockUser(userId: string): { success: boolean; error?: string } {
@@ -41057,11 +41159,14 @@ export function getMockUserByCredentials(identifier: string, secret?: string): A
  * matching the given prefix. Returns max + 1 (defaulting to 1 if no matches).
  * e.g., from TOOL-WLD-001 or TOOL-0043 -> extracts max number.
  */
-export function getNextAvailableMockTagNumber(prefix: string = 'ZR-'): number {
+export function getNextAvailableMockTagNumber(prefix: string = 'ZR-', organizationId?: string): number {
   const cleanPrefix = prefix.trim().toUpperCase();
   let maxNumber = 0;
 
   for (const asset of assetsStore) {
+    if (organizationId && asset.organizationId && asset.organizationId !== organizationId) {
+      continue;
+    }
     const qr = (asset.qrCode || '').trim().toUpperCase();
     if (cleanPrefix.startsWith('ZR')) {
       const match = qr.match(/ZR[-_ ]*(\d+)/i);

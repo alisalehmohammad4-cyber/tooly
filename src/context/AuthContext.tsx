@@ -9,13 +9,15 @@ import React, {
   useRef,
   useSyncExternalStore,
 } from 'react';
-import type { AppUser, UserRole } from '@/types/domain';
+import type { AppUser, UserRole, Organization } from '@/types/domain';
 import { authenticateUserAction } from '@/app/actions/users';
+import { DEFAULT_ORGANIZATION } from '@/lib/mockStore';
 
 export const DEFAULT_WORKER_USER: AppUser = {
   id: 'usr-worker',
   fullName: 'עובד שטח',
   role: 'worker',
+  organizationId: DEFAULT_ORGANIZATION.id,
 };
 
 export const PREDEFINED_USERS: Record<string, AppUser> = {
@@ -26,6 +28,7 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
     username: 'Zatout01',
     role: 'general_manager',
     pinCode: '1952',
+    organizationId: DEFAULT_ORGANIZATION.id,
     assignedWarehouseId: undefined,
     assignedWarehouseName: 'כלל המפעל והפרויקטים',
     isActive: true,
@@ -36,6 +39,7 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
     username: 'Zatout01',
     role: 'general_manager',
     pinCode: '1952',
+    organizationId: DEFAULT_ORGANIZATION.id,
     assignedWarehouseId: undefined,
     assignedWarehouseName: 'כלל המפעל והפרויקטים',
     isActive: true,
@@ -46,6 +50,7 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
     username: 'Zatout01',
     role: 'general_manager',
     pinCode: '1952',
+    organizationId: DEFAULT_ORGANIZATION.id,
     assignedWarehouseId: undefined,
     assignedWarehouseName: 'כלל המפעל והפרויקטים',
     isActive: true,
@@ -56,6 +61,7 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
     username: 'Zatout01',
     role: 'general_manager',
     pinCode: '1952',
+    organizationId: DEFAULT_ORGANIZATION.id,
     assignedWarehouseId: undefined,
     assignedWarehouseName: 'כלל המפעל והפרויקטים',
     isActive: true,
@@ -68,6 +74,7 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
     username: 'dan',
     role: 'chief_operations',
     pinCode: '2026',
+    organizationId: DEFAULT_ORGANIZATION.id,
     assignedWarehouseId: undefined,
     assignedWarehouseName: 'כלל המחסנים (All Depots)',
     isActive: true,
@@ -78,6 +85,7 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
     username: 'dan',
     role: 'chief_operations',
     pinCode: '2026',
+    organizationId: DEFAULT_ORGANIZATION.id,
     assignedWarehouseId: undefined,
     assignedWarehouseName: 'כלל המחסנים (All Depots)',
     isActive: true,
@@ -88,6 +96,7 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
     username: 'dan',
     role: 'chief_operations',
     pinCode: '2026',
+    organizationId: DEFAULT_ORGANIZATION.id,
     assignedWarehouseId: undefined,
     assignedWarehouseName: 'כלל המחסנים (All Depots)',
     isActive: true,
@@ -100,6 +109,7 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
     username: 'yossi',
     role: 'storekeeper',
     pinCode: '1111',
+    organizationId: DEFAULT_ORGANIZATION.id,
     assignedWarehouseId: 'wh-main-01',
     assignedWarehouseName: "מחסן מרכזי - אגף א'",
     isActive: true,
@@ -110,6 +120,7 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
     username: 'yossi',
     role: 'storekeeper',
     pinCode: '1111',
+    organizationId: DEFAULT_ORGANIZATION.id,
     assignedWarehouseId: 'wh-main-01',
     assignedWarehouseName: "מחסן מרכזי - אגף א'",
     isActive: true,
@@ -120,6 +131,7 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
     username: 'avi',
     role: 'storekeeper',
     pinCode: '1234',
+    organizationId: DEFAULT_ORGANIZATION.id,
     assignedWarehouseId: 'wh-site-02',
     assignedWarehouseName: "אתר בנייה - מכולה ב'",
     isActive: true,
@@ -130,6 +142,7 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
     username: 'avi',
     role: 'storekeeper',
     pinCode: '1234',
+    organizationId: DEFAULT_ORGANIZATION.id,
     assignedWarehouseId: 'wh-site-02',
     assignedWarehouseName: "אתר בנייה - מכולה ב'",
     isActive: true,
@@ -142,6 +155,7 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
     username: 'admin',
     role: 'general_manager',
     pinCode: '9999',
+    organizationId: DEFAULT_ORGANIZATION.id,
     assignedWarehouseId: undefined,
     assignedWarehouseName: 'כלל המפעל והפרויקטים',
     isActive: true,
@@ -151,6 +165,7 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
 interface AuthContextType {
   user: AppUser;
   role: UserRole;
+  currentOrganization: Organization;
   isGeneralManager: boolean;
   isChiefOperations: boolean;
   isStorekeeper: boolean;
@@ -419,10 +434,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const isSupervisorOrAdmin = user.role !== 'worker';
     const isAdmin = isGeneralManager;
     const canSwitchDepots = isGeneralManager || isChiefOperations;
+    const currentOrganization: Organization = user.organizationId
+      ? { ...DEFAULT_ORGANIZATION, id: user.organizationId }
+      : DEFAULT_ORGANIZATION;
 
     return {
       user,
       role: user.role,
+      currentOrganization,
       isGeneralManager,
       isChiefOperations,
       isStorekeeper,

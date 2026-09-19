@@ -78,7 +78,7 @@ export default function QuickOnboardView({
   warehouses,
   onReturnToPortal,
 }: QuickOnboardViewProps) {
-  const { role, assignedWarehouseId, openPinModal } = useAuth();
+  const { role, assignedWarehouseId, openPinModal, currentOrganization } = useAuth();
 
   // Scoped Storekeeper check: Locked strictly to assigned facility ("כל אחד של שלו")
   const isStorekeeperScoped =
@@ -204,21 +204,23 @@ export default function QuickOnboardView({
   // Automatically fetch and pre-fill next sequential available code (e.g. ZR-1099)
   const handleAutoSuggestNextQr = useCallback(async () => {
     setIsSuggestingQr(true);
+    const activePrefix = currentOrganization?.serialPrefix || 'ZR-';
     try {
-      const nextNum = await getNextAvailableTagNumberAction('ZR-');
-      const suggested = `ZR-${nextNum}`;
+      const nextNum = await getNextAvailableTagNumberAction(activePrefix, currentOrganization?.id);
+      const suggested = `${activePrefix}${nextNum}`;
       setQrCode(suggested);
       setManualQrInput(suggested);
       setQrWarning(null);
     } catch (err) {
       console.warn('Failed to fetch next sequential code:', err);
-      setQrCode('ZR-1099');
-      setManualQrInput('ZR-1099');
+      const fallbackCode = `${activePrefix}1099`;
+      setQrCode(fallbackCode);
+      setManualQrInput(fallbackCode);
       setQrWarning(null);
     } finally {
       setIsSuggestingQr(false);
     }
-  }, []);
+  }, [currentOrganization]);
 
   // Open Onboard Form and auto-suggest if no QR was previously scanned
   const handleOpenOnboardForm = useCallback(async () => {
@@ -402,7 +404,7 @@ export default function QuickOnboardView({
         setQrCode(cleanQr);
         setManualQrInput(cleanQr);
         setIsVerifyingQr(true);
-        const exists = await checkQrCodeExists(cleanQr);
+        const exists = await checkQrCodeExists(cleanQr, currentOrganization?.id);
         if (exists) {
           setQrWarning(`קוד QR "${cleanQr}" כבר רשום במערכת.`);
         } else {
@@ -416,7 +418,7 @@ export default function QuickOnboardView({
         setIsVerifyingQr(false);
       }
     },
-    [isRapidDispatchMode, stopScanner, handleAddToCart, role]
+    [isRapidDispatchMode, stopScanner, handleAddToCart, role, currentOrganization]
   );
 
   // Handle Barcode & Text OCR Detections directly into the scan pipeline
@@ -712,17 +714,20 @@ export default function QuickOnboardView({
     try {
       const gps = await getCurrentGpsCoordinates();
 
-      const result = await onboardAsset({
-        warehouseId: selectedWarehouseId,
-        categoryId: selectedCategoryId,
-        qrCode: qrCode.trim(),
-        nfcUid: nfcUid.trim() || undefined,
-        toolName: toolName.trim(),
-        brand: brand.trim(),
-        modelNumber: modelNumber.trim() || undefined,
-        condition,
-        gps,
-      });
+      const result = await onboardAsset(
+        {
+          warehouseId: selectedWarehouseId,
+          categoryId: selectedCategoryId,
+          qrCode: qrCode.trim(),
+          nfcUid: nfcUid.trim() || undefined,
+          toolName: toolName.trim(),
+          brand: brand.trim(),
+          modelNumber: modelNumber.trim() || undefined,
+          condition,
+          gps,
+        },
+        currentOrganization?.id
+      );
 
       if (!result.success) {
         setSubmitError(result.error);
@@ -1460,7 +1465,7 @@ export default function QuickOnboardView({
                     if (!val.trim()) {
                       setQrWarning('יש להזין קוד זיהוי או תגית ברקוד.');
                     } else {
-                      const exists = await checkQrCodeExists(val.trim());
+                      const exists = await checkQrCodeExists(val.trim(), currentOrganization?.id);
                       if (exists) {
                         setQrWarning(`קוד ברקוד/QR "${val.trim()}" כבר רשום במערכת.`);
                       } else {
