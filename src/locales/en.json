@@ -1,0 +1,68 @@
+{
+  "nav": {
+    "scanner": "Scanner & Dispatch",
+    "catalog": "Catalog & Stock",
+    "history": "Audit Log & GPS",
+    "printTags": "Print QR Tags",
+    "managerDashboard": "General Manager BI",
+    "warehouseDashboard": "Depot Station"
+  },
+  "roles": {
+    "generalManager": "General Manager",
+    "chiefOperations": "Chief Operations Officer",
+    "storekeeper": "Storekeeper",
+    "worker": "Field Worker"
+  },
+  "statuses": {
+    "available": "Available",
+    "checkedOut": "Checked Out",
+    "inRepair": "In Repair",
+    "needsRepair": "Needs Repair"
+  },
+  "operations": {
+    "checkout": "Check Out",
+    "checkin": "Check In",
+    "transfer": "Depot Transfer",
+    "reportDamage": "Report Damage",
+    "print": "Print",
+    "save": "Save",
+    "cancel": "Cancel",
+    "logout": "Log Out",
+    "lockStation": "Lock Station"
+  },
+  "common": {
+    "search": "Search",
+    "allDepots": "All Depots",
+    "tools": "Tools",
+    "categories": "Categories",
+    "facilities": "Facilities & Depots",
+    "valuation": "Inventory Valuation",
+    "utilization": "Tool Utilization"
+  },
+  "header": {
+    "appName": "Tooly",
+    "fieldOperations": "Field Operations",
+    "authorizedLogin": "Authorized Login",
+    "activeStorekeeper": "Active Storekeeper",
+    "crossDepotControl": "Cross-Depot Operations",
+    "mainOperationsCenter": "Main Operations Center",
+    "executiveManagement": "Executive Control",
+    "plantManager": "Plant & Project Manager",
+    "cart": "Dispatch Cart",
+    "lockOrExit": "Lock Station / Exit",
+    "lock": "Lock",
+    "switchUser": "Click to switch user",
+    "backToWorkerScanner": "Back to Worker Scanner",
+    "authorizedAreaOnly": "Authorized Personnel Only",
+    "authorizedAreaDesc": "This page is restricted to management and authorized storekeepers. Please authenticate to continue.",
+    "username": "Username",
+    "password": "Password",
+    "loginToSystem": "Sign In to System",
+    "verifying": "Verifying..."
+  },
+  "languages": {
+    "he": "עברית",
+    "en": "English",
+    "ar": "العربية"
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "nav": {
+    "scanner": "סורק וניפוק",
+    "catalog": "קטלוג ומלאי",
+    "history": "יומן תנועות והעברות",
+    "printTags": "הדפסת תגיות",
+    "managerDashboard": "לוח מנהל כללי (BI)",
+    "warehouseDashboard": "לוח מחסנאי"
+  },
+  "roles": {
+    "generalManager": "מנכ\"ל / מנהל כללי",
+    "chiefOperations": "אחראי תפעול ראשי",
+    "storekeeper": "מחסנאי",
+    "worker": "פועל שטח"
+  },
+  "statuses": {
+    "available": "זמין",
+    "checkedOut": "בניפוק",
+    "inRepair": "בתיקון",
+    "needsRepair": "דרוש תיקון"
+  },
+  "operations": {
+    "checkout": "ניפוק כלי",
+    "checkin": "החזרת כלי",
+    "transfer": "העברה בין מחסנים",
+    "reportDamage": "דיווח על תקלה",
+    "print": "הדפסה",
+    "save": "שמירה",
+    "cancel": "ביטול",
+    "logout": "התנתק",
+    "lockStation": "נעילת עמדה"
+  },
+  "common": {
+    "search": "חיפוש",
+    "allDepots": "כל המחסנים",
+    "tools": "כלים",
+    "categories": "קטגוריות",
+    "facilities": "אתרים ומחסנים",
+    "valuation": "שווי מלאי",
+    "utilization": "ניצולת כלים"
+  },
+  "header": {
+    "appName": "Tooly",
+    "fieldOperations": "תפעול שטח",
+    "authorizedLogin": "התחברות מורשית",
+    "activeStorekeeper": "עמדת מחסנאי פעיל",
+    "crossDepotControl": "שליטה ובקרה חוצת-מחסנים",
+    "mainOperationsCenter": "מרכז תפעול ראשי",
+    "executiveManagement": "ניהול ובקרה ניהולית",
+    "plantManager": "מנהל מפעל ופרויקטים",
+    "cart": "סל ניפוק",
+    "lockOrExit": "נעילת עמדה / יציאה",
+    "lock": "נעילה",
+    "switchUser": "לחץ להחלפת משתמש",
+    "backToWorkerScanner": "חזרה לסורק פועל שטח",
+    "authorizedAreaOnly": "אזור מורשה בלבד",
+    "authorizedAreaDesc": "עמוד זה מיועד לצוותי ניהול ומחסנאים מורשים. יש להזין פרטי התחברות כדי לגשת לנתונים.",
+    "username": "שם משתמש",
+    "password": "סיסמה",
+    "loginToSystem": "התחבר למערכת",
+    "verifying": "מאמת נתונים..."
+  },
+  "languages": {
+    "he": "עברית",
+    "en": "English",
+    "ar": "العربية"
+  }
+}

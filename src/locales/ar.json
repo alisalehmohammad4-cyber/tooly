@@ -1,0 +1,68 @@
+{
+  "nav": {
+    "scanner": "ماسح وصرف الأدوات",
+    "catalog": "الكتالوج والمخزون",
+    "history": "سجل الحركات و GPS",
+    "printTags": "طباعة بطاقات QR",
+    "managerDashboard": "لوحة المدير العام (BI)",
+    "warehouseDashboard": "محطة المستودع"
+  },
+  "roles": {
+    "generalManager": "المدير العام",
+    "chiefOperations": "مدير العمليات الرئيسي",
+    "storekeeper": "أمين المستودع",
+    "worker": "عامل ميداني"
+  },
+  "statuses": {
+    "available": "متاح",
+    "checkedOut": "مصروف",
+    "inRepair": "قيد الصيانة",
+    "needsRepair": "بحاجة لصيانة"
+  },
+  "operations": {
+    "checkout": "صرف أداة",
+    "checkin": "إرجاع أداة",
+    "transfer": "نقل بين المستودعات",
+    "reportDamage": "إبلاغ عن عطل",
+    "print": "طباعة",
+    "save": "حفظ",
+    "cancel": "إلغاء",
+    "logout": "تسجيل الخروج",
+    "lockStation": "قفل المحطة"
+  },
+  "common": {
+    "search": "بحث",
+    "allDepots": "جميع المستودعات",
+    "tools": "أدوات ومعدات",
+    "categories": "تصنيفات",
+    "facilities": "المواقع والمستودعات",
+    "valuation": "قيمة المخزون",
+    "utilization": "نسبة الاستخدام"
+  },
+  "header": {
+    "appName": "Tooly",
+    "fieldOperations": "عمليات ميدانية",
+    "authorizedLogin": "تسجيل دخول مخول",
+    "activeStorekeeper": "محطة أمين المستودع",
+    "crossDepotControl": "إدارة العمليات المشتركة",
+    "mainOperationsCenter": "مركز العمليات الرئيسي",
+    "executiveManagement": "إدارة ورقابة تنفيذية",
+    "plantManager": "مدير المصنع والمشاريع",
+    "cart": "سلة الصرف",
+    "lockOrExit": "قفل المحطة / خروج",
+    "lock": "قفل",
+    "switchUser": "اضغط لتبديل المستخدم",
+    "backToWorkerScanner": "العودة لماسح العامل",
+    "authorizedAreaOnly": "منطقة مخولة فقط",
+    "authorizedAreaDesc": "هذه الصفحة مخصصة لفرق الإدارة وأمناء المستودعات المخولين. يرجى تسجيل الدخول للمتابعة.",
+    "username": "اسم المستخدم",
+    "password": "كلمة المرور",
+    "loginToSystem": "تسجيل الدخول للنظام",
+    "verifying": "جارٍ التحقق..."
+  },
+  "languages": {
+    "he": "עברית",
+    "en": "English",
+    "ar": "العربية"
+  }
+}

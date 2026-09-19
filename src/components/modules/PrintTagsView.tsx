@@ -47,21 +47,18 @@ export default function PrintTagsView() {
   const [quantity, setQuantity] = useState<number>(24);
   const [customQtyInput, setCustomQtyInput] = useState<string>('24');
   const [facilityText, setFacilityText] = useState<string>('מחסן מרכזי - ציוד קבוע');
-  const [companyName, setCompanyName] = useState<string>(() => {
+  const [customCompanyName, setCustomCompanyName] = useState<string | null>(() => {
     if (typeof window !== 'undefined') {
       try {
-        return (
-          localStorage.getItem('tooly_company_name') ||
-          currentOrganization?.name ||
-          'TOOLY'
-        );
+        return localStorage.getItem('tooly_company_name');
       } catch (err) {
         console.warn('Error reading tooly_company_name from localStorage:', err);
-        return currentOrganization?.name || 'TOOLY';
       }
     }
-    return currentOrganization?.name || 'TOOLY';
+    return null;
   });
+
+  const effectiveCompanyName = customCompanyName ?? currentOrganization?.name ?? 'TOOLY';
 
   // Tab B: Reprint Damaged Label State
   const [reprintSearchInput, setReprintSearchInput] = useState<string>('');
@@ -76,7 +73,7 @@ export default function PrintTagsView() {
 
   // Persist company name edits to localStorage
   const handleCompanyNameChange = useCallback((value: string) => {
-    setCompanyName(value);
+    setCustomCompanyName(value);
     if (typeof window !== 'undefined') {
       try {
         localStorage.setItem('tooly_company_name', value);
@@ -310,12 +307,37 @@ export default function PrintTagsView() {
               height: 30mm !important;
               max-width: 60mm !important;
               max-height: 30mm !important;
+              box-sizing: border-box !important;
               page-break-after: always !important;
               break-after: page !important;
               display: flex !important;
-              box-sizing: border-box !important;
+              flex-direction: row !important;
+              align-items: center !important;
+              justify-content: space-between !important;
               padding: 2mm 3mm !important;
               overflow: hidden !important;
+              border: none !important;
+              border-radius: 0 !important;
+              box-shadow: none !important;
+              margin: 0 !important;
+              background: #ffffff !important;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+            .tsc-qr-img {
+              width: 22mm !important;
+              height: 22mm !important;
+              max-width: 22mm !important;
+              max-height: 22mm !important;
+              object-fit: contain !important;
+              image-rendering: -webkit-optimize-contrast !important;
+              image-rendering: crisp-edges !important;
+            }
+            .tsc-serial {
+              font-size: 13pt !important;
+              line-height: 1.1 !important;
+              font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+              font-weight: 900 !important;
             }
           }
         `}</style>
@@ -507,9 +529,9 @@ export default function PrintTagsView() {
                   <Building2 className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
                   <input
                     type="text"
-                    value={companyName}
+                    value={customCompanyName ?? currentOrganization?.name ?? 'TOOLY'}
                     onChange={(e) => handleCompanyNameChange(e.target.value)}
-                    placeholder="לדוגמה: סאלח הנדסה ובנייה"
+                    placeholder={currentOrganization?.name || 'לדוגמה: סאלח הנדסה ובנייה'}
                     className="w-full min-h-[48px] bg-white text-blue-950 font-bold text-sm pr-10 pl-3.5 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none shadow-sm"
                   />
                 </div>
@@ -778,79 +800,60 @@ export default function PrintTagsView() {
             </p>
           </div>
         ) : labelFormat === 'tsc' ? (
-          /* TSC THERMAL LABEL 60x30 mm ROLL */
-          <div className="tsc-container grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3.5 print:block print:w-[60mm] print:m-0 print:p-0">
+          /* TSC THERMAL LABEL 60x30 mm ROLL (Exact 2:1 Landscape) */
+          <div className="tsc-container grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 print:block print:w-[60mm] print:m-0 print:p-0">
             {tags.map((tag, idx) => (
               <div
                 key={`${tag.serial}-${idx}`}
-                className="tsc-label bg-white border-2 border-slate-900 rounded-xl p-2.5 flex items-center justify-between gap-2.5 shadow-sm print:shadow-none print:border-none print:rounded-none print:m-0 h-auto sm:h-[135px]"
+                dir="rtl"
+                className="tsc-label bg-white border-2 border-slate-900 rounded-xl p-2.5 sm:p-3 aspect-[2/1] w-full max-w-[340px] mx-auto flex flex-row items-center justify-between gap-2.5 shadow-sm transition-all overflow-hidden print:shadow-none print:border-none print:rounded-none print:m-0 print:w-[60mm] print:h-[30mm] print:max-w-[60mm] print:max-h-[30mm] print:p-[2mm_3mm]"
               >
-                {/* Information Column (RTL: Right side) */}
-                <div className="flex-1 flex flex-col justify-between h-full min-w-0 text-right pr-0.5">
-                  {/* Brand & Badge Header */}
-                  <div className="flex items-center justify-between gap-1 border-b border-slate-900 pb-0.5 mb-1 print:border-black overflow-hidden">
-                    <div className="flex items-center gap-1 font-black text-slate-950 min-w-0 flex-1">
-                      <Wrench className="w-3.5 h-3.5 text-blue-600 print:text-black shrink-0" />
-                      <span
-                        className={`truncate leading-none ${
-                          (companyName || 'TOOLY').length > 18
-                            ? 'text-[8.5px] print:text-[7.5px]'
-                            : (companyName || 'TOOLY').length > 12
-                            ? 'text-[10px] print:text-[8.5px]'
-                            : (companyName || 'TOOLY').length > 7
-                            ? 'text-xs print:text-[9.5px]'
-                            : 'text-xs print:text-[10.5px] tracking-wider'
-                        }`}
-                        title={companyName || 'TOOLY'}
-                      >
-                        {companyName || 'TOOLY'}
-                      </span>
-                    </div>
-                    <span
-                      className={`shrink-0 text-[8.5px] print:text-[8px] font-black uppercase px-1 py-0.5 rounded border leading-none ${
-                        tag.isReprint
-                          ? 'bg-amber-100 text-amber-900 border-amber-300 print:border-black'
-                          : 'bg-slate-100 text-slate-800 border-slate-300 print:border-black'
-                      }`}
-                    >
-                      {tag.isReprint ? 'חלופית' : 'ציוד מבוקר'}
-                    </span>
-                  </div>
-
-                  {/* Serial Code */}
-                  <div
-                    className="font-mono font-black text-xs sm:text-sm print:text-[11px] text-slate-950 tracking-wider select-all leading-tight"
-                    dir="ltr"
-                  >
-                    {tag.serial}
-                  </div>
-
-                  {/* Tool Name / Facility Location */}
-                  <div className="mt-0.5 space-y-0.5 overflow-hidden">
-                    {tag.toolName && (
-                      <div className="text-[10px] print:text-[9px] font-black text-slate-800 truncate leading-tight">
-                        {tag.toolName}
-                      </div>
-                    )}
-                    <div className="text-[9px] print:text-[8px] font-bold text-slate-600 truncate leading-tight">
-                      {tag.facilityName || facilityText}
-                    </div>
-                  </div>
-
-                  {/* Micro Notice */}
-                  <div className="text-[7.5px] print:text-[7.5px] font-bold text-slate-500 print:text-black mt-1 truncate">
-                    סרוק לבדיקה וניפוק • Tooly
-                  </div>
-                </div>
-
-                {/* QR Code Column (RTL: Left side) */}
-                <div className="shrink-0 flex items-center justify-center bg-white p-0.5">
+                {/* Column 1 (Right in RTL): 22mm x 22mm crisp QR code */}
+                <div className="shrink-0 flex items-center justify-center p-0.5 print:p-0 bg-white">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={tag.qrDataUrl}
                     alt={`QR Code for ${tag.serial}`}
-                    className="w-20 h-20 print:w-[24mm] print:h-[24mm] object-contain"
+                    className="tsc-qr-img aspect-square w-[72px] h-[72px] sm:w-[82px] sm:h-[82px] print:w-[22mm] print:h-[22mm] object-contain"
                   />
+                </div>
+
+                {/* Column 2 (Left in RTL): Text details */}
+                <div className="flex-1 flex flex-col justify-between h-full min-w-0 text-right pr-2 print:pr-[2mm] py-0.5 print:py-0">
+                  {/* Top: Company Name (dynamic {currentOrganization.name}) with mini wrench icon */}
+                  <div className="flex items-center justify-between gap-1 min-w-0 pb-0.5 border-b border-slate-200 print:border-black/30 overflow-hidden">
+                    <div className="flex items-center gap-1 min-w-0 overflow-hidden">
+                      <Wrench className="w-3.5 h-3.5 text-blue-600 print:text-black shrink-0" />
+                      <span
+                        className="font-extrabold text-slate-950 print:text-black truncate text-xs print:text-[8pt] leading-tight"
+                        title={effectiveCompanyName}
+                      >
+                        {effectiveCompanyName}
+                      </span>
+                    </div>
+                    {tag.isReprint && (
+                      <span className="shrink-0 text-[8.5px] print:text-[6.5pt] font-black uppercase px-1 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300 print:border-black print:text-black leading-none">
+                        חלופית
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Center: Large bold monospace serial number (e.g. ZR-1099) in 13pt font */}
+                  <div className="my-auto py-0.5 print:py-0 overflow-hidden">
+                    <div
+                      className="tsc-serial font-mono font-black text-slate-950 text-right tracking-wider select-all leading-tight text-sm sm:text-base print:text-[13pt]"
+                      dir="ltr"
+                    >
+                      {tag.serial}
+                    </div>
+                  </div>
+
+                  {/* Bottom: Subtext (e.g. ציוד מבוקר • סרוק לבדיקה) */}
+                  <div className="text-[9px] sm:text-[10px] print:text-[7pt] font-bold text-slate-500 print:text-black truncate leading-tight pt-0.5 border-t border-slate-100 print:border-black/20">
+                    {tag.toolName
+                      ? `${tag.toolName} • ${tag.isReprint ? 'מדבקה חלופית' : 'ציוד מבוקר'} • סרוק לבדיקה`
+                      : `${tag.isReprint ? 'מדבקה חלופית' : 'ציוד מבוקר'} • סרוק לבדיקה`}
+                  </div>
                 </div>
               </div>
             ))}
@@ -869,15 +872,15 @@ export default function PrintTagsView() {
                     <Wrench className="w-3.5 h-3.5 text-blue-600 print:text-black shrink-0" />
                     <span
                       className={`truncate leading-none ${
-                        (companyName || 'TOOLY').length > 18
+                        effectiveCompanyName.length > 18
                           ? 'text-[9.5px] print:text-[8.5px]'
-                          : (companyName || 'TOOLY').length > 12
+                          : effectiveCompanyName.length > 12
                           ? 'text-[11px] print:text-[9.5px]'
                           : 'text-xs print:text-[11px] tracking-wider'
                       }`}
-                      title={companyName || 'TOOLY'}
+                      title={effectiveCompanyName}
                     >
-                      {companyName || 'TOOLY'}
+                      {effectiveCompanyName}
                     </span>
                   </div>
                   <span
