@@ -174,20 +174,37 @@ export async function getPlantManagerAnalytics(
         .select('*')
         .gte('created_at', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString());
 
-      if (orgId === DEFAULT_ORGANIZATION_ID) {
-        astQuery = astQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
-        whQuery = whQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
-        ledgerQuery = ledgerQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
-      } else {
-        astQuery = astQuery.eq('organization_id', orgId);
-        whQuery = whQuery.eq('organization_id', orgId);
-        ledgerQuery = ledgerQuery.eq('organization_id', orgId);
+      astQuery = astQuery.eq('organization_id', orgId);
+      whQuery = whQuery.eq('organization_id', orgId);
+      ledgerQuery = ledgerQuery.eq('organization_id', orgId);
+
+      const [assetsRes, warehousesRes, ledgerRes] = await Promise.all([
+        astQuery.range(0, 999),
+        whQuery,
+        ledgerQuery,
+      ]);
+
+      let rawAssets: Record<string, unknown>[] = [];
+      if (!assetsRes.error && assetsRes.data && assetsRes.data.length > 0) {
+        rawAssets = [...assetsRes.data];
+        if (assetsRes.data.length === 1000) {
+          let page = 1;
+          const pageSize = 1000;
+          while (true) {
+            const { data, error } = await supabase
+              .from('assets')
+              .select('*, tool_models(name, brand, model_number, category_id), warehouses(name, code)')
+              .eq('organization_id', orgId)
+              .range(page * pageSize, (page + 1) * pageSize - 1);
+            if (error || !data || data.length === 0) break;
+            rawAssets.push(...data);
+            if (data.length < pageSize) break;
+            page++;
+          }
+        }
       }
 
-      const [assetsRes, warehousesRes, ledgerRes] = await Promise.all([astQuery, whQuery, ledgerQuery]);
-
-      if (!assetsRes.error && assetsRes.data && assetsRes.data.length > 0) {
-        const rawAssets = assetsRes.data;
+      if (rawAssets.length > 0) {
         const now = Date.now();
 
         let totalFleetValue = 0;
@@ -201,12 +218,12 @@ export async function getPlantManagerAnalytics(
         const overdueList: HighRiskOverdueAsset[] = [];
 
         rawAssets.forEach((row: Record<string, unknown>) => {
-          const cost = Number(row.purchase_cost) || 1500;
+          const cost = typeof row.purchase_cost === 'number' ? row.purchase_cost : 2500;
           totalFleetValue += cost;
 
+          if (row.status === 'available') inWarehouse++;
           if (row.status === 'checked_out') inUse++;
-          else if (row.status === 'available') inWarehouse++;
-          else if (row.status === 'maintenance') maintenance++;
+          if (row.status === 'maintenance' || row.status === 'needs_repair') maintenance++;
 
           if (row.is_locked) lockedCount++;
 
@@ -227,9 +244,9 @@ export async function getPlantManagerAnalytics(
               const wh = (row.warehouses as Record<string, unknown>) || {};
               overdueList.push({
                 assetId: row.id as string,
-                toolName: (model.name as string) || 'כלי עבודה',
-                brand: (model.brand as string) || 'Standard',
-                modelNumber: (model.model_number as string) || null,
+                toolName: (row.name as string) || (model.name as string) || 'כלי עבודה',
+                brand: (row.brand as string) || (model.brand as string) || 'Standard',
+                modelNumber: (row.model_number as string) || (model.model_number as string) || null,
                 qrCode: row.qr_code as string,
                 workerName: (row.current_assigned_worker as string) || 'עובד שטח',
                 workerPhone: (row.worker_phone as string) || null,
@@ -389,16 +406,34 @@ export async function getStorekeeperOperations(
         .select('*, tool_models(name, brand, model_number, category_id)')
         .limit(10000);
 
-      if (orgId === DEFAULT_ORGANIZATION_ID) {
-        query = query.or(`organization_id.eq.${orgId},organization_id.is.null`);
-      } else {
-        query = query.eq('organization_id', orgId);
-      }
+      query = query.eq('organization_id', orgId);
 
       if (!isAll) {
         query = query.eq('current_warehouse_id', selectedWhId);
       }
-      const { data: whAssets } = await query;
+      const { data: initialAssets } = await query.range(0, 999);
+      let whAssets: Record<string, unknown>[] = [];
+      if (initialAssets && initialAssets.length > 0) {
+        whAssets = [...initialAssets];
+        if (initialAssets.length === 1000) {
+          let page = 1;
+          const pageSize = 1000;
+          while (true) {
+            let pQuery = supabase
+              .from('assets')
+              .select('*, tool_models(name, brand, model_number, category_id)')
+              .eq('organization_id', orgId);
+            if (!isAll) {
+              pQuery = pQuery.eq('current_warehouse_id', selectedWhId);
+            }
+            const { data, error } = await pQuery.range(page * pageSize, (page + 1) * pageSize - 1);
+            if (error || !data || data.length === 0) break;
+            whAssets.push(...data);
+            if (data.length < pageSize) break;
+            page++;
+          }
+        }
+      }
 
       if (whAssets && whAssets.length > 0) {
         const now = Date.now();
@@ -426,9 +461,9 @@ export async function getStorekeeperOperations(
               const days = Math.max(1, Math.floor((now - rTime) / (1000 * 60 * 60 * 24)));
               overdueAssets.push({
                 assetId: row.id as string,
-                toolName: (model.name as string) || 'כלי עבודה',
-                brand: (model.brand as string) || 'Standard',
-                modelNumber: (model.model_number as string) || null,
+                toolName: (row.name as string) || (model.name as string) || 'כלי עבודה',
+                brand: (row.brand as string) || (model.brand as string) || 'Standard',
+                modelNumber: (row.model_number as string) || (model.model_number as string) || null,
                 qrCode: row.qr_code as string,
                 workerName: (row.current_assigned_worker as string) || 'עובד שטח',
                 workerPhone: (row.worker_phone as string) || null,
@@ -439,9 +474,9 @@ export async function getStorekeeperOperations(
             } else if (rTime >= startOfToday.getTime() && rTime <= endOfToday.getTime()) {
               returnsDueToday.push({
                 assetId: row.id as string,
-                toolName: (model.name as string) || 'כלי עבודה',
-                brand: (model.brand as string) || 'Standard',
-                modelNumber: (model.model_number as string) || null,
+                toolName: (row.name as string) || (model.name as string) || 'כלי עבודה',
+                brand: (row.brand as string) || (model.brand as string) || 'Standard',
+                modelNumber: (row.model_number as string) || (model.model_number as string) || null,
                 qrCode: row.qr_code as string,
                 workerName: (row.current_assigned_worker as string) || 'עובד שטח',
                 workerPhone: (row.worker_phone as string) || null,

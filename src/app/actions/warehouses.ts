@@ -101,15 +101,10 @@ export async function getWarehousesAdminAction(
         .select('id, current_warehouse_id, status, organization_id')
         .limit(10000);
 
-      if (orgId === DEFAULT_ORGANIZATION_ID) {
-        whQuery = whQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
-        astQuery = astQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
-      } else {
-        whQuery = whQuery.eq('organization_id', orgId);
-        astQuery = astQuery.eq('organization_id', orgId);
-      }
+      whQuery = whQuery.eq('organization_id', orgId);
+      astQuery = astQuery.eq('organization_id', orgId);
 
-      const [whRes, assetsRes] = await Promise.all([whQuery, astQuery]);
+      const [whRes, firstAssetsRes] = await Promise.all([whQuery, astQuery.range(0, 999)]);
 
       if (!whRes.error && whRes.data && whRes.data.length > 0) {
         warehousesList = whRes.data.map((row: Record<string, unknown>) => ({
@@ -123,8 +118,24 @@ export async function getWarehousesAdminAction(
         }));
       }
 
-      if (!assetsRes.error && assetsRes.data && assetsRes.data.length > 0) {
-        assetsList = assetsRes.data as typeof assetsList;
+      if (!firstAssetsRes.error && firstAssetsRes.data) {
+        let allAssets = [...firstAssetsRes.data];
+        if (firstAssetsRes.data.length === 1000) {
+          let page = 1;
+          const pageSize = 1000;
+          while (true) {
+            const { data, error } = await supabase
+              .from('assets')
+              .select('id, current_warehouse_id, status, organization_id')
+              .eq('organization_id', orgId)
+              .range(page * pageSize, (page + 1) * pageSize - 1);
+            if (error || !data || data.length === 0) break;
+            allAssets.push(...data);
+            if (data.length < pageSize) break;
+            page++;
+          }
+        }
+        assetsList = allAssets as typeof assetsList;
       }
     } catch (err) {
       console.warn('[getWarehousesAdminAction] Supabase error, falling back to mockStore:', err);
@@ -572,24 +583,18 @@ export async function getWarehouseToolsAction(
       let astQuery = supabase
         .from('assets')
         .select(
-          'id, name, tool_name, qr_code, serial_number, category_id, category_name, status, current_assigned_worker, order_number'
+          'id, name, qr_code, serial_number, category_name, status, current_assigned_worker, order_number'
         )
-        .or(`current_warehouse_id.eq.${targetWhId},warehouse_id.eq.${targetWhId}`)
+        .eq('current_warehouse_id', targetWhId)
         .limit(5000);
 
       let catQuery = supabase
         .from('categories')
         .select('id, name');
 
-      if (orgId === DEFAULT_ORGANIZATION_ID) {
-        whLookup = whLookup.or(`organization_id.eq.${orgId},organization_id.is.null`);
-        astQuery = astQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
-        catQuery = catQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
-      } else {
-        whLookup = whLookup.eq('organization_id', orgId);
-        astQuery = astQuery.eq('organization_id', orgId);
-        catQuery = catQuery.eq('organization_id', orgId);
-      }
+      whLookup = whLookup.eq('organization_id', orgId);
+      astQuery = astQuery.eq('organization_id', orgId);
+      catQuery = catQuery.eq('organization_id', orgId);
 
       const { data: wh } = await whLookup.maybeSingle();
 

@@ -418,6 +418,8 @@ async function main() {
       originalTaskId,
       orderNumber: orderNumber || null,
       order_number: orderNumber || null,
+      organizationId: '00000000-0000-0000-0000-000000000001',
+      organization_id: '00000000-0000-0000-0000-000000000001',
     });
   }
 
@@ -466,22 +468,36 @@ async function main() {
         console.log(`[Supabase] Warehouses upsert response (status ${whStatus} ${whStatusText}): Successfully synchronized ${discoveredWarehouses.length} warehouses.`);
       }
 
-      // Upsert discovered categories
-      const { error: catErr, status: catStatus, statusText: catStatusText } = await supabase.from('categories').upsert(
-        discoveredCategories.map((c) => ({
-          id: c.id,
+      // Synchronize discovered categories
+      const { data: existingCategories, error: fetchCatErr } = await supabase
+        .from('categories')
+        .select('id, name, slug')
+        .eq('organization_id', '00000000-0000-0000-0000-000000000001');
+
+      if (fetchCatErr) {
+        console.error('[Supabase] Categories fetch error:', fetchCatErr.message);
+      }
+
+      const existingNames = new Set((existingCategories || []).map((c) => c.name));
+      const newCats = discoveredCategories
+        .filter((c) => !existingNames.has(c.name))
+        .map((c) => ({
           name: c.name,
           slug: c.slug,
           icon: c.icon,
           display_order: c.displayOrder,
           organization_id: '00000000-0000-0000-0000-000000000001',
-        })),
-        { onConflict: 'id' }
-      );
-      if (catErr) {
-        console.error(`[Supabase] Categories upsert error (status ${catStatus} ${catStatusText}):`, catErr.message);
+        }));
+
+      if (newCats.length > 0) {
+        const { error: catErr, data: insertedCats } = await supabase.from('categories').insert(newCats).select('id, name');
+        if (catErr) {
+          console.error('[Supabase] Categories insert error:', catErr.message);
+        } else {
+          console.log(`[Supabase] Categories insert response: Successfully synchronized ${insertedCats.length} new categories.`);
+        }
       } else {
-        console.log(`[Supabase] Categories upsert response (status ${catStatus} ${catStatusText}): Successfully synchronized ${discoveredCategories.length} categories.`);
+        console.log(`[Supabase] Categories sync response: All ${discoveredCategories.length} categories already synchronized in Supabase.`);
       }
 
       // Upsert assets in chunks of 50
@@ -492,13 +508,18 @@ async function main() {
         const chunkIndex = Math.floor(i / BATCH_SIZE) + 1;
         const currentSlice = finalAssets.slice(i, i + BATCH_SIZE);
         const chunk = currentSlice.map((item) => ({
-          id: item.id,
           qr_code: item.qrCode,
-          serial_number: item.serialNumber,
+          name: item.toolName,
+          brand: item.brand,
+          model_number: item.modelNumber || null,
+          category_name: item.categoryName,
+          order_number: item.orderNumber || null,
+          original_task_id: item.originalTaskId || item.id,
+          serial_number: item.serialNumber || null,
           current_warehouse_id: item.warehouseId,
           status: item.status,
           condition: item.condition,
-          current_assigned_worker: item.currentAssignedWorker,
+          current_assigned_worker: item.currentAssignedWorker || null,
           version: 1,
           purchase_cost: item.purchaseCost,
           purchase_date: item.purchaseDate,

@@ -407,13 +407,13 @@ export async function getCatalogData(
     const whQuery = supabase.from('warehouses').select('id, name, code').eq('is_active', true).eq('organization_id', orgId);
     const catQuery = supabase.from('categories').select('id, name, slug, icon').eq('organization_id', orgId).order('display_order', { ascending: true });
     const astQuery = supabase.from('assets').select(
-      'id, qr_code, status, condition, current_assigned_worker, current_warehouse_id, warehouse_id, category_id, category_name, tool_name, brand, model_number, purchase_date, purchase_cost, order_number'
+      'id, qr_code, status, condition, current_assigned_worker, current_warehouse_id, category_name, name, brand, model_number, purchase_date, purchase_cost, order_number'
     ).eq('organization_id', orgId).limit(10000);
 
-    const [warehousesRes, categoriesRes, assetsRes] = await Promise.all([
+    const [warehousesRes, categoriesRes, firstAssetsRes] = await Promise.all([
       whQuery,
       catQuery,
-      astQuery,
+      astQuery.range(0, 999),
     ]);
 
     if (!warehousesRes.error && warehousesRes.data && warehousesRes.data.length > 0) {
@@ -424,13 +424,36 @@ export async function getCatalogData(
         categoriesRes.data as Array<{ id: string; name: string; slug: string; icon: string | null }>
       ).filter((c) => !isLegacyEnglishCategory(c));
     }
-    if (!assetsRes.error && assetsRes.data && assetsRes.data.length > 0) {
+
+    let rawAssetsRows: Record<string, unknown>[] = [];
+    if (!firstAssetsRes.error && firstAssetsRes.data) {
+      rawAssetsRows = [...firstAssetsRes.data];
+      if (firstAssetsRes.data.length === 1000) {
+        let page = 1;
+        const pageSize = 1000;
+        while (true) {
+          const { data, error } = await supabase
+            .from('assets')
+            .select(
+              'id, qr_code, status, condition, current_assigned_worker, current_warehouse_id, category_name, name, brand, model_number, purchase_date, purchase_cost, order_number'
+            )
+            .eq('organization_id', orgId)
+            .range(page * pageSize, (page + 1) * pageSize - 1);
+          if (error || !data || data.length === 0) break;
+          rawAssetsRows.push(...data);
+          if (data.length < pageSize) break;
+          page++;
+        }
+      }
+    }
+
+    if (rawAssetsRows.length > 0) {
       const warehouseMap = new Map(warehousesList.map((w) => [w.id, w]));
       const categoryMap = new Map(categoriesList.map((c) => [c.id, c]));
       const categoryNameMap = new Map(categoriesList.map((c) => [c.name, c]));
       const mockAssetMap = new Map(getMockAssets(orgId).map((a) => [a.qrCode, a]));
 
-      allAssets = (assetsRes.data as Record<string, unknown>[]).map((row) => {
+      allAssets = rawAssetsRows.map((row) => {
         const qr = (row.qr_code || row.qrCode || '') as string;
         const mockFallback = mockAssetMap.get(qr);
 
