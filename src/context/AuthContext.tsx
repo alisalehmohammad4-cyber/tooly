@@ -160,6 +160,19 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
     assignedWarehouseName: 'כלל המפעל והפרויקטים',
     isActive: true,
   },
+
+  // 5. Saleh Ali New Organization Admin (salehali)
+  'salehali': {
+    id: 'usr-salehali-admin',
+    fullName: 'Saleh Ali (מנהל כללי)',
+    username: 'salehali',
+    role: 'general_manager',
+    pinCode: '1234',
+    organizationId: '11111111-1111-1111-1111-111111111111',
+    assignedWarehouseId: 'wh-salehali-main',
+    assignedWarehouseName: 'מחסן ראשי (MAIN-01)',
+    isActive: true,
+  },
 };
 
 interface AuthContextType {
@@ -267,6 +280,14 @@ function persistUserToStorage(userToSave: AppUser) {
     document.cookie = `${STORAGE_KEY}=${encodeURIComponent(
       serialized
     )}; path=/; max-age=86400; SameSite=Lax`;
+
+    if (userToSave.organizationId && userToSave.id !== 'usr-worker') {
+      document.cookie = `tooly_org_id=${encodeURIComponent(
+        userToSave.organizationId
+      )}; path=/; max-age=86400; SameSite=Lax`;
+    } else {
+      document.cookie = `tooly_org_id=; path=/; max-age=0; SameSite=Lax`;
+    }
   } catch {
     // Ignore quota errors
   }
@@ -280,6 +301,7 @@ function clearUserFromStorage() {
       sessionStorage.setItem(STORAGE_KEY, DEFAULT_WORKER_SERIALIZED);
     }
     document.cookie = `${STORAGE_KEY}=; path=/; max-age=0; SameSite=Lax`;
+    document.cookie = `tooly_org_id=; path=/; max-age=0; SameSite=Lax`;
   } catch {
     // Ignore storage errors
   }

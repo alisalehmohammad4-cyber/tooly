@@ -423,20 +423,32 @@ async function main() {
 
   // 5. Batch Upsert to Supabase
   const env = loadEnvLocal();
-  const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL || '';
-  const supabaseKey = env.SUPABASE_SERVICE_ROLE_KEY || env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+  const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+  const supabaseKey =
+    env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    '';
 
   const isLiveSupabase =
     Boolean(supabaseUrl && supabaseKey) &&
     !supabaseUrl.includes('placeholder.supabase.co') &&
     !supabaseUrl.includes('your-supabase-url');
 
-  if (isLiveSupabase) {
+  let exactInsertedAssetsCount = 0;
+
+  if (!isLiveSupabase) {
+    console.error('[Supabase] ERROR: No valid Supabase credentials configured in .env.local or process.env.');
+    console.error('[Supabase] Please provide NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or NEXT_PUBLIC_SUPABASE_ANON_KEY).');
+    console.log('Exact count of inserted assets into Supabase: 0');
+  } else {
     try {
+      console.log(`[Supabase] Initializing client for: ${supabaseUrl}`);
       const supabase = createClient(supabaseUrl, supabaseKey);
 
       // Upsert discovered warehouses
-      const { error: whErr } = await supabase.from('warehouses').upsert(
+      const { error: whErr, status: whStatus, statusText: whStatusText } = await supabase.from('warehouses').upsert(
         discoveredWarehouses.map((w) => ({
           id: w.id,
           name: w.name,
@@ -444,28 +456,42 @@ async function main() {
           type: w.type,
           address: w.address,
           is_active: w.isActive,
+          organization_id: '00000000-0000-0000-0000-000000000001',
         })),
         { onConflict: 'id' }
       );
-      if (whErr) console.warn('[Supabase] Warehouses upsert notice:', whErr.message);
+      if (whErr) {
+        console.error(`[Supabase] Warehouses upsert error (status ${whStatus} ${whStatusText}):`, whErr.message);
+      } else {
+        console.log(`[Supabase] Warehouses upsert response (status ${whStatus} ${whStatusText}): Successfully synchronized ${discoveredWarehouses.length} warehouses.`);
+      }
 
       // Upsert discovered categories
-      const { error: catErr } = await supabase.from('categories').upsert(
+      const { error: catErr, status: catStatus, statusText: catStatusText } = await supabase.from('categories').upsert(
         discoveredCategories.map((c) => ({
           id: c.id,
           name: c.name,
           slug: c.slug,
           icon: c.icon,
           display_order: c.displayOrder,
+          organization_id: '00000000-0000-0000-0000-000000000001',
         })),
         { onConflict: 'id' }
       );
-      if (catErr) console.warn('[Supabase] Categories upsert notice:', catErr.message);
+      if (catErr) {
+        console.error(`[Supabase] Categories upsert error (status ${catStatus} ${catStatusText}):`, catErr.message);
+      } else {
+        console.log(`[Supabase] Categories upsert response (status ${catStatus} ${catStatusText}): Successfully synchronized ${discoveredCategories.length} categories.`);
+      }
 
       // Upsert assets in chunks of 50
       const BATCH_SIZE = 50;
+      const totalChunks = Math.ceil(finalAssets.length / BATCH_SIZE);
+
       for (let i = 0; i < finalAssets.length; i += BATCH_SIZE) {
-        const chunk = finalAssets.slice(i, i + BATCH_SIZE).map((item) => ({
+        const chunkIndex = Math.floor(i / BATCH_SIZE) + 1;
+        const currentSlice = finalAssets.slice(i, i + BATCH_SIZE);
+        const chunk = currentSlice.map((item) => ({
           id: item.id,
           qr_code: item.qrCode,
           serial_number: item.serialNumber,
@@ -476,17 +502,26 @@ async function main() {
           version: 1,
           purchase_cost: item.purchaseCost,
           purchase_date: item.purchaseDate,
+          organization_id: '00000000-0000-0000-0000-000000000001',
         }));
 
-        const { error } = await supabase.from('assets').upsert(chunk, {
+        const { data, error, status, statusText } = await supabase.from('assets').upsert(chunk, {
           onConflict: 'qr_code',
-        });
+        }).select('id');
+
         if (error) {
-          console.error('Supabase Error:', error.message);
+          console.error(`[Supabase Chunk ${chunkIndex}/${totalChunks}] Error (status ${status} ${statusText}): ${error.message}${error.details ? ` - Details: ${error.details}` : ''}`);
+        } else {
+          const insertedThisBatch = data && Array.isArray(data) ? data.length : chunk.length;
+          exactInsertedAssetsCount += insertedThisBatch;
+          console.log(`[Supabase Chunk ${chunkIndex}/${totalChunks}] Response (status ${status} ${statusText}): Successfully inserted/upserted ${insertedThisBatch} assets (items ${i + 1} to ${Math.min(i + BATCH_SIZE, finalAssets.length)})`);
         }
       }
+
+      console.log(`\nExact count of inserted assets into Supabase: ${exactInsertedAssetsCount}`);
     } catch (err) {
-      console.error('Supabase Error:', err.message);
+      console.error('[Supabase] Fatal error during injection:', err.message);
+      console.log(`Exact count of inserted assets into Supabase: ${exactInsertedAssetsCount}`);
     }
   }
 

@@ -11,8 +11,14 @@ export const metadata: Metadata = {
 
 export const dynamic = 'force-dynamic';
 
-export default async function ManagerDashboardPage() {
-  const analyticsData = await getPlantManagerAnalytics();
+interface ManagerDashboardPageProps {
+  searchParams?: Promise<{ org?: string; organizationId?: string }>;
+}
 
-  return <ManagerDashboardView data={analyticsData} />;
+export default async function ManagerDashboardPage(props: ManagerDashboardPageProps) {
+  const searchParams = await props.searchParams;
+  const orgParam = searchParams?.org || searchParams?.organizationId;
+  const analyticsData = await getPlantManagerAnalytics(orgParam);
+
+  return <ManagerDashboardView key={orgParam || 'session'} data={analyticsData} />;
 }

@@ -30,7 +30,15 @@ export const DEFAULT_ORGANIZATION: Organization = {
   defaultCurrency: 'ILS',
 };
 
-export const MOCK_ORGANIZATIONS: Organization[] = [DEFAULT_ORGANIZATION];
+export const SALEHALI_ORGANIZATION: Organization = {
+  id: '11111111-1111-1111-1111-111111111111',
+  name: 'Ali Saleh Enterprises',
+  slug: 'salehali',
+  serialPrefix: 'ALI-',
+  defaultCurrency: 'ILS',
+};
+
+export const MOCK_ORGANIZATIONS: Organization[] = [DEFAULT_ORGANIZATION, SALEHALI_ORGANIZATION];
 
 export function getMockOrganizations(): Organization[] {
   return [...MOCK_ORGANIZATIONS];
@@ -169,10 +177,19 @@ export const MOCK_WAREHOUSES: Warehouse[] = [
     "type": "site_container",
     "address": "מתחם באר שבע",
     "isActive": true
+  },
+  {
+    "id": "wh-salehali-main",
+    "name": "מחסן ראשי",
+    "code": "MAIN-01",
+    "type": "central_warehouse",
+    "address": "מתחם מרכזי",
+    "isActive": true,
+    "organizationId": "11111111-1111-1111-1111-111111111111"
   }
 ];
 
-// Associate mock warehouses with DEFAULT_ORGANIZATION
+// Associate default mock warehouses with DEFAULT_ORGANIZATION
 for (const w of MOCK_WAREHOUSES) {
   if (!w.organizationId) {
     w.organizationId = DEFAULT_ORGANIZATION.id;
@@ -194,11 +211,7 @@ export function getMockWarehouses(
   }
   let list = includeInactive ? [...warehousesStore] : warehousesStore.filter((w) => w.isActive !== false);
   if (orgId) {
-    list = list.filter((w) =>
-      orgId === DEFAULT_ORGANIZATION.id
-        ? !w.organizationId || w.organizationId === orgId
-        : w.organizationId === orgId
-    );
+    list = list.filter((w) => w.organizationId === orgId);
   }
   return list;
 }
@@ -209,9 +222,7 @@ export function getMockWarehousesAdmin(organizationId?: string): WarehouseAdminI
     const whAssets = assetsStore.filter(
       (a) =>
         (organizationId
-          ? organizationId === DEFAULT_ORGANIZATION.id
-            ? !a.organizationId || a.organizationId === organizationId || a.organization_id === organizationId
-            : a.organizationId === organizationId || a.organization_id === organizationId
+          ? a.organizationId === organizationId || a.organization_id === organizationId
           : true) &&
         (a.currentWarehouseId === wh.id ||
           a.current_warehouse_id === wh.id ||
@@ -235,7 +246,7 @@ export function getMockWarehousesAdmin(organizationId?: string): WarehouseAdminI
       availableCount,
       inUseCount,
       maintenanceCount,
-      organizationId: wh.organizationId || DEFAULT_ORGANIZATION.id,
+      organizationId: wh.organizationId || organizationId || DEFAULT_ORGANIZATION.id,
     };
   });
 }
@@ -454,158 +465,165 @@ export const MOCK_CATEGORIES: Category[] = [
     "displayOrder": 15
   },
   {
+    "id": "cat-general-equipment",
+    "name": "ציוד כללי",
+    "slug": "general-equipment",
+    "icon": "wrench",
+    "displayOrder": 16
+  },
+  {
     "id": "cat-piping-tools",
     "name": "צנרת",
     "slug": "piping-tools",
     "icon": "scissors",
-    "displayOrder": 16
+    "displayOrder": 17
   },
   {
     "id": "cat-jigsaws",
     "name": "גקסון",
     "slug": "jigsaws",
     "icon": "scissors",
-    "displayOrder": 17
+    "displayOrder": 18
   },
   {
     "id": "cat-measuring-tools",
     "name": "כלי מדידה",
     "slug": "measuring-tools",
     "icon": "ruler",
-    "displayOrder": 18
+    "displayOrder": 19
   },
   {
     "id": "cat-saws",
     "name": "משור",
     "slug": "saws",
     "icon": "scissors",
-    "displayOrder": 19
+    "displayOrder": 20
   },
   {
     "id": "cat-welding-masks",
     "name": "מסיכת ריתוך",
     "slug": "welding-masks",
     "icon": "flame",
-    "displayOrder": 20
+    "displayOrder": 21
   },
   {
     "id": "cat-blowers",
     "name": "מפוחים",
     "slug": "blowers",
     "icon": "wrench",
-    "displayOrder": 21
+    "displayOrder": 22
   },
   {
     "id": "cat-compressors",
     "name": "קומפרסור",
     "slug": "compressors",
     "icon": "wrench",
-    "displayOrder": 22
+    "displayOrder": 23
   },
   {
     "id": "cat-breathing-apparatus",
     "name": "מנפ\"ם",
     "slug": "breathing-apparatus",
     "icon": "crane",
-    "displayOrder": 23
+    "displayOrder": 24
   },
   {
     "id": "cat-levels",
     "name": "מאזנת",
     "slug": "levels",
     "icon": "ruler",
-    "displayOrder": 24
+    "displayOrder": 25
   },
   {
     "id": "cat-sirius",
     "name": "סיריוס",
     "slug": "sirius",
     "icon": "wrench",
-    "displayOrder": 25
+    "displayOrder": 26
   },
   {
     "id": "cat-vacuums",
     "name": "שואב אבק",
     "slug": "vacuums",
     "icon": "wrench",
-    "displayOrder": 26
+    "displayOrder": 27
   },
   {
     "id": "cat-paint-compressors",
     "name": "קומפרסור צבע",
     "slug": "paint-compressors",
     "icon": "wrench",
-    "displayOrder": 27
+    "displayOrder": 28
   },
   {
     "id": "cat-ladders",
     "name": "סולמות",
     "slug": "ladders",
     "icon": "crane",
-    "displayOrder": 28
+    "displayOrder": 29
   },
   {
     "id": "cat-oxygen-batteries",
     "name": "סוללת חמצן",
     "slug": "oxygen-batteries",
     "icon": "crane",
-    "displayOrder": 29
+    "displayOrder": 30
   },
   {
     "id": "cat-gardening",
     "name": "גינון",
     "slug": "gardening",
     "icon": "wrench",
-    "displayOrder": 30
+    "displayOrder": 31
   },
   {
     "id": "cat-electric-panels",
     "name": "לוח חשמל",
     "slug": "electric-panels",
     "icon": "wrench",
-    "displayOrder": 31
+    "displayOrder": 32
   },
   {
     "id": "cat-gas-detectors",
     "name": "גלאי גז",
     "slug": "gas-detectors",
     "icon": "ruler",
-    "displayOrder": 32
+    "displayOrder": 33
   },
   {
     "id": "cat-explosion-proof-lighting",
     "name": "גוף תאורה מגן פיצוץ",
     "slug": "explosion-proof-lighting",
     "icon": "wrench",
-    "displayOrder": 33
+    "displayOrder": 34
   },
   {
     "id": "cat-generators",
     "name": "גנרטור",
     "slug": "generators",
     "icon": "wrench",
-    "displayOrder": 34
+    "displayOrder": 35
   },
   {
     "id": "cat-extractors",
     "name": "מחלץ",
     "slug": "extractors",
     "icon": "wrench",
-    "displayOrder": 35
+    "displayOrder": 36
   },
   {
     "id": "cat-drones",
     "name": "רחפן",
     "slug": "drones",
     "icon": "wrench",
-    "displayOrder": 36
+    "displayOrder": 37
   },
   {
     "id": "cat-isolation-transformers",
     "name": "שנאי מבדיל",
     "slug": "isolation-transformers",
     "icon": "wrench",
-    "displayOrder": 37
+    "displayOrder": 38
   }
 ];
 
@@ -40367,11 +40385,9 @@ export function addMockCategory(cat: Category): Category {
 
 export function getMockCategories(organizationId?: string): Category[] {
   if (organizationId) {
-    return MOCK_CATEGORIES.filter((c) =>
-      organizationId === DEFAULT_ORGANIZATION.id
-        ? !c.organizationId || c.organizationId === organizationId
-        : c.organizationId === organizationId
-    );
+    const orgCats = MOCK_CATEGORIES.filter((c) => c.organizationId === organizationId);
+    if (orgCats.length > 0) return orgCats;
+    return MOCK_CATEGORIES.map((c) => ({ ...c, organizationId }));
   }
   return [...MOCK_CATEGORIES];
 }
@@ -40396,16 +40412,15 @@ export function appendMockAuditRecord(entry: AuditHistoryRecord): void {
 
 /**
  * Get all assets from the unified mock store, optionally scoped by organizationId.
+ * STRICT ENFORCEMENT: Never return global MOCK_ASSETS if an orgId is provided!
  */
 export function getMockAssets(organizationId?: string): UnifiedAssetItem[] {
   if (organizationId) {
-    return assetsStore.filter((a) =>
-      organizationId === DEFAULT_ORGANIZATION.id
-        ? !a.organizationId || a.organizationId === organizationId || a.organization_id === organizationId
-        : a.organizationId === organizationId || a.organization_id === organizationId
+    return assetsStore.filter(
+      (a) => a.organizationId === organizationId || a.organization_id === organizationId
     );
   }
-  return assetsStore;
+  return [];
 }
 
 function toScannedAssetDetails(asset: UnifiedAssetItem): ScannedAssetDetails {
@@ -40685,12 +40700,8 @@ export function getMockPlantManagerAnalytics(organizationId?: string): PlantMana
   > = {};
 
   const activeWarehouses = organizationId
-    ? warehousesStore.filter((wh) =>
-        organizationId === DEFAULT_ORGANIZATION.id
-          ? !wh.organizationId || wh.organizationId === organizationId
-          : wh.organizationId === organizationId
-      )
-    : warehousesStore;
+    ? warehousesStore.filter((wh) => wh.organizationId === organizationId)
+    : [];
 
   activeWarehouses.forEach((wh) => {
     whMap[wh.id] = {
@@ -40705,12 +40716,8 @@ export function getMockPlantManagerAnalytics(organizationId?: string): PlantMana
   });
 
   const activeAssets = organizationId
-    ? assetsStore.filter((a) =>
-        organizationId === DEFAULT_ORGANIZATION.id
-          ? !a.organizationId || a.organizationId === organizationId || a.organization_id === organizationId
-          : a.organizationId === organizationId || a.organization_id === organizationId
-      )
-    : assetsStore;
+    ? assetsStore.filter((a) => a.organizationId === organizationId || a.organization_id === organizationId)
+    : [];
 
   activeAssets.forEach((asset) => {
     totalFleetValue += asset.purchaseCost;
@@ -40813,12 +40820,8 @@ export function getMockPlantManagerAnalytics(organizationId?: string): PlantMana
   let damageIncidentCount = 0;
 
   const activeHistory = organizationId
-    ? historyStore.filter((log) =>
-        organizationId === DEFAULT_ORGANIZATION.id
-          ? !log.organizationId || log.organizationId === organizationId
-          : log.organizationId === organizationId
-      )
-    : historyStore;
+    ? historyStore.filter((log) => log.organizationId === organizationId)
+    : [];
 
   activeHistory.forEach((log) => {
     if (log.damageReport?.estimatedCost) {
@@ -40879,12 +40882,8 @@ export function getMockStorekeeperOperations(
 ): StorekeeperOperationsPayload {
   const isAll = !warehouseId || warehouseId === 'all' || warehouseId.toLowerCase() === 'all';
   const activeWarehouses = organizationId
-    ? warehousesStore.filter((w) =>
-        organizationId === DEFAULT_ORGANIZATION.id
-          ? !w.organizationId || w.organizationId === organizationId
-          : w.organizationId === organizationId
-      )
-    : warehousesStore;
+    ? warehousesStore.filter((w) => w.organizationId === organizationId)
+    : [];
 
   const currentWh = isAll
     ? { id: 'all', name: 'כלל המחסנים (All Depots)', code: 'ALL' }
@@ -40904,12 +40903,8 @@ export function getMockStorekeeperOperations(
   let quarantinedCount = 0;
 
   const activeAssets = organizationId
-    ? assetsStore.filter((a) =>
-        organizationId === DEFAULT_ORGANIZATION.id
-          ? !a.organizationId || a.organizationId === organizationId || a.organization_id === organizationId
-          : a.organizationId === organizationId || a.organization_id === organizationId
-      )
-    : assetsStore;
+    ? assetsStore.filter((a) => a.organizationId === organizationId || a.organization_id === organizationId)
+    : [];
 
   // Filter tools belonging to this facility matching currentWarehouseId or current_warehouse_id
   const whAssets = isAll
@@ -40987,7 +40982,7 @@ export function getMockStorekeeperOperations(
 
   return {
     warehouse: currentWh,
-    allWarehouses: getMockWarehouses(false, organizationId),
+    allWarehouses: getMockWarehouses(false, organizationId).map((w) => ({ id: w.id, name: w.name, code: w.code })),
     returnsDueToday,
     overdueAssets: overdueAssets.sort((a, b) => b.daysOverdue - a.daysOverdue),
     lowStockAlerts,
@@ -41002,12 +40997,8 @@ export function getMockStorekeeperOperations(
  */
 export function getMockCatalogData(warehouseId?: string, organizationId?: string): CatalogDataPayload {
   const activeAssets = organizationId
-    ? assetsStore.filter((a) =>
-        organizationId === DEFAULT_ORGANIZATION.id
-          ? !a.organizationId || a.organizationId === organizationId || a.organization_id === organizationId
-          : a.organizationId === organizationId || a.organization_id === organizationId
-      )
-    : assetsStore;
+    ? assetsStore.filter((a) => a.organizationId === organizationId || a.organization_id === organizationId)
+    : [];
 
   const filteredAssets =
     warehouseId && warehouseId !== 'all'
@@ -41063,7 +41054,8 @@ export function getMockCatalogData(warehouseId?: string, organizationId?: string
     };
   });
 
-  const categories: CatalogCategory[] = MOCK_CATEGORIES.map((cat) => ({
+  const scopedCategories = getMockCategories(organizationId);
+  const categories: CatalogCategory[] = scopedCategories.map((cat) => ({
     id: cat.id,
     name: cat.name,
     slug: cat.slug,
@@ -41078,10 +41070,11 @@ export function getMockCatalogData(warehouseId?: string, organizationId?: string
     ).length,
   }));
 
+  const scopedWarehouses = getMockWarehouses(false, organizationId);
   return {
     categories,
     assets: catalogAssets,
-    warehouses: getMockWarehouses(false, organizationId),
+    warehouses: scopedWarehouses.map((w) => ({ id: w.id, name: w.name, code: w.code })),
     selectedWarehouseId: warehouseId || 'all',
   };
 }
@@ -41090,15 +41083,9 @@ export function getMockCatalogData(warehouseId?: string, organizationId?: string
  * Retrieves audit history filtered from the unified history store.
  */
 export function getMockAuditHistory(filters?: AuditHistoryFilters, organizationId?: string): AuditHistoryPayload {
-  let items = [...historyStore];
-
-  if (organizationId) {
-    items = items.filter((item) =>
-      organizationId === DEFAULT_ORGANIZATION.id
-        ? !item.organizationId || item.organizationId === organizationId
-        : item.organizationId === organizationId
-    );
-  }
+  let items = organizationId
+    ? historyStore.filter((item) => item.organizationId === organizationId)
+    : [];
 
   if (filters?.action && filters.action !== 'all') {
     items = items.filter((item) => item.action === filters.action);
@@ -41141,6 +41128,18 @@ export const MOCK_USERS: AppUser[] = [
     isActive: true,
     organizationId: DEFAULT_ORGANIZATION.id,
     createdAt: '2023-11-01T10:00:00.000Z',
+  },
+  {
+    id: 'usr-salehali-01',
+    fullName: 'עלי סאלח (מנהל ראשי)',
+    username: 'salehali',
+    role: 'general_manager',
+    pinCode: '1234',
+    assignedWarehouseId: 'wh-salehali-main',
+    assignedWarehouseName: 'מחסן ראשי',
+    isActive: true,
+    organizationId: '11111111-1111-1111-1111-111111111111',
+    createdAt: '2026-01-01T10:00:00.000Z',
   },
 ];
 

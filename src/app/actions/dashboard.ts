@@ -132,25 +132,10 @@ interface CacheEntry<T> {
 const analyticsCache = new Map<string, CacheEntry<PlantManagerAnalyticsPayload>>();
 const storekeeperOpsCache = new Map<string, CacheEntry<StorekeeperOperationsPayload>>();
 
-async function resolveActiveOrganizationId(providedOrgId?: string): Promise<string> {
-  if (providedOrgId && providedOrgId.trim()) {
-    return providedOrgId.trim();
-  }
-  try {
-    const { cookies } = await import('next/headers');
-    const cookieStore = await cookies();
-    const activeUserCookie = cookieStore.get('tooly_active_user');
-    if (activeUserCookie?.value) {
-      const decoded = decodeURIComponent(activeUserCookie.value);
-      const parsed = JSON.parse(decoded);
-      if (parsed?.organizationId) {
-        return parsed.organizationId;
-      }
-    }
-  } catch {
-    // In contexts where cookies() is unavailable
-  }
-  return DEFAULT_ORGANIZATION_ID;
+import { getServerSessionOrgId } from '@/lib/auth/session';
+
+async function resolveActiveOrganizationId(providedOrgId?: string): Promise<string | null> {
+  return getServerSessionOrgId(providedOrgId);
 }
 
 /**
@@ -160,14 +145,22 @@ export async function getPlantManagerAnalytics(
   organizationId?: string
 ): Promise<PlantManagerAnalyticsPayload> {
   const orgId = await resolveActiveOrganizationId(organizationId);
+  if (!orgId) {
+    return getMockPlantManagerAnalytics(undefined);
+  }
   const cacheKey = `analytics_${orgId}`;
   const cached = analyticsCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.data;
   }
 
-  if (isSupabaseConfigured()) {
-    try {
+  if (!isSupabaseConfigured()) {
+    const fallbackPayload = getMockPlantManagerAnalytics(orgId);
+    analyticsCache.set(cacheKey, { data: fallbackPayload, expiresAt: Date.now() + 30000 });
+    return fallbackPayload;
+  }
+
+  try {
       let astQuery = supabase
         .from('assets')
         .select('*, tool_models(name, brand, model_number, category_id), warehouses(name, code)')
@@ -352,7 +345,6 @@ export async function getPlantManagerAnalytics(
     } catch (err) {
       console.warn('[getPlantManagerAnalytics] Supabase query fallback:', err);
     }
-  }
 
   // Fallback unified dataset for instant rich presentation and offline preview
   const fallbackPayload = getMockPlantManagerAnalytics(orgId);
@@ -368,6 +360,9 @@ export async function getStorekeeperOperations(
   organizationId?: string
 ): Promise<StorekeeperOperationsPayload> {
   const orgId = await resolveActiveOrganizationId(organizationId);
+  if (!orgId) {
+    return getMockStorekeeperOperations(warehouseId, undefined);
+  }
   const fallbackWarehouses = getFallbackWarehouses(orgId);
   const isAll = warehouseId === 'all' || warehouseId === 'ALL';
   const selectedWhId = isAll ? 'all' : (warehouseId || fallbackWarehouses[0]?.id || 'all');
@@ -377,14 +372,18 @@ export async function getStorekeeperOperations(
     return cached.data;
   }
 
+  if (!isSupabaseConfigured()) {
+    const fallbackStorekeeper = getMockStorekeeperOperations(selectedWhId, orgId);
+    storekeeperOpsCache.set(cacheKey, { data: fallbackStorekeeper, expiresAt: Date.now() + 30000 });
+    return fallbackStorekeeper;
+  }
+
   const currentWh = isAll
     ? { id: 'all', name: 'כלל המחסנים (All Depots)', code: 'ALL' }
     : (fallbackWarehouses.find((w) => w.id === selectedWhId) ||
        fallbackWarehouses[0] || { id: selectedWhId || 'all', name: 'כלל המחסנים (All Depots)', code: 'ALL' });
 
-  // If Supabase is connected, attempt dynamic query
-  if (isSupabaseConfigured()) {
-    try {
+  try {
       let query = supabase
         .from('assets')
         .select('*, tool_models(name, brand, model_number, category_id)')
@@ -483,7 +482,6 @@ export async function getStorekeeperOperations(
     } catch (err) {
       console.warn('[getStorekeeperOperations] Supabase query fallback:', err);
     }
-  }
 
   // Fallback operational data for storekeeper derived strictly from unified store
   const fallbackStorekeeper = getMockStorekeeperOperations(selectedWhId, orgId);

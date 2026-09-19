@@ -11,8 +11,15 @@ export const metadata: Metadata = {
 
 export const dynamic = 'force-dynamic';
 
-export default async function WarehouseDashboardPage() {
-  const operationsData = await getStorekeeperOperations();
+interface WarehouseDashboardPageProps {
+  searchParams?: Promise<{ warehouse?: string; org?: string; organizationId?: string }>;
+}
 
-  return <WarehouseDashboardView initialData={operationsData} />;
+export default async function WarehouseDashboardPage(props: WarehouseDashboardPageProps) {
+  const searchParams = await props.searchParams;
+  const warehouseId = searchParams?.warehouse;
+  const orgParam = searchParams?.org || searchParams?.organizationId;
+  const operationsData = await getStorekeeperOperations(warehouseId, orgParam);
+
+  return <WarehouseDashboardView key={`${orgParam || 'session'}_${warehouseId || 'all'}`} initialData={operationsData} />;
 }

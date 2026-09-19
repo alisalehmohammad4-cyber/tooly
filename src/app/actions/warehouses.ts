@@ -35,25 +35,10 @@ export async function invalidateWarehouseCache(): Promise<void> {
   warehouseToolsCache.clear();
 }
 
-async function resolveActiveOrganizationId(providedOrgId?: string): Promise<string> {
-  if (providedOrgId && providedOrgId.trim()) {
-    return providedOrgId.trim();
-  }
-  try {
-    const { cookies } = await import('next/headers');
-    const cookieStore = await cookies();
-    const activeUserCookie = cookieStore.get('tooly_active_user');
-    if (activeUserCookie?.value) {
-      const decoded = decodeURIComponent(activeUserCookie.value);
-      const parsed = JSON.parse(decoded);
-      if (parsed?.organizationId) {
-        return parsed.organizationId;
-      }
-    }
-  } catch {
-    // In contexts where cookies() is unavailable
-  }
-  return DEFAULT_ORGANIZATION_ID;
+import { getServerSessionOrgId } from '@/lib/auth/session';
+
+async function resolveActiveOrganizationId(providedOrgId?: string): Promise<string | null> {
+  return getServerSessionOrgId(providedOrgId);
 }
 
 /**
@@ -64,9 +49,22 @@ export async function getWarehousesAdminAction(
   organizationId?: string
 ): Promise<WarehouseAdminItem[]> {
   const orgId = await resolveActiveOrganizationId(organizationId);
+  if (!orgId) {
+    return [];
+  }
   const cached = adminWarehousesCache.get(orgId);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.data;
+  }
+
+  if (!isSupabaseConfigured()) {
+    const { getMockWarehousesAdmin } = await import('@/lib/mockStore');
+    const results = getMockWarehousesAdmin(orgId);
+    adminWarehousesCache.set(orgId, {
+      data: results,
+      expiresAt: Date.now() + WAREHOUSE_CACHE_TTL_MS,
+    });
+    return results;
   }
 
   let warehousesList: Array<{
@@ -205,6 +203,9 @@ export async function createWarehouseAction(
   organizationId?: string
 ): Promise<WarehouseActionResult> {
   const orgId = await resolveActiveOrganizationId(organizationId);
+  if (!orgId) {
+    return { success: false, error: 'פעולה זו דורשת התחברות למערכת.' };
+  }
   const cleanName = input.name.trim();
   const cleanCode = input.code.trim().toUpperCase();
 
@@ -498,6 +499,9 @@ export async function getWarehouseToolsAction(
   }
 
   const orgId = await resolveActiveOrganizationId(organizationId);
+  if (!orgId) {
+    return [];
+  }
   const cacheKey = `${orgId}_${cleanWhId}`;
   const cached = warehouseToolsCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
@@ -506,8 +510,58 @@ export async function getWarehouseToolsAction(
 
   let toolsList: WarehouseToolItem[] = [];
 
-  if (isSupabaseConfigured()) {
-    try {
+  if (!isSupabaseConfigured()) {
+    const { getMockAssets, getMockWarehouses } = await import('@/lib/mockStore');
+    const mockWhs = getMockWarehouses(true, orgId);
+    const targetWh = mockWhs.find(
+      (w) => w.id === cleanWhId || (w.code && w.code.toUpperCase() === cleanWhId.toUpperCase())
+    );
+
+    const allAssets = getMockAssets(orgId);
+    const filtered = allAssets.filter((a) => {
+      const matchDirect =
+        a.current_warehouse_id === cleanWhId ||
+        a.currentWarehouseId === cleanWhId ||
+        a.warehouse_id === cleanWhId ||
+        a.warehouseId === cleanWhId ||
+        a.warehouseCode === cleanWhId ||
+        a.warehouse_code === cleanWhId;
+
+      if (matchDirect) return true;
+
+      if (targetWh) {
+        return (
+          a.current_warehouse_id === targetWh.id ||
+          a.currentWarehouseId === targetWh.id ||
+          a.warehouse_id === targetWh.id ||
+          a.warehouseId === targetWh.id ||
+          (Boolean(targetWh.code) &&
+            (a.warehouseCode === targetWh.code || a.warehouse_code === targetWh.code))
+        );
+      }
+
+      return false;
+    });
+
+    toolsList = filtered.map((a) => ({
+      id: a.id,
+      name: a.toolName || a.tool_name || 'כלי עבודה',
+      qr_code: a.qrCode || a.qr_code || '',
+      serial_number: a.serialNumber || a.serial_number || null,
+      category_name: a.categoryName || a.category_name || a.category || 'ציוד כללי',
+      status: a.status || 'available',
+      current_assigned_worker: a.currentAssignedWorker || a.current_assigned_worker || null,
+      order_number: a.orderNumber || a.order_number || null,
+    }));
+
+    warehouseToolsCache.set(cacheKey, {
+      data: toolsList,
+      expiresAt: Date.now() + WAREHOUSE_CACHE_TTL_MS,
+    });
+    return toolsList;
+  }
+
+  try {
       // Find matching warehouse by id or code to ensure robust resolution
       let targetWhId = cleanWhId;
       let whLookup = supabase
@@ -575,62 +629,15 @@ export async function getWarehouseToolsAction(
         });
       }
     } catch (err) {
-      console.warn('[getWarehouseToolsAction] Supabase query warning, falling back to mockStore:', err);
+      console.warn('[getWarehouseToolsAction] Supabase query warning:', err);
     }
-  }
 
-  // Fallback to mockStore if empty or Supabase not configured
-  if (toolsList.length === 0) {
-    const { getMockAssets, getMockWarehouses } = await import('@/lib/mockStore');
-    const mockWhs = getMockWarehouses(true, orgId);
-    const targetWh = mockWhs.find(
-      (w) => w.id === cleanWhId || (w.code && w.code.toUpperCase() === cleanWhId.toUpperCase())
-    );
-
-    const allAssets = getMockAssets(orgId);
-    const filtered = allAssets.filter((a) => {
-      const matchDirect =
-        a.current_warehouse_id === cleanWhId ||
-        a.currentWarehouseId === cleanWhId ||
-        a.warehouse_id === cleanWhId ||
-        a.warehouseId === cleanWhId ||
-        a.warehouseCode === cleanWhId ||
-        a.warehouse_code === cleanWhId;
-
-      if (matchDirect) return true;
-
-      if (targetWh) {
-        return (
-          a.current_warehouse_id === targetWh.id ||
-          a.currentWarehouseId === targetWh.id ||
-          a.warehouse_id === targetWh.id ||
-          a.warehouseId === targetWh.id ||
-          (Boolean(targetWh.code) &&
-            (a.warehouseCode === targetWh.code || a.warehouse_code === targetWh.code))
-        );
-      }
-
-      return false;
+    warehouseToolsCache.set(cacheKey, {
+      data: toolsList,
+      expiresAt: Date.now() + WAREHOUSE_CACHE_TTL_MS,
     });
 
-    toolsList = filtered.map((a) => ({
-      id: a.id,
-      name: a.toolName || a.tool_name || 'כלי עבודה',
-      qr_code: a.qrCode || a.qr_code || '',
-      serial_number: a.serialNumber || a.serial_number || null,
-      category_name: a.categoryName || a.category_name || a.category || 'ציוד כללי',
-      status: a.status || 'available',
-      current_assigned_worker: a.currentAssignedWorker || a.current_assigned_worker || null,
-      order_number: a.orderNumber || a.order_number || null,
-    }));
+    return toolsList;
   }
-
-  warehouseToolsCache.set(cacheKey, {
-    data: toolsList,
-    expiresAt: Date.now() + WAREHOUSE_CACHE_TTL_MS,
-  });
-
-  return toolsList;
-}
 
 

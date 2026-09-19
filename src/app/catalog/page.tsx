@@ -10,15 +10,16 @@ export const metadata: Metadata = {
 };
 
 interface CatalogPageProps {
-  searchParams?: Promise<{ warehouse?: string }>;
+  searchParams?: Promise<{ warehouse?: string; org?: string; organizationId?: string }>;
 }
 
 export default async function CatalogPage(props: CatalogPageProps) {
   const searchParams = await props.searchParams;
   const warehouseId = searchParams?.warehouse;
-  const catalogData = await getCatalogData(warehouseId);
+  const orgParam = searchParams?.org || searchParams?.organizationId;
+  const catalogData = await getCatalogData(warehouseId, orgParam);
 
-  return <CatalogView key={warehouseId || 'all'} initialData={catalogData} />;
+  return <CatalogView key={`${orgParam || 'session'}_${warehouseId || 'all'}`} initialData={catalogData} />;
 }
 
 

@@ -56,25 +56,10 @@ export interface AuditHistoryPayload {
   warehouses: Array<{ id: string; name: string; code: string }>;
 }
 
-async function resolveActiveOrganizationId(providedOrgId?: string): Promise<string> {
-  if (providedOrgId && providedOrgId.trim()) {
-    return providedOrgId.trim();
-  }
-  try {
-    const { cookies } = await import('next/headers');
-    const cookieStore = await cookies();
-    const activeUserCookie = cookieStore.get('tooly_active_user');
-    if (activeUserCookie?.value) {
-      const decoded = decodeURIComponent(activeUserCookie.value);
-      const parsed = JSON.parse(decoded);
-      if (parsed?.organizationId) {
-        return parsed.organizationId;
-      }
-    }
-  } catch {
-    // In contexts where cookies() is unavailable
-  }
-  return DEFAULT_ORGANIZATION_ID;
+import { getServerSessionOrgId } from '@/lib/auth/session';
+
+async function resolveActiveOrganizationId(providedOrgId?: string): Promise<string | null> {
+  return getServerSessionOrgId(providedOrgId);
 }
 
 /**
@@ -85,6 +70,9 @@ export async function getAuditHistory(
   organizationId?: string
 ): Promise<AuditHistoryPayload> {
   const orgId = await resolveActiveOrganizationId(organizationId);
+  if (!orgId) {
+    return { records: [], totalCount: 0, warehouses: [] };
+  }
 
   if (!isSupabaseConfigured()) {
     return getMockAuditHistory(filters, orgId);
@@ -141,9 +129,17 @@ export async function getAuditHistory(
 
     const { data: rawRows, error } = await query;
 
-    if (error || !rawRows || rawRows.length === 0) {
-      console.warn('Using fallback audit trail history due to empty database or query error');
+    if (error) {
+      console.warn('Using fallback audit trail history due to query error:', error);
       return getMockAuditHistory(filters, orgId);
+    }
+
+    if (!rawRows || rawRows.length === 0) {
+      return {
+        records: [],
+        totalCount: 0,
+        warehouses: getMockWarehouses(false, orgId),
+      };
     }
 
     interface RawLedgerRow {

@@ -9,8 +9,14 @@ export const metadata: Metadata = {
   description: 'יומן מעקב תנועות ציוד, היסטוריית ניפוקים, החזרות וחתימות עובדים.',
 };
 
-export default async function HistoryPage() {
-  const historyData = await getAuditHistory();
+interface HistoryPageProps {
+  searchParams?: Promise<{ org?: string; organizationId?: string }>;
+}
 
-  return <HistoryView initialData={historyData} />;
+export default async function HistoryPage(props: HistoryPageProps) {
+  const searchParams = await props.searchParams;
+  const orgParam = searchParams?.org || searchParams?.organizationId;
+  const historyData = await getAuditHistory(undefined, orgParam);
+
+  return <HistoryView key={orgParam || 'session'} initialData={historyData} />;
 }

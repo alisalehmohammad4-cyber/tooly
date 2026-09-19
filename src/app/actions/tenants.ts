@@ -57,7 +57,7 @@ export async function registerNewOrganizationAction(
   const orgId = randomUUID();
   const whId = randomUUID();
   const userId = randomUUID();
-  const whCode = `${cleanSlug.slice(0, 4).toUpperCase() || 'WH'}-01`;
+  const whCode = 'MAIN-01';
 
   const newOrg: Organization = {
     id: orgId,

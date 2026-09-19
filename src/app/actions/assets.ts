@@ -4,12 +4,14 @@ import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { QuickOnboardSchema, type QuickOnboardInput } from '@/core/assets/onboard.schema';
 import type { AssetReservation, AssetStatus } from '@/types/domain';
 import { appendAuditHistoryEntry } from '@/app/actions/history';
+import { getServerSessionOrgId } from '@/lib/auth/session';
 import {
   getMockWarehouses,
   getMockCategories,
   getMockAssetByQr,
   addMockAsset,
   getMockAssets,
+  getMockCatalogData,
   getNextAvailableMockTagNumber,
   isLegacyEnglishCategory,
   DEFAULT_ORGANIZATION,
@@ -22,25 +24,8 @@ export interface OnboardFormData {
   categories: Array<{ id: string; name: string; slug: string; icon: string | null }>;
 }
 
-async function resolveActiveOrganizationId(providedOrgId?: string): Promise<string> {
-  if (providedOrgId && providedOrgId.trim()) {
-    return providedOrgId.trim();
-  }
-  try {
-    const { cookies } = await import('next/headers');
-    const cookieStore = await cookies();
-    const activeUserCookie = cookieStore.get('tooly_active_user');
-    if (activeUserCookie?.value) {
-      const decoded = decodeURIComponent(activeUserCookie.value);
-      const parsed = JSON.parse(decoded);
-      if (parsed?.organizationId) {
-        return parsed.organizationId;
-      }
-    }
-  } catch {
-    // In contexts where cookies() is unavailable
-  }
-  return DEFAULT_ORGANIZATION_ID;
+async function resolveActiveOrganizationId(providedOrgId?: string): Promise<string | null> {
+  return getServerSessionOrgId(providedOrgId);
 }
 
 export type OnboardAssetResult =
@@ -53,11 +38,12 @@ export type OnboardAssetResult =
  */
 export async function getOnboardFormData(organizationId?: string): Promise<OnboardFormData> {
   const orgId = await resolveActiveOrganizationId(organizationId);
+  const targetOrgId = orgId || DEFAULT_ORGANIZATION_ID;
 
   if (!isSupabaseConfigured()) {
     return {
-      warehouses: getMockWarehouses(orgId).map((w) => ({ id: w.id, name: w.name, code: w.code })),
-      categories: getMockCategories(orgId)
+      warehouses: getMockWarehouses(targetOrgId).map((w) => ({ id: w.id, name: w.name, code: w.code })),
+      categories: getMockCategories(targetOrgId)
         .filter((c) => !isLegacyEnglishCategory(c))
         .map((c) => ({
           id: c.id,
@@ -100,7 +86,7 @@ export async function getOnboardFormData(organizationId?: string): Promise<Onboa
     categories:
       rawCategories.length > 0
         ? rawCategories
-        : getMockCategories(orgId)
+        : getMockCategories(orgId ?? undefined)
             .filter((c) => !isLegacyEnglishCategory(c))
             .map((c) => ({
               id: c.id,
@@ -122,7 +108,7 @@ export async function checkQrCodeExists(qrCode: string, organizationId?: string)
   const orgId = await resolveActiveOrganizationId(organizationId);
 
   if (!isSupabaseConfigured()) {
-    return Boolean(getMockAssetByQr(sanitizedQr, undefined, orgId));
+    return Boolean(getMockAssetByQr(sanitizedQr, undefined, orgId ?? undefined));
   }
 
   try {
@@ -133,17 +119,17 @@ export async function checkQrCodeExists(qrCode: string, organizationId?: string)
 
     if (orgId === DEFAULT_ORGANIZATION_ID) {
       query = query.or(`organization_id.eq.${orgId},organization_id.is.null`);
-    } else {
+    } else if (orgId) {
       query = query.eq('organization_id', orgId);
     }
 
     const { data, error } = await query.maybeSingle();
     if (error) {
-      return Boolean(getMockAssetByQr(sanitizedQr, undefined, orgId));
+      return Boolean(getMockAssetByQr(sanitizedQr, undefined, orgId ?? undefined));
     }
     return Boolean(data);
   } catch {
-    return Boolean(getMockAssetByQr(sanitizedQr, undefined, orgId));
+    return Boolean(getMockAssetByQr(sanitizedQr, undefined, orgId ?? undefined));
   }
 }
 
@@ -166,7 +152,7 @@ export async function onboardAsset(
   const input = parsed.data;
 
   if (!isSupabaseConfigured()) {
-    const exists = Boolean(getMockAssetByQr(input.qrCode, orgId));
+    const exists = Boolean(getMockAssetByQr(input.qrCode, undefined, orgId ?? undefined));
     if (exists) {
       return {
         success: false,
@@ -183,7 +169,7 @@ export async function onboardAsset(
       brand: input.brand,
       modelNumber: input.modelNumber || undefined,
       condition: input.condition,
-      organizationId: orgId,
+      organizationId: orgId ?? undefined,
     });
 
     await invalidateCatalogCache();
@@ -196,7 +182,7 @@ export async function onboardAsset(
 
   try {
     // 2. Check if QR code is already registered
-    const exists = await checkQrCodeExists(input.qrCode, orgId);
+    const exists = await checkQrCodeExists(input.qrCode, orgId ?? undefined);
     if (exists) {
       return {
         success: false,
@@ -304,7 +290,7 @@ export async function onboardAsset(
       notes: 'רישום כלי ראשוני במערכת',
       createdAt: new Date().toISOString(),
       gps: input.gps || null,
-      organizationId: orgId,
+      organizationId: orgId ?? undefined,
     });
 
     await invalidateCatalogCache();
@@ -397,145 +383,152 @@ export async function getCatalogData(
   organizationId?: string
 ): Promise<CatalogDataPayload> {
   const orgId = await resolveActiveOrganizationId(organizationId);
+  if (!orgId) {
+    return {
+      categories: [],
+      assets: [],
+      warehouses: [],
+      selectedWarehouseId: warehouseId || 'all',
+    };
+  }
+
   const cacheKey = `catalog_${orgId}_${warehouseId || 'all'}`;
   const cached = catalogCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.data;
   }
 
+  if (!isSupabaseConfigured()) {
+    const data = getMockCatalogData(warehouseId, orgId);
+    catalogCache.set(cacheKey, { data, expiresAt: Date.now() + CATALOG_CACHE_TTL_MS });
+    return data;
+  }
+
   let warehousesList: Array<{ id: string; name: string; code: string }> = [];
   let categoriesList: Array<{ id: string; name: string; slug: string; icon: string | null }> = [];
   let allAssets: CatalogAssetItem[] = [];
 
-  if (isSupabaseConfigured()) {
-    try {
-      let whQuery = supabase.from('warehouses').select('id, name, code').eq('is_active', true);
-      let catQuery = supabase.from('categories').select('id, name, slug, icon').order('display_order', { ascending: true });
-      let astQuery = supabase.from('assets').select(
-        'id, qr_code, status, condition, current_assigned_worker, current_warehouse_id, warehouse_id, category_id, category_name, tool_name, brand, model_number, purchase_date, purchase_cost, order_number'
-      ).limit(10000);
+  try {
+    const whQuery = supabase.from('warehouses').select('id, name, code').eq('is_active', true).eq('organization_id', orgId);
+    const catQuery = supabase.from('categories').select('id, name, slug, icon').eq('organization_id', orgId).order('display_order', { ascending: true });
+    const astQuery = supabase.from('assets').select(
+      'id, qr_code, status, condition, current_assigned_worker, current_warehouse_id, warehouse_id, category_id, category_name, tool_name, brand, model_number, purchase_date, purchase_cost, order_number'
+    ).eq('organization_id', orgId).limit(10000);
 
-      if (orgId === DEFAULT_ORGANIZATION_ID) {
-        whQuery = whQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
-        catQuery = catQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
-        astQuery = astQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
-      } else {
-        whQuery = whQuery.eq('organization_id', orgId);
-        catQuery = catQuery.eq('organization_id', orgId);
-        astQuery = astQuery.eq('organization_id', orgId);
-      }
+    const [warehousesRes, categoriesRes, assetsRes] = await Promise.all([
+      whQuery,
+      catQuery,
+      astQuery,
+    ]);
 
-      const [warehousesRes, categoriesRes, assetsRes] = await Promise.all([
-        whQuery,
-        catQuery,
-        astQuery,
-      ]);
-
-      if (!warehousesRes.error && warehousesRes.data && warehousesRes.data.length > 0) {
-        warehousesList = warehousesRes.data;
-      }
-      if (!categoriesRes.error && categoriesRes.data && categoriesRes.data.length > 0) {
-        categoriesList = (
-          categoriesRes.data as Array<{ id: string; name: string; slug: string; icon: string | null }>
-        ).filter((c) => !isLegacyEnglishCategory(c));
-      }
-      if (!assetsRes.error && assetsRes.data && assetsRes.data.length > 0) {
-        const warehouseMap = new Map(warehousesList.map((w) => [w.id, w]));
-        const categoryMap = new Map(categoriesList.map((c) => [c.id, c]));
-        const categoryNameMap = new Map(categoriesList.map((c) => [c.name, c]));
-        const mockAssetMap = new Map(getMockAssets(orgId).map((a) => [a.qrCode, a]));
-
-        allAssets = (assetsRes.data as Record<string, unknown>[]).map((row) => {
-          const qr = (row.qr_code || row.qrCode || '') as string;
-          const mockFallback = mockAssetMap.get(qr);
-
-          const whId = (row.current_warehouse_id ||
-            row.warehouse_id ||
-            row.currentWarehouseId ||
-            mockFallback?.currentWarehouseId ||
-            '') as string;
-          const wh = warehouseMap.get(whId);
-          const catId = (row.category_id || row.categoryId || mockFallback?.categoryId || '') as string;
-          const catName = (row.category_name ||
-            row.categoryName ||
-            row.category ||
-            mockFallback?.categoryName ||
-            '') as string;
-          const cat = categoryMap.get(catId) || categoryNameMap.get(catName);
-
-          const toolName = (row.tool_name ||
-            row.toolName ||
-            row.name ||
-            mockFallback?.toolName ||
-            'כלי עבודה') as string;
-          const brand = (row.brand || mockFallback?.brand || 'Zatout') as string;
-          const worker = (row.current_assigned_worker ||
-            row.currentAssignedWorker ||
-            mockFallback?.currentAssignedWorker ||
-            null) as string | null;
-          const orderNum = (row.order_number ||
-            row.orderNumber ||
-            mockFallback?.orderNumber ||
-            null) as string | null;
-          const resolvedCatName = cat?.name || catName || mockFallback?.categoryName || 'ציוד כללי';
-
-          return {
-            id: (row.id || mockFallback?.id || '') as string,
-            qrCode: qr,
-            qr_code: qr,
-            status: (row.status || mockFallback?.status || 'available') as AssetStatus,
-            condition: (row.condition || mockFallback?.condition || 'good') as
-              | 'excellent'
-              | 'good'
-              | 'needs_repair'
-              | 'retired',
-            currentAssignedWorker: worker,
-            current_assigned_worker: worker,
-            warehouseId: whId,
-            currentWarehouseId: whId,
-            current_warehouse_id: whId,
-            warehouseName:
-              wh?.name || mockFallback?.warehouseName || (row.warehouse_name as string) || 'מחסן ראשי',
-            warehouse_name:
-              wh?.name || mockFallback?.warehouseName || (row.warehouse_name as string) || 'מחסן ראשי',
-            warehouseCode:
-              wh?.code || mockFallback?.warehouseCode || (row.warehouse_code as string) || 'WH',
-            warehouse_code:
-              wh?.code || mockFallback?.warehouseCode || (row.warehouse_code as string) || 'WH',
-            categoryId: cat?.id || catId,
-            category_id: cat?.id || catId,
-            categoryName: resolvedCatName,
-            category_name: resolvedCatName,
-            category: resolvedCatName,
-            toolName,
-            tool_name: toolName,
-            brand,
-            modelNumber: (row.model_number ||
-              row.modelNumber ||
-              mockFallback?.modelNumber ||
-              null) as string | null,
-            model_number: (row.model_number ||
-              row.modelNumber ||
-              mockFallback?.modelNumber ||
-              null) as string | null,
-            purchaseDate: (row.purchase_date ||
-              row.purchaseDate ||
-              mockFallback?.purchaseDate) as string | undefined,
-            purchaseCost:
-              Number(row.purchase_cost || row.purchaseCost || mockFallback?.purchaseCost) || 2500,
-            orderNumber: orderNum,
-            order_number: orderNum,
-          };
-        });
-      }
-    } catch (err) {
-      console.warn('Supabase error in getCatalogData, falling back to mockStore:', err);
+    if (!warehousesRes.error && warehousesRes.data && warehousesRes.data.length > 0) {
+      warehousesList = warehousesRes.data;
     }
+    if (!categoriesRes.error && categoriesRes.data && categoriesRes.data.length > 0) {
+      categoriesList = (
+        categoriesRes.data as Array<{ id: string; name: string; slug: string; icon: string | null }>
+      ).filter((c) => !isLegacyEnglishCategory(c));
+    }
+    if (!assetsRes.error && assetsRes.data && assetsRes.data.length > 0) {
+      const warehouseMap = new Map(warehousesList.map((w) => [w.id, w]));
+      const categoryMap = new Map(categoriesList.map((c) => [c.id, c]));
+      const categoryNameMap = new Map(categoriesList.map((c) => [c.name, c]));
+      const mockAssetMap = new Map(getMockAssets(orgId).map((a) => [a.qrCode, a]));
+
+      allAssets = (assetsRes.data as Record<string, unknown>[]).map((row) => {
+        const qr = (row.qr_code || row.qrCode || '') as string;
+        const mockFallback = mockAssetMap.get(qr);
+
+        const whId = (row.current_warehouse_id ||
+          row.warehouse_id ||
+          row.currentWarehouseId ||
+          mockFallback?.currentWarehouseId ||
+          mockFallback?.warehouseId ||
+          '') as string;
+        const wh = warehouseMap.get(whId);
+
+        const catId = (row.category_id || row.categoryId || mockFallback?.categoryId || '') as string;
+        const catName = (row.category_name || row.categoryName || row.category || '') as string;
+        const cat = categoryMap.get(catId) || (catName ? categoryNameMap.get(catName) : undefined);
+
+        const worker = (row.current_assigned_worker ||
+          row.currentAssignedWorker ||
+          mockFallback?.currentAssignedWorker ||
+          null) as string | null;
+
+        const toolName = (row.tool_name ||
+          row.toolName ||
+          row.name ||
+          mockFallback?.toolName ||
+          'כלי עבודה') as string;
+
+        const brand = (row.brand || mockFallback?.brand || 'Zatout') as string;
+        const orderNum = (row.order_number ||
+          row.orderNumber ||
+          mockFallback?.orderNumber ||
+          null) as string | null;
+
+        const resolvedCatName = cat?.name || catName || mockFallback?.categoryName || 'ציוד כללי';
+
+        return {
+          id: (row.id || mockFallback?.id || '') as string,
+          qrCode: qr,
+          qr_code: qr,
+          status: (row.status || mockFallback?.status || 'available') as AssetStatus,
+          condition: (row.condition || mockFallback?.condition || 'good') as
+            | 'excellent'
+            | 'good'
+            | 'needs_repair'
+            | 'retired',
+          currentAssignedWorker: worker,
+          current_assigned_worker: worker,
+          warehouseId: whId,
+          currentWarehouseId: whId,
+          current_warehouse_id: whId,
+          warehouseName:
+            wh?.name || mockFallback?.warehouseName || (row.warehouse_name as string) || 'מחסן ראשי',
+          warehouse_name:
+            wh?.name || mockFallback?.warehouseName || (row.warehouse_name as string) || 'מחסן ראשי',
+          warehouseCode:
+            wh?.code || mockFallback?.warehouseCode || (row.warehouse_code as string) || 'WH',
+          warehouse_code:
+            wh?.code || mockFallback?.warehouseCode || (row.warehouse_code as string) || 'WH',
+          categoryId: cat?.id || catId,
+          category_id: cat?.id || catId,
+          categoryName: resolvedCatName,
+          category_name: resolvedCatName,
+          category: resolvedCatName,
+          toolName,
+          tool_name: toolName,
+          brand,
+          modelNumber: (row.model_number ||
+            row.modelNumber ||
+            mockFallback?.modelNumber ||
+            null) as string | null,
+          model_number: (row.model_number ||
+            row.modelNumber ||
+            mockFallback?.modelNumber ||
+            null) as string | null,
+          purchaseDate: (row.purchase_date ||
+            row.purchaseDate ||
+            mockFallback?.purchaseDate) as string | undefined,
+          purchaseCost:
+            Number(row.purchase_cost || row.purchaseCost || mockFallback?.purchaseCost) || 2500,
+          orderNumber: orderNum,
+          order_number: orderNum,
+        };
+      });
+    }
+  } catch (err) {
+    console.warn('Supabase error in getCatalogData, falling back to mockStore:', err);
+    const data = getMockCatalogData(warehouseId, orgId);
+    catalogCache.set(cacheKey, { data, expiresAt: Date.now() + CATALOG_CACHE_TTL_MS });
+    return data;
   }
 
-  // Fallback to mockStore if empty
+  // Fallback to mockStore scoped specifically to orgId if empty from Supabase
   if (warehousesList.length === 0) {
-    warehousesList = getMockWarehouses(orgId).map((w) => ({ id: w.id, name: w.name, code: w.code }));
+    warehousesList = getMockWarehouses(false, orgId).map((w) => ({ id: w.id, name: w.name, code: w.code }));
   }
   if (categoriesList.length === 0) {
     categoriesList = getMockCategories(orgId)
@@ -546,38 +539,6 @@ export async function getCatalogData(
         slug: c.slug,
         icon: c.icon ?? null,
       }));
-  }
-  if (allAssets.length === 0) {
-    allAssets = getMockAssets(orgId).map((a) => ({
-      id: a.id,
-      qrCode: a.qrCode || a.qr_code || '',
-      qr_code: a.qrCode || a.qr_code || '',
-      status: a.status,
-      condition: a.condition,
-      currentAssignedWorker: a.currentAssignedWorker || a.current_assigned_worker || null,
-      current_assigned_worker: a.currentAssignedWorker || a.current_assigned_worker || null,
-      warehouseId: a.currentWarehouseId || a.current_warehouse_id || a.warehouseId,
-      currentWarehouseId: a.currentWarehouseId || a.current_warehouse_id || a.warehouseId,
-      current_warehouse_id: a.currentWarehouseId || a.current_warehouse_id || a.warehouseId,
-      warehouseName: a.warehouseName || a.warehouse_name || 'מחסן ראשי',
-      warehouse_name: a.warehouseName || a.warehouse_name || 'מחסן ראשי',
-      warehouseCode: a.warehouseCode || a.warehouse_code || 'WH',
-      warehouse_code: a.warehouseCode || a.warehouse_code || 'WH',
-      categoryId: a.categoryId || a.category_id || '',
-      category_id: a.categoryId || a.category_id || '',
-      categoryName: a.category || a.categoryName || a.category_name || '',
-      category_name: a.category || a.categoryName || a.category_name || '',
-      category: a.category || a.categoryName || a.category_name || '',
-      toolName: a.toolName || a.tool_name || 'כלי עבודה',
-      tool_name: a.toolName || a.tool_name || 'כלי עבודה',
-      brand: a.brand || 'Zatout',
-      modelNumber: a.modelNumber || a.model_number || null,
-      model_number: a.modelNumber || a.model_number || null,
-      purchaseDate: a.purchaseDate,
-      purchaseCost: a.purchaseCost,
-      orderNumber: a.orderNumber || a.order_number || null,
-      order_number: a.orderNumber || a.order_number || null,
-    }));
   }
 
   // 2. Compute toolCount for EACH category:
@@ -598,15 +559,10 @@ export async function getCatalogData(
     };
   });
 
-  // Filter returned assets by warehouseId if specified
+  // 3. Filter assets by selected warehouse if requested
   const filteredAssets =
     warehouseId && warehouseId !== 'all'
-      ? allAssets.filter(
-          (a) =>
-            a.warehouseId === warehouseId ||
-            a.currentWarehouseId === warehouseId ||
-            a.current_warehouse_id === warehouseId
-        )
+      ? allAssets.filter((a) => a.warehouseId === warehouseId || a.currentWarehouseId === warehouseId)
       : allAssets;
 
   const result: CatalogDataPayload = {
@@ -637,7 +593,7 @@ export async function getNextAvailableTagNumberAction(
   let maxNumber = 0;
 
   // 1. Check mock store assets (contains all 1016 imported Excel assets, max 1098)
-  const mockNext = getNextAvailableMockTagNumber(cleanPrefix, orgId);
+  const mockNext = getNextAvailableMockTagNumber(cleanPrefix, orgId ?? undefined);
   if (mockNext > 1) {
     maxNumber = Math.max(maxNumber, mockNext - 1);
   }
