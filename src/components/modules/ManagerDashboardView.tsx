@@ -119,6 +119,14 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
     return data.facilityDistribution;
   }, [warehousesList, data.facilityDistribution]);
 
+  // Derived effective warehouse ID for form dropdown
+  const effectiveAssignedWarehouseId = useMemo(() => {
+    if (availableFacilities.some((f) => f.warehouseId === newAssignedWarehouseId)) {
+      return newAssignedWarehouseId;
+    }
+    return availableFacilities[0]?.warehouseId || newAssignedWarehouseId;
+  }, [availableFacilities, newAssignedWarehouseId]);
+
   // Load storekeepers list
   const loadStorekeepers = useCallback(async () => {
     setIsLoadingStorekeepers(true);
@@ -313,7 +321,7 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
         pinCode: newPinCode,
         role: newUserRole,
         assignedWarehouseId:
-          newUserRole === 'chief_operations' ? undefined : newAssignedWarehouseId,
+          newUserRole === 'chief_operations' ? undefined : effectiveAssignedWarehouseId,
         email: newEmail,
         phone: newPhone,
       });
@@ -1484,7 +1492,7 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                         </div>
                       ) : (
                         <select
-                          value={newAssignedWarehouseId}
+                          value={effectiveAssignedWarehouseId}
                           onChange={(e) => setNewAssignedWarehouseId(e.target.value)}
                           className="w-full bg-white border border-purple-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-bold focus:border-purple-600 focus:outline-none"
                         >

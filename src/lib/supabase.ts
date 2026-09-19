@@ -31,7 +31,10 @@ export const isSupabaseConfigured = (): boolean => {
     url &&
     key &&
     url !== 'https://placeholder.supabase.co' &&
-    key !== 'placeholder-anon-key'
+    key !== 'placeholder-anon-key' &&
+    url !== 'your-supabase-url-here' &&
+    key !== 'your-supabase-anon-key-here' &&
+    key !== 'your-service-role-key-here'
   );
 };
 
@@ -46,12 +49,10 @@ export const supabase: SupabaseClient = createClient(
  * Bypasses RLS on server actions for authoritative user registration and management.
  */
 let cachedServerClient: SupabaseClient | null = null;
+let cachedServerUrl = '';
+let cachedServerKey = '';
 
 export const getSupabaseServerClient = (): SupabaseClient => {
-  if (cachedServerClient) {
-    return cachedServerClient;
-  }
-
   const url =
     process.env.NEXT_PUBLIC_SUPABASE_URL ||
     process.env.SUPABASE_URL ||
@@ -62,6 +63,12 @@ export const getSupabaseServerClient = (): SupabaseClient => {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
     'placeholder-anon-key';
 
+  if (cachedServerClient && cachedServerKey === key && cachedServerUrl === url) {
+    return cachedServerClient;
+  }
+
+  cachedServerUrl = url;
+  cachedServerKey = key;
   cachedServerClient = createClient(url, key, {
     auth: {
       persistSession: false,
