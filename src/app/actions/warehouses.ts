@@ -311,9 +311,11 @@ export async function updateWarehouseAction(
   if (input.address !== undefined) patch.address = input.address.trim() || null;
   if (input.isActive !== undefined) patch.isActive = input.isActive;
 
+  const orgId = await resolveActiveOrganizationId();
+
   if (isSupabaseConfigured()) {
     try {
-      await supabase
+      let query = supabase
         .from('warehouses')
         .update({
           name: patch.name,
@@ -323,6 +325,12 @@ export async function updateWarehouseAction(
           ...(patch.isActive !== undefined ? { is_active: patch.isActive } : {}),
         })
         .eq('id', id);
+
+      if (orgId) {
+        query = query.eq('organization_id', orgId);
+      }
+
+      await query;
     } catch (err) {
       console.warn('[updateWarehouseAction] Supabase update error:', err);
     }
@@ -349,24 +357,34 @@ export async function deleteWarehouseAction(targetId: string): Promise<Warehouse
     return { success: false, error: 'מזהה מתקן לא תקין.' };
   }
 
+  const orgId = await resolveActiveOrganizationId();
+
   // 1. If Supabase is configured:
   if (isSupabaseConfigured()) {
     try {
-      // Query warehouse by matching either id = targetId OR code = targetId
-      let { data: wh, error: findError } = await supabase
+      // Query warehouse by matching either id = targetId OR code = targetId within active org
+      let whQuery = supabase
         .from('warehouses')
-        .select('id, name, code')
-        .or(`id.eq.${cleanTarget},code.eq.${cleanTarget}`)
-        .maybeSingle();
+        .select('id, name, code, organization_id')
+        .or(`id.eq.${cleanTarget},code.eq.${cleanTarget}`);
+
+      if (orgId) {
+        whQuery = whQuery.eq('organization_id', orgId);
+      }
+
+      let { data: wh, error: findError } = await whQuery.maybeSingle();
 
       // If .or failed (e.g. UUID format constraint when cleanTarget is a code), fallback to code match
       if (findError) {
         console.warn('[deleteWarehouseAction] Supabase .or search warning:', findError.message);
-        const { data: whByCode, error: codeError } = await supabase
+        let codeQuery = supabase
           .from('warehouses')
-          .select('id, name, code')
-          .eq('code', cleanTarget)
-          .maybeSingle();
+          .select('id, name, code, organization_id')
+          .eq('code', cleanTarget);
+        if (orgId) {
+          codeQuery = codeQuery.eq('organization_id', orgId);
+        }
+        const { data: whByCode, error: codeError } = await codeQuery.maybeSingle();
         if (!codeError && whByCode) {
           wh = whByCode;
           findError = null;
@@ -393,10 +411,16 @@ export async function deleteWarehouseAction(targetId: string): Promise<Warehouse
         }
 
         // If empty: delete the record
-        const { error: deleteError } = await supabase
+        let deleteQuery = supabase
           .from('warehouses')
           .delete()
           .eq('id', wh.id);
+
+        if (orgId) {
+          deleteQuery = deleteQuery.eq('organization_id', orgId);
+        }
+
+        const { error: deleteError } = await deleteQuery;
 
         if (deleteError) {
           console.error('[deleteWarehouseAction] Supabase delete error:', deleteError.message);
@@ -572,32 +596,31 @@ export async function getWarehouseToolsAction(
   try {
       // Find matching warehouse by id or code to ensure robust resolution
       let targetWhId = cleanWhId;
-      let whLookup = supabase
+      const whLookup = supabase
         .from('warehouses')
         .select('id, code')
-        .or(`id.eq.${cleanWhId},code.eq.${cleanWhId}`);
-
-      let astQuery = supabase
-        .from('assets')
-        .select(
-          'id, name, qr_code, serial_number, category_name, status, current_assigned_worker, order_number'
-        )
-        .eq('current_warehouse_id', targetWhId)
-        .limit(5000);
-
-      let catQuery = supabase
-        .from('categories')
-        .select('id, name');
-
-      whLookup = whLookup.eq('organization_id', orgId);
-      astQuery = astQuery.eq('organization_id', orgId);
-      catQuery = catQuery.eq('organization_id', orgId);
+        .or(`id.eq.${cleanWhId},code.eq.${cleanWhId}`)
+        .eq('organization_id', orgId);
 
       const { data: wh } = await whLookup.maybeSingle();
 
       if (wh?.id) {
         targetWhId = wh.id;
       }
+
+      const astQuery = supabase
+        .from('assets')
+        .select(
+          'id, name, qr_code, serial_number, category_name, status, current_assigned_worker, order_number'
+        )
+        .eq('current_warehouse_id', targetWhId)
+        .eq('organization_id', orgId)
+        .limit(5000);
+
+      const catQuery = supabase
+        .from('categories')
+        .select('id, name')
+        .eq('organization_id', orgId);
 
       const [assetsRes, categoriesRes] = await Promise.all([astQuery, catQuery]);
 

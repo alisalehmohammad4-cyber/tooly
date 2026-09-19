@@ -74,7 +74,7 @@ export type BulkCustodyActionResult =
     }
   | { success: false; error: string };
 
-import { cookies } from 'next/headers';
+import { getServerSessionOrgId } from '@/lib/auth/session';
 import {
   getMockAssetByQr,
   mutateMockAsset,
@@ -84,22 +84,8 @@ import {
 } from '@/lib/mockStore';
 
 export async function resolveActiveOrganizationId(providedOrgId?: string): Promise<string> {
-  if (providedOrgId && providedOrgId.trim()) {
-    return providedOrgId.trim();
-  }
-  try {
-    const cookieStore = await cookies();
-    const raw = cookieStore.get('tooly_active_user')?.value;
-    if (raw) {
-      const parsed = JSON.parse(decodeURIComponent(raw));
-      if (parsed?.organizationId) {
-        return parsed.organizationId;
-      }
-    }
-  } catch {
-    // Fallback if cookies() is inaccessible
-  }
-  return DEFAULT_ORGANIZATION.id;
+  const resolved = await getServerSessionOrgId(providedOrgId);
+  return resolved || DEFAULT_ORGANIZATION.id;
 }
 
 // In-memory fallback dataset synchronized with unified mockStore
@@ -609,6 +595,7 @@ export async function bulkCheckoutAssetAction(
           gps_lat: gps?.lat ?? null,
           gps_lng: gps?.lng ?? null,
           notes: notes || `Bulk checkout to ${workerName}`,
+          organization_id: orgId,
         });
 
         if (ledgerErr) {
@@ -791,16 +778,31 @@ export async function checkinAssetAction(
   const isDamaged = damageReport?.isDamaged || condition === 'needs_repair' || condition === 'retired';
   const newStatus: ScannedAssetDetails['status'] = isDamaged ? 'maintenance' : 'available';
 
+  const orgId = await resolveActiveOrganizationId();
+
   if (isSupabaseConfigured()) {
     try {
       const { data: currentAsset, error: fetchErr } = await supabase
         .from('assets')
-        .select('id, version')
+        .select('id, version, organization_id')
         .eq('id', assetId)
-        .single();
+        .maybeSingle();
 
       if (fetchErr || !currentAsset) {
         return { success: false, error: 'Asset not found in database.' };
+      }
+
+      const itemOrg = (currentAsset.organization_id as string) || DEFAULT_ORGANIZATION.id;
+      const isOwner =
+        orgId === DEFAULT_ORGANIZATION.id
+          ? !currentAsset.organization_id || itemOrg === orgId
+          : itemOrg === orgId;
+
+      if (!isOwner) {
+        return {
+          success: false,
+          error: 'לא ניתן לקלוט ציוד שאינו שייך לארגון הפעיל',
+        };
       }
 
       const nextVersion = (currentAsset.version || 1) + 1;
@@ -824,6 +826,7 @@ export async function checkinAssetAction(
         asset_id: assetId,
         action: 'CHECKIN',
         performed_by: 'Field Agent',
+        organization_id: orgId,
         notes: notes || `Field check-in (Condition: ${condition})`,
         damage_report: damageReport || null,
         gps_lat: gps?.lat ?? null,

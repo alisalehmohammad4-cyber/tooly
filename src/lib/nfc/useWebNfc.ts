@@ -203,7 +203,7 @@ export function useWebNfc(): UseWebNfcReturn {
 
         // Universal NDEF URL Deep-Link: iPhone XS-16 natively detects this in background
         const origin = window.location.origin;
-        const slug = (orgSlug || 'zatout').trim();
+        const slug = (orgSlug || 'tooly').trim();
         const deepLinkUrl = `${origin}/?org=${encodeURIComponent(slug)}&tool=${encodeURIComponent(cleanCode)}`;
 
         await ndef.write({

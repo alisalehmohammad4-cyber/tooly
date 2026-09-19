@@ -5,10 +5,7 @@ import {
   getMockPlantManagerAnalytics,
   getMockStorekeeperOperations,
   getMockOrganizationById,
-  DEFAULT_ORGANIZATION,
 } from '@/lib/mockStore';
-
-const DEFAULT_ORGANIZATION_ID = DEFAULT_ORGANIZATION.id;
 
 export interface FleetUtilization {
   totalAssets: number;
@@ -211,7 +208,7 @@ export async function getPlantManagerAnalytics(
   }
 
   // Fetch active organization details (name, serial_prefix, currency)
-  let organizationName = orgId === DEFAULT_ORGANIZATION_ID ? 'Sami Zatout Production' : 'חברה';
+  let organizationName = 'ארגון פעיל';
   let organizationPrefix = 'TOOL';
   let currency = 'ILS';
 
@@ -228,13 +225,13 @@ export async function getPlantManagerAnalytics(
         if (orgData.serial_prefix) organizationPrefix = orgData.serial_prefix;
         if (orgData.currency) currency = orgData.currency;
       }
-    } catch (e) {
-      console.warn('[getPlantManagerAnalytics] Failed to fetch organization info:', e);
+    } catch (err) {
+      console.warn('Error fetching organization info from Supabase:', err);
     }
   } else {
     const mockOrg = getMockOrganizationById(orgId);
     if (mockOrg) {
-      organizationName = mockOrg.name;
+      organizationName = mockOrg.name || organizationName;
       organizationPrefix = mockOrg.serialPrefix || 'TOOL';
       currency = mockOrg.defaultCurrency || 'ILS';
     }

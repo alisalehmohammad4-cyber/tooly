@@ -18,8 +18,6 @@ import {
   DEFAULT_ORGANIZATION,
 } from '@/lib/mockStore';
 
-const DEFAULT_ORGANIZATION_ID = DEFAULT_ORGANIZATION.id;
-
 export interface OnboardFormData {
   warehouses: Array<{ id: string; name: string; code: string }>;
   categories: Array<{ id: string; name: string; slug: string; icon: string | null }>;
@@ -39,12 +37,14 @@ export type OnboardAssetResult =
  */
 export async function getOnboardFormData(organizationId?: string): Promise<OnboardFormData> {
   const orgId = await resolveActiveOrganizationId(organizationId);
-  const targetOrgId = orgId || DEFAULT_ORGANIZATION_ID;
+  if (!orgId) {
+    return { warehouses: [], categories: [] };
+  }
 
   if (!isSupabaseConfigured()) {
     return {
-      warehouses: getMockWarehouses(targetOrgId).map((w) => ({ id: w.id, name: w.name, code: w.code })),
-      categories: getMockCategories(targetOrgId)
+      warehouses: getMockWarehouses(orgId).map((w) => ({ id: w.id, name: w.name, code: w.code })),
+      categories: getMockCategories(orgId)
         .filter((c) => !isLegacyEnglishCategory(c))
         .map((c) => ({
           id: c.id,
@@ -480,7 +480,7 @@ export async function getCatalogData(
           mockFallback?.toolName ||
           'כלי עבודה') as string;
 
-        const brand = (row.brand || mockFallback?.brand || 'Zatout') as string;
+        const brand = (row.brand || mockFallback?.brand || 'כללי') as string;
         const orderNum = (row.order_number ||
           row.orderNumber ||
           mockFallback?.orderNumber ||

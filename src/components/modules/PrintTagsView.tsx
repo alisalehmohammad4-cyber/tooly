@@ -35,7 +35,7 @@ export default function PrintTagsView() {
   const { currentOrganization } = useAuth();
 
   const orgId = currentOrganization?.id || 'default';
-  const orgSlug = currentOrganization?.slug || 'zatout';
+  const orgSlug = currentOrganization?.slug || 'tooly';
 
   // Mode selection: Tab A (Batch) vs Tab B (Reprint)
   const [activeTab, setActiveTab] = useState<PrintMode>('batch');

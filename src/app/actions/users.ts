@@ -432,7 +432,7 @@ export async function createStorekeeperAction(
   const assignedWarehouse = isChief ? null : (assignedWarehouseId || null);
 
   const userId = randomUUID();
-  const userEmail = email?.trim() || `${cleanUsername}@zatout.co.il`;
+  const userEmail = email?.trim() || `${cleanUsername}@company.local`;
   const userPhone = phone?.trim() || null;
   const userRole = isChief ? 'chief_operations' : role;
 
