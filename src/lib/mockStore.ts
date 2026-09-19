@@ -42885,6 +42885,7 @@ export function getMockPlantManagerAnalytics(organizationId?: string): PlantMana
   });
 
   return {
+    organizationName: (organizationId ? getMockOrganizationById(organizationId)?.name : DEFAULT_ORGANIZATION.name) || 'חברה',
     totalFleetValue,
     depreciation: {
       totalAcquisitionCost: totalFleetValue,

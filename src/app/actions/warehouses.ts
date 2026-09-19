@@ -9,10 +9,7 @@ import {
   deleteMockWarehouse,
   type WarehouseAdminItem,
   isLegacyEnglishCategory,
-  DEFAULT_ORGANIZATION,
 } from '@/lib/mockStore';
-
-const DEFAULT_ORGANIZATION_ID = DEFAULT_ORGANIZATION.id;
 
 export interface WarehouseActionResult {
   success: boolean;
@@ -119,7 +116,7 @@ export async function getWarehousesAdminAction(
       }
 
       if (!firstAssetsRes.error && firstAssetsRes.data) {
-        let allAssets = [...firstAssetsRes.data];
+        const allAssets = [...firstAssetsRes.data];
         if (firstAssetsRes.data.length === 1000) {
           let page = 1;
           const pageSize = 1000;

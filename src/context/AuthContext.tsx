@@ -466,7 +466,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const isAdmin = isGeneralManager;
     const canSwitchDepots = isGeneralManager || isChiefOperations;
     const currentOrganization: Organization = user.organizationId
-      ? getMockOrganizationById(user.organizationId) || { ...DEFAULT_ORGANIZATION, id: user.organizationId }
+      ? getMockOrganizationById(user.organizationId) || {
+          id: user.organizationId,
+          name: user.organizationId === DEFAULT_ORGANIZATION.id ? DEFAULT_ORGANIZATION.name : 'ארגון פעיל',
+          slug: user.organizationId,
+          serialPrefix: 'TOOL-',
+          defaultCurrency: 'ILS',
+        }
       : DEFAULT_ORGANIZATION;
 
     return {

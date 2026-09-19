@@ -4,7 +4,7 @@ import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import {
   getMockPlantManagerAnalytics,
   getMockStorekeeperOperations,
-  getMockWarehouses,
+  getMockOrganizationById,
   DEFAULT_ORGANIZATION,
 } from '@/lib/mockStore';
 
@@ -66,7 +66,15 @@ export interface DamageAttribution {
   monthlyIncidentCount: number;
 }
 
+export interface CategoryDistributionItem {
+  name: string;
+  count: number;
+}
+
 export interface PlantManagerAnalyticsPayload {
+  organizationName: string;
+  organizationPrefix?: string;
+  currency?: string;
   totalFleetValue: number;
   depreciation: DepreciationAnalytics;
   utilization: FleetUtilization;
@@ -75,6 +83,7 @@ export interface PlantManagerAnalyticsPayload {
   damageAttribution: DamageAttribution;
   facilityDistribution: FacilityAssetDistribution[];
   highRiskOverdueAssets: HighRiskOverdueAsset[];
+  categoryBreakdown?: CategoryDistributionItem[];
 }
 
 export interface StorekeeperReturnDue {
@@ -121,8 +130,7 @@ export interface StorekeeperOperationsPayload {
   checkedOutCount: number;
 }
 
-// Fallback dataset for instant preview and offline development
-const getFallbackWarehouses = (orgId?: string) => getMockWarehouses(false, orgId);
+
 
 // Fast in-memory cache for executive analytics and warehouse operations (30-second TTL)
 interface CacheEntry<T> {
@@ -139,6 +147,9 @@ async function resolveActiveOrganizationId(providedOrgId?: string): Promise<stri
 }
 
 const EMPTY_PLANT_MANAGER_ANALYTICS: PlantManagerAnalyticsPayload = {
+  organizationName: 'חברה',
+  organizationPrefix: 'TOOL',
+  currency: 'ILS',
   totalFleetValue: 0,
   depreciation: {
     totalAcquisitionCost: 0,
@@ -169,6 +180,7 @@ const EMPTY_PLANT_MANAGER_ANALYTICS: PlantManagerAnalyticsPayload = {
   },
   facilityDistribution: [],
   highRiskOverdueAssets: [],
+  categoryBreakdown: [],
 };
 
 const EMPTY_STOREKEEPER_PAYLOAD: StorekeeperOperationsPayload = {
@@ -198,26 +210,61 @@ export async function getPlantManagerAnalytics(
     return cached.data;
   }
 
+  // Fetch active organization details (name, serial_prefix, currency)
+  let organizationName = orgId === DEFAULT_ORGANIZATION_ID ? 'Sami Zatout Production' : 'חברה';
+  let organizationPrefix = 'TOOL';
+  let currency = 'ILS';
+
+  if (isSupabaseConfigured()) {
+    try {
+      const { data: orgData } = await supabase
+        .from('organizations')
+        .select('name, serial_prefix, currency')
+        .eq('id', orgId)
+        .maybeSingle();
+
+      if (orgData) {
+        if (orgData.name) organizationName = orgData.name;
+        if (orgData.serial_prefix) organizationPrefix = orgData.serial_prefix;
+        if (orgData.currency) currency = orgData.currency;
+      }
+    } catch (e) {
+      console.warn('[getPlantManagerAnalytics] Failed to fetch organization info:', e);
+    }
+  } else {
+    const mockOrg = getMockOrganizationById(orgId);
+    if (mockOrg) {
+      organizationName = mockOrg.name;
+      organizationPrefix = mockOrg.serialPrefix || 'TOOL';
+      currency = mockOrg.defaultCurrency || 'ILS';
+    }
+  }
+
   if (!isSupabaseConfigured()) {
-    const fallbackPayload = getMockPlantManagerAnalytics(orgId);
+    const fallbackPayload: PlantManagerAnalyticsPayload = {
+      ...getMockPlantManagerAnalytics(orgId),
+      organizationName,
+      organizationPrefix,
+      currency,
+    };
     analyticsCache.set(cacheKey, { data: fallbackPayload, expiresAt: Date.now() + 30000 });
     return fallbackPayload;
   }
 
   try {
-    let astQuery = supabase
+    const astQuery = supabase
       .from('assets')
       .select('*, tool_models(name, brand, model_number, category_id), warehouses(name, code)')
       .eq('organization_id', orgId);
 
-    let whQuery = supabase
+    const whQuery = supabase
       .from('warehouses')
       .select('*')
       .eq('is_active', true)
       .eq('organization_id', orgId)
       .order('name', { ascending: true });
 
-    let ledgerQuery = supabase
+    const ledgerQuery = supabase
       .from('custody_ledger')
       .select('*')
       .eq('organization_id', orgId)
@@ -259,6 +306,7 @@ export async function getPlantManagerAnalytics(
     let lockedCount = 0;
 
     const overdueList: HighRiskOverdueAsset[] = [];
+    const catMap: Record<string, number> = {};
 
     rawAssets.forEach((row: Record<string, unknown>) => {
       const cost = typeof row.purchase_cost === 'number' ? row.purchase_cost : 2500;
@@ -269,6 +317,9 @@ export async function getPlantManagerAnalytics(
       if (row.status === 'maintenance' || row.status === 'needs_repair') maintenance++;
 
       if (row.is_locked) lockedCount++;
+
+      const cat = (row.category_name as string) || (row.category as string) || 'כללי';
+      catMap[cat] = (catMap[cat] || 0) + 1;
 
       if (row.safety_inspection_due) {
         const dueTime = new Date(row.safety_inspection_due as string).getTime();
@@ -301,6 +352,10 @@ export async function getPlantManagerAnalytics(
         }
       }
     });
+
+    const categoryBreakdown: CategoryDistributionItem[] = Object.entries(catMap)
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
 
     // Compute monthly damage costs from ledger
     let workerTotal = 0;
@@ -380,6 +435,9 @@ export async function getPlantManagerAnalytics(
     const depreciationRatePct = totalFleetValue > 0 ? 20 : 0;
 
     const payload: PlantManagerAnalyticsPayload = {
+      organizationName,
+      organizationPrefix,
+      currency,
       totalFleetValue,
       depreciation: {
         totalAcquisitionCost: totalFleetValue,
@@ -410,18 +468,20 @@ export async function getPlantManagerAnalytics(
       },
       facilityDistribution,
       highRiskOverdueAssets: overdueList.sort((a, b) => b.daysOverdue - a.daysOverdue),
+      categoryBreakdown,
     };
 
     analyticsCache.set(cacheKey, { data: payload, expiresAt: Date.now() + 30000 });
     return payload;
   } catch (err) {
     console.warn('[getPlantManagerAnalytics] Supabase query error:', err);
+    return {
+      ...EMPTY_PLANT_MANAGER_ANALYTICS,
+      organizationName,
+      organizationPrefix,
+      currency,
+    };
   }
-
-  // Fallback unified dataset for offline preview
-  const fallbackPayload = getMockPlantManagerAnalytics(orgId);
-  analyticsCache.set(cacheKey, { data: fallbackPayload, expiresAt: Date.now() + 30000 });
-  return fallbackPayload;
 }
 
 /**
@@ -563,10 +623,6 @@ export async function getStorekeeperOperations(
     return opsPayload;
   } catch (err) {
     console.warn('[getStorekeeperOperations] Supabase query error:', err);
+    return EMPTY_STOREKEEPER_PAYLOAD;
   }
-
-  // Fallback operational data for storekeeper derived strictly from unified store
-  const fallbackStorekeeper = getMockStorekeeperOperations(warehouseId, orgId);
-  storekeeperOpsCache.set(cacheKey, { data: fallbackStorekeeper, expiresAt: Date.now() + 30000 });
-  return fallbackStorekeeper;
 }

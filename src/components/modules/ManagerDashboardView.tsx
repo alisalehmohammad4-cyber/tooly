@@ -68,7 +68,10 @@ interface ManagerDashboardViewProps {
 }
 
 export default function ManagerDashboardView({ data }: ManagerDashboardViewProps) {
-  const { currentOrganization } = useAuth();
+  const { currentOrganization, user } = useAuth();
+
+  const orgDisplayName = data.organizationName || currentOrganization?.name || 'ארגון פעיל';
+  const totalAssetsCount = data.utilization?.totalAssets ?? 0;
 
   // Main Tab Navigation: Warehouses vs Storekeepers vs Executive BI Analytics
   const [activeTab, setActiveTab] = useState<'warehouses' | 'users' | 'analytics'>('warehouses');
@@ -508,7 +511,7 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
       <div className="hidden print:block p-6 border-b-2 border-slate-900 mb-6 text-center" dir="rtl">
         <div className="flex items-center justify-between border-b pb-4 mb-4">
           <div className="text-right">
-            <h1 className="text-2xl font-black tracking-tight text-slate-900">Tooly Enterprise</h1>
+            <h1 className="text-2xl font-black tracking-tight text-slate-900">{orgDisplayName} - Tooly</h1>
             <p className="text-xs text-slate-600 font-bold">דוח מאזן ציוד, שווי נכסים ופחת תקופתי לחשבונאות</p>
           </div>
           <div className="text-left text-xs text-slate-500 font-mono">
@@ -517,10 +520,10 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
           </div>
         </div>
         <div className="grid grid-cols-4 gap-3 text-center my-4 text-xs font-bold bg-slate-50 p-3 rounded-xl border border-slate-300">
-          <div>שווי רכישה כולל: ₪{data.totalFleetValue.toLocaleString()}</div>
-          <div>פחת מצטבר: ₪{(data.depreciation?.accumulatedDepreciation ?? Math.round(data.totalFleetValue * 0.3)).toLocaleString()}</div>
-          <div>שווי ספרים נקי: ₪{(data.depreciation?.currentBookValue ?? Math.round(data.totalFleetValue * 0.7)).toLocaleString()}</div>
-          <div>סה&quot;כ כלים: {data.utilization.totalAssets}</div>
+          <div>שווי רכישה כולל: ₪{(data.totalFleetValue ?? 0).toLocaleString()}</div>
+          <div>פחת מצטבר: ₪{(data.depreciation?.accumulatedDepreciation ?? 0).toLocaleString()}</div>
+          <div>שווי ספרים נקי: ₪{(data.depreciation?.currentBookValue ?? 0).toLocaleString()}</div>
+          <div>סה&quot;כ כלים: {totalAssetsCount}</div>
         </div>
       </div>
 
@@ -649,7 +652,7 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                     </span>
                   </div>
                   <p className="text-xs sm:text-sm font-semibold text-slate-500 mt-0.5">
-                    Sami Zatout Production | ניתוח חזותי בזמן אמת של {data.utilization.totalAssets > 0 ? data.utilization.totalAssets.toLocaleString() : '1,016'} נכסי החברה
+                    {orgDisplayName} | {totalAssetsCount.toLocaleString()} פריטי ציוד
                   </p>
                 </div>
               </div>
@@ -674,11 +677,11 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                 </div>
                 <div>
                   <div className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
-                    ₪{data.totalFleetValue > 0 ? data.totalFleetValue.toLocaleString() : '2,540,000'}
+                    ₪{(data.totalFleetValue ?? 0).toLocaleString()}
                   </div>
                   <div className="mt-2.5 flex items-center gap-1.5 text-xs font-black text-emerald-800 bg-emerald-50/80 border border-emerald-200/60 px-2.5 py-1 rounded-lg">
                     <span>ערך נקי בספרים:</span>
-                    <span className="font-mono font-bold">₪{(data.depreciation?.currentBookValue ?? 2198624).toLocaleString()}</span>
+                    <span className="font-mono font-bold">₪{(data.depreciation?.currentBookValue ?? 0).toLocaleString()}</span>
                   </div>
                 </div>
               </div>
@@ -695,10 +698,10 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                 </div>
                 <div>
                   <div className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
-                    {data.utilization.utilizationRate > 0 ? `${data.utilization.utilizationRate}%` : '79.9%'}
+                    {data.utilization?.utilizationRate ?? 0}%
                   </div>
                   <div className="mt-2.5 flex items-center gap-1.5 text-xs font-black text-blue-800 bg-blue-50/80 border border-blue-200/60 px-2.5 py-1 rounded-lg">
-                    <span>812 כלים פעילים בשטח מתוך 1,016</span>
+                    <span>{(data.utilization?.inUse ?? 0).toLocaleString()} כלים פעילים בשטח מתוך {totalAssetsCount.toLocaleString()}</span>
                   </div>
                 </div>
               </div>
@@ -715,10 +718,10 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                 </div>
                 <div>
                   <div className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
-                    {data.safetyCompliance.complianceRate > 0 ? `${data.safetyCompliance.complianceRate}%` : '97.8%'}
+                    {data.safetyCompliance?.complianceRate ?? 100}%
                   </div>
                   <div className="mt-2.5 flex items-center gap-1.5 text-xs font-black text-indigo-800 bg-indigo-50/80 border border-indigo-200/60 px-2.5 py-1 rounded-lg">
-                    <span>יחס ציוד תקין, 22 כלים בתהליך שיקום</span>
+                    <span>יחס ציוד תקין, {(data.utilization?.maintenance ?? 0).toLocaleString()} כלים בתהליך שיקום</span>
                   </div>
                 </div>
               </div>
@@ -735,7 +738,7 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                 </div>
                 <div>
                   <div className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
-                    ₪{(data.depreciation?.accumulatedDepreciation ?? 341376).toLocaleString()}
+                    ₪{(data.depreciation?.accumulatedDepreciation ?? 0).toLocaleString()}
                   </div>
                   <div className="mt-2.5 flex items-center gap-1.5 text-xs font-black text-amber-800 bg-amber-50/80 border border-amber-200/60 px-2.5 py-1 rounded-lg">
                     <span>פחת שנתי מבוקר לפי תקנות מס</span>
@@ -755,7 +758,7 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                       <span>מצב כשירות מבצעי של צי הכלים</span>
                     </h3>
                     <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">
-                      1,016 נכסים
+                      {totalAssetsCount.toLocaleString()} נכסים
                     </span>
                   </div>
                   <p className="text-xs text-slate-500 mt-1">
@@ -765,99 +768,126 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
 
                 <div className="flex flex-col sm:flex-row items-center justify-center gap-8 py-2">
                   {/* SVG Donut */}
-                  <div className="relative w-44 h-44 flex items-center justify-center shrink-0">
-                    <svg className="w-full h-full -rotate-90 origin-center" viewBox="0 0 170 170">
-                      {/* Background circle */}
-                      <circle
-                        cx="85"
-                        cy="85"
-                        r="65"
-                        className="stroke-slate-100"
-                        strokeWidth="18"
-                        fill="transparent"
-                      />
-                      {/* Segment 1: Active In-Use (79.9% -> stroke-dasharray 326.3 408.4) */}
-                      <circle
-                        cx="85"
-                        cy="85"
-                        r="65"
-                        stroke="#10b981"
-                        strokeWidth="18"
-                        strokeDasharray="326.32 408.4"
-                        strokeDashoffset="0"
-                        strokeLinecap="round"
-                        fill="transparent"
-                        className="transition-all duration-1000"
-                      />
-                      {/* Segment 2: Central Depot Available (18.3% -> stroke-dasharray 74.74 408.4) */}
-                      <circle
-                        cx="85"
-                        cy="85"
-                        r="65"
-                        stroke="#3b82f6"
-                        strokeWidth="18"
-                        strokeDasharray="74.74 408.4"
-                        strokeDashoffset="-328"
-                        strokeLinecap="round"
-                        fill="transparent"
-                        className="transition-all duration-1000"
-                      />
-                      {/* Segment 3: Maintenance In-Repair (2.2% -> stroke-dasharray 9 408.4) */}
-                      <circle
-                        cx="85"
-                        cy="85"
-                        r="65"
-                        stroke="#f43f5e"
-                        strokeWidth="18"
-                        strokeDasharray="9 408.4"
-                        strokeDashoffset="-403"
-                        strokeLinecap="round"
-                        fill="transparent"
-                        className="transition-all duration-1000"
-                      />
-                    </svg>
-                    {/* Centered Readout */}
-                    <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-                      <span className="text-2xl font-black text-slate-900 leading-none">97.8%</span>
-                      <span className="text-[10px] font-black text-slate-500 mt-1">כשיר לפעילות</span>
-                    </div>
-                  </div>
+                  {(() => {
+                    const inUseCount = data.utilization?.inUse ?? 0;
+                    const inWarehouseCount = data.utilization?.inWarehouse ?? 0;
+                    const maintenanceCount = data.utilization?.maintenance ?? 0;
+                    const T = totalAssetsCount;
 
-                  {/* Donut Legend */}
-                  <div className="space-y-3 w-full max-w-xs">
-                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-100">
-                      <div className="flex items-center gap-2">
-                        <span className="w-3 h-3 rounded-full bg-emerald-500 shrink-0" />
-                        <span className="text-xs font-bold text-slate-700">פעיל באתרי פרויקטים</span>
-                      </div>
-                      <div className="text-left">
-                        <span className="text-xs font-black text-slate-900 font-mono">812</span>
-                        <span className="text-[10px] text-slate-500 font-semibold mr-1">(79.9%)</span>
-                      </div>
-                    </div>
+                    const inUsePct = T > 0 ? inUseCount / T : 0;
+                    const inWarehousePct = T > 0 ? inWarehouseCount / T : 0;
+                    const maintenancePct = T > 0 ? maintenanceCount / T : 0;
 
-                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-100">
-                      <div className="flex items-center gap-2">
-                        <span className="w-3 h-3 rounded-full bg-blue-500 shrink-0" />
-                        <span className="text-xs font-bold text-slate-700">מלאי זמין במחסנים</span>
-                      </div>
-                      <div className="text-left">
-                        <span className="text-xs font-black text-slate-900 font-mono">182</span>
-                        <span className="text-[10px] text-slate-500 font-semibold mr-1">(18.3%)</span>
-                      </div>
-                    </div>
+                    const inUseDash = inUsePct * 408.4;
+                    const inWarehouseDash = inWarehousePct * 408.4;
+                    const maintenanceDash = maintenancePct * 408.4;
 
-                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-100">
-                      <div className="flex items-center gap-2">
-                        <span className="w-3 h-3 rounded-full bg-rose-500 shrink-0" />
-                        <span className="text-xs font-bold text-slate-700">בתיקון / שיקום סדנה</span>
-                      </div>
-                      <div className="text-left">
-                        <span className="text-xs font-black text-slate-900 font-mono">22</span>
-                        <span className="text-[10px] text-slate-500 font-semibold mr-1">(2.2%)</span>
-                      </div>
-                    </div>
-                  </div>
+                    const readyPct = T > 0 ? Math.round(((T - maintenanceCount) / T) * 100) : 100;
+
+                    return (
+                      <>
+                        <div className="relative w-44 h-44 flex items-center justify-center shrink-0">
+                          <svg className="w-full h-full -rotate-90 origin-center" viewBox="0 0 170 170">
+                            {/* Background circle */}
+                            <circle
+                              cx="85"
+                              cy="85"
+                              r="65"
+                              className="stroke-slate-100"
+                              strokeWidth="18"
+                              fill="transparent"
+                            />
+                            {/* Segment 1: Active In-Use */}
+                            {inUseDash > 0 && (
+                              <circle
+                                cx="85"
+                                cy="85"
+                                r="65"
+                                stroke="#10b981"
+                                strokeWidth="18"
+                                strokeDasharray={`${inUseDash} 408.4`}
+                                strokeDashoffset="0"
+                                strokeLinecap="round"
+                                fill="transparent"
+                                className="transition-all duration-1000"
+                              />
+                            )}
+                            {/* Segment 2: Central Depot Available */}
+                            {inWarehouseDash > 0 && (
+                              <circle
+                                cx="85"
+                                cy="85"
+                                r="65"
+                                stroke="#3b82f6"
+                                strokeWidth="18"
+                                strokeDasharray={`${inWarehouseDash} 408.4`}
+                                strokeDashoffset={`${-inUseDash}`}
+                                strokeLinecap="round"
+                                fill="transparent"
+                                className="transition-all duration-1000"
+                              />
+                            )}
+                            {/* Segment 3: Maintenance In-Repair */}
+                            {maintenanceDash > 0 && (
+                              <circle
+                                cx="85"
+                                cy="85"
+                                r="65"
+                                stroke="#f43f5e"
+                                strokeWidth="18"
+                                strokeDasharray={`${maintenanceDash} 408.4`}
+                                strokeDashoffset={`${-(inUseDash + inWarehouseDash)}`}
+                                strokeLinecap="round"
+                                fill="transparent"
+                                className="transition-all duration-1000"
+                              />
+                            )}
+                          </svg>
+                          {/* Centered Readout */}
+                          <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+                            <span className="text-2xl font-black text-slate-900 leading-none">{readyPct}%</span>
+                            <span className="text-[10px] font-black text-slate-500 mt-1">כשיר לפעילות</span>
+                          </div>
+                        </div>
+
+                        {/* Donut Legend */}
+                        <div className="space-y-3 w-full max-w-xs">
+                          <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                            <div className="flex items-center gap-2">
+                              <span className="w-3 h-3 rounded-full bg-emerald-500 shrink-0" />
+                              <span className="text-xs font-bold text-slate-700">פעיל באתרי פרויקטים</span>
+                            </div>
+                            <div className="text-left">
+                              <span className="text-xs font-black text-slate-900 font-mono">{inUseCount.toLocaleString()}</span>
+                              <span className="text-[10px] text-slate-500 font-semibold mr-1">({Math.round(inUsePct * 100)}%)</span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                            <div className="flex items-center gap-2">
+                              <span className="w-3 h-3 rounded-full bg-blue-500 shrink-0" />
+                              <span className="text-xs font-bold text-slate-700">מלאי זמין במחסנים</span>
+                            </div>
+                            <div className="text-left">
+                              <span className="text-xs font-black text-slate-900 font-mono">{inWarehouseCount.toLocaleString()}</span>
+                              <span className="text-[10px] text-slate-500 font-semibold mr-1">({Math.round(inWarehousePct * 100)}%)</span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                            <div className="flex items-center gap-2">
+                              <span className="w-3 h-3 rounded-full bg-rose-500 shrink-0" />
+                              <span className="text-xs font-bold text-slate-700">בתיקון / שיקום סדנה</span>
+                            </div>
+                            <div className="text-left">
+                              <span className="text-xs font-black text-slate-900 font-mono">{maintenanceCount.toLocaleString()}</span>
+                              <span className="text-[10px] text-slate-500 font-semibold mr-1">({Math.round(maintenancePct * 100)}%)</span>
+                            </div>
+                          </div>
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
 
@@ -870,7 +900,7 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                       <span>פיזור הון הציוד לפי אתרים ומתקנים</span>
                     </h3>
                     <span className="text-[11px] font-bold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-200">
-                      סה&quot;כ: ₪2,540,000
+                      סה&quot;כ: ₪{(data.totalFleetValue ?? 0).toLocaleString()}
                     </span>
                   </div>
                   <p className="text-xs text-slate-500 mt-1">
@@ -879,61 +909,51 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                 </div>
 
                 <div className="space-y-3.5 py-1">
-                  {/* Site 1: Bazan */}
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between text-xs font-bold text-slate-700">
-                      <span className="flex items-center gap-1.5">
-                        <Factory className="w-3.5 h-3.5 text-blue-600" />
-                        <span>מתקן בתי זיקוק (בז&quot;ן) - WH-BZN</span>
-                      </span>
-                      <span className="font-mono text-slate-900">53.6% (545 כלים · ~₪1,361,440)</span>
-                    </div>
-                    <div className="h-3 w-full bg-slate-100 rounded-full overflow-hidden flex">
-                      <div className="h-full bg-gradient-to-r from-blue-600 to-indigo-600 rounded-full" style={{ width: '53.6%' }} />
-                    </div>
-                  </div>
+                  {data.facilityDistribution && data.facilityDistribution.length > 0 ? (
+                    data.facilityDistribution.map((fac, idx) => {
+                      const facTotal = fac.totalTools || fac.totalAssets || 0;
+                      const pct = totalAssetsCount > 0 ? Math.round((facTotal / totalAssetsCount) * 100) : 0;
+                      const estValue = totalAssetsCount > 0 ? Math.round((facTotal / totalAssetsCount) * (data.totalFleetValue ?? 0)) : 0;
+                      
+                      const isBazan = fac.warehouseName.includes('בז"ן') || fac.warehouseCode.includes('BZN');
+                      const isHabonim = fac.warehouseName.includes('הבונים') || fac.warehouseCode.includes('HB');
+                      const isSagi = fac.warehouseName.includes('שגיא') || fac.warehouseCode.includes('SG');
+                      const FacIcon = isBazan ? Factory : isHabonim ? Building2 : isSagi ? Container : Truck;
+                      
+                      const gradientColors = [
+                        'from-blue-600 to-indigo-600',
+                        'from-indigo-500 to-purple-500',
+                        'from-emerald-500 to-teal-500',
+                        'from-amber-500 to-orange-500',
+                        'from-cyan-500 to-blue-500',
+                      ];
+                      const gradientClass = gradientColors[idx % gradientColors.length];
 
-                  {/* Site 2: Habonim */}
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between text-xs font-bold text-slate-700">
-                      <span className="flex items-center gap-1.5">
-                        <Building2 className="w-3.5 h-3.5 text-indigo-600" />
-                        <span>מחסן מרכזי הבונים - WH-HB</span>
-                      </span>
-                      <span className="font-mono text-slate-900">19.0% (193 כלים · ~₪482,600)</span>
+                      return (
+                        <div key={fac.warehouseId} className="space-y-1.5">
+                          <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+                            <span className="flex items-center gap-1.5">
+                              <FacIcon className="w-3.5 h-3.5 text-blue-600" />
+                              <span>{fac.warehouseName} ({fac.warehouseCode})</span>
+                            </span>
+                            <span className="font-mono text-slate-900">
+                              {pct}% ({facTotal} כלים · ~₪{estValue.toLocaleString()})
+                            </span>
+                          </div>
+                          <div className="h-3 w-full bg-slate-100 rounded-full overflow-hidden flex">
+                            <div
+                              className={`h-full bg-gradient-to-r ${gradientClass} rounded-full transition-all duration-500`}
+                              style={{ width: `${Math.max(pct, facTotal > 0 ? 3 : 0)}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="p-6 text-center text-xs text-slate-400 font-semibold bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                      אין אתרים או מחסנים מוגדרים לארגון זה
                     </div>
-                    <div className="h-3 w-full bg-slate-100 rounded-full overflow-hidden flex">
-                      <div className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full" style={{ width: '19.0%' }} />
-                    </div>
-                  </div>
-
-                  {/* Site 3: Sagi 2000 */}
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between text-xs font-bold text-slate-700">
-                      <span className="flex items-center gap-1.5">
-                        <Container className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>מתחם שגיא 2000 - WH-SG</span>
-                      </span>
-                      <span className="font-mono text-slate-900">10.3% (105 כלים · ~₪261,620)</span>
-                    </div>
-                    <div className="h-3 w-full bg-slate-100 rounded-full overflow-hidden flex">
-                      <div className="h-full bg-gradient-to-r from-emerald-500 to-teal-500 rounded-full" style={{ width: '10.3%' }} />
-                    </div>
-                  </div>
-
-                  {/* Site 4: Other Sites */}
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between text-xs font-bold text-slate-700">
-                      <span className="flex items-center gap-1.5">
-                        <Truck className="w-3.5 h-3.5 text-amber-600" />
-                        <span>שאר האתרים והציוד הנייד</span>
-                      </span>
-                      <span className="font-mono text-slate-900">17.1% (173 כלים · ~₪434,340)</span>
-                    </div>
-                    <div className="h-3 w-full bg-slate-100 rounded-full overflow-hidden flex">
-                      <div className="h-full bg-gradient-to-r from-amber-500 to-orange-500 rounded-full" style={{ width: '17.1%' }} />
-                    </div>
-                  </div>
+                  )}
                 </div>
               </div>
 
@@ -946,7 +966,7 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                       <span>רדאר תחזוקה ובקרת סיכוני ציוד</span>
                     </h3>
                     <span className="text-[11px] font-bold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200">
-                      סדנת הבונים
+                      {data.facilityDistribution[0]?.warehouseName || 'מוקד תחזוקה ובטיחות'}
                     </span>
                   </div>
                   <p className="text-xs text-slate-500 mt-1">
@@ -958,33 +978,39 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                   <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
                     <div className="flex items-center gap-1.5 text-amber-700">
                       <Wrench className="w-4 h-4" />
-                      <span className="text-[11px] font-black uppercase">תיקון חוץ</span>
+                      <span className="text-[11px] font-black uppercase">בתיקון והשבתה</span>
                     </div>
-                    <div className="text-xl font-black text-slate-900">13 כלים</div>
+                    <div className="text-xl font-black text-slate-900">
+                      {(data.utilization?.maintenance ?? 0).toLocaleString()} כלים
+                    </div>
                     <p className="text-[10px] text-slate-500 font-semibold leading-tight">
-                      אצל ספקים מורשים (בוש / מילווקי / היטאצ&apos;י)
+                      כלים הנמצאים כעת בסדנה או בהשבתה
                     </p>
                   </div>
 
                   <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
                     <div className="flex items-center gap-1.5 text-rose-700">
                       <AlertTriangle className="w-4 h-4" />
-                      <span className="text-[11px] font-black uppercase">טיפול מיידי</span>
+                      <span className="text-[11px] font-black uppercase">בדיקות באיחור</span>
                     </div>
-                    <div className="text-xl font-black text-slate-900">5 כלים</div>
+                    <div className="text-xl font-black text-slate-900">
+                      {(data.safetyCompliance?.overdueCount ?? 0).toLocaleString()} כלים
+                    </div>
                     <p className="text-[10px] text-slate-500 font-semibold leading-tight">
-                      ממתינים לאישור תקציבי / חלפים בסדנה
+                      ציוד שמועד ביקורת הבטיחות שלו חלף
                     </p>
                   </div>
 
                   <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
                     <div className="flex items-center gap-1.5 text-emerald-700">
                       <Clock className="w-4 h-4" />
-                      <span className="text-[11px] font-black uppercase">סבב ממוצע</span>
+                      <span className="text-[11px] font-black uppercase">ביקורות קרובות</span>
                     </div>
-                    <div className="text-xl font-black text-slate-900">3.2 ימים</div>
+                    <div className="text-xl font-black text-slate-900">
+                      {(data.safetyCompliance?.upcomingInspectionCount ?? 0).toLocaleString()} כלים
+                    </div>
                     <p className="text-[10px] text-emerald-700 font-semibold leading-tight">
-                      ירידה של 18% בזמן השבתה החודש
+                      בדיקות מתוכננות במהלך 7 הימים הקרובים
                     </p>
                   </div>
                 </div>
@@ -992,9 +1018,11 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                 <div className="p-3 rounded-xl bg-emerald-50/70 border border-emerald-200/80 flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <ShieldCheck className="w-4 h-4 text-emerald-700 shrink-0" />
-                    <span className="text-xs font-bold text-emerald-950">עמידה ביעדי SLA לסבב תחזוקה שוטפת</span>
+                    <span className="text-xs font-bold text-emerald-950">עמידה ביעדי SLA לכשירות ובטיחות</span>
                   </div>
-                  <span className="text-xs font-black text-emerald-700 font-mono">94% הצלחה</span>
+                  <span className="text-xs font-black text-emerald-700 font-mono">
+                    {data.safetyCompliance?.complianceRate ?? 100}% הצלחה
+                  </span>
                 </div>
               </div>
 
@@ -1007,58 +1035,37 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                       <span>עמודי התווך של הון הציוד התעשייתי</span>
                     </h3>
                     <span className="text-[11px] font-bold text-purple-700 bg-purple-50 px-2.5 py-1 rounded-full border border-purple-200">
-                      4 קטגוריות ליבה
+                      קטגוריות מובילות
                     </span>
                   </div>
                   <p className="text-xs text-slate-500 mt-1">
-                    ריכוז הנכסים הכבדים והציוד עתיר ההון של חברת סמי זטוט
+                    ריכוז הנכסים הכבדים והציוד עתיר ההון של {orgDisplayName}
                   </p>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-700">דיסקים ומשחזות</span>
-                      <Scissors className="w-4 h-4 text-blue-600" />
+                  {(data.categoryBreakdown && data.categoryBreakdown.length > 0) ? (
+                    data.categoryBreakdown.slice(0, 4).map((cat, idx) => {
+                      const catIcons = [Scissors, Flame, Anchor, Sparkles];
+                      const IconComp = catIcons[idx % catIcons.length];
+                      return (
+                        <div key={cat.name} className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-slate-700">{cat.name}</span>
+                            <IconComp className="w-4 h-4 text-purple-600" />
+                          </div>
+                          <div className="text-2xl font-black text-slate-900 font-mono">{cat.count} כלים</div>
+                          <p className="text-[10px] text-slate-500 font-semibold leading-tight">
+                            ציוד מבוקר ורשום במערך התפעול
+                          </p>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="col-span-2 p-6 text-center text-xs text-slate-400 font-semibold bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                      אין עדיין קטגוריות ציוד פעילות לארגון זה
                     </div>
-                    <div className="text-2xl font-black text-slate-900 font-mono">224 כלים</div>
-                    <p className="text-[10px] text-slate-500 font-semibold leading-tight">
-                      משחזות זווית 5&quot;-9&quot;, פולישרים ודיסקים פניאומטיים
-                    </p>
-                  </div>
-
-                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-700">רתכות תעשייתיות</span>
-                      <Flame className="w-4 h-4 text-amber-600" />
-                    </div>
-                    <div className="text-2xl font-black text-slate-900 font-mono">169 כלים</div>
-                    <p className="text-[10px] text-slate-500 font-semibold leading-tight">
-                      רתכות TIG, MIG, אלקטרודה ואינוורטרים ייעודיים
-                    </p>
-                  </div>
-
-                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-700">ג&apos;קים והרמה כבדה</span>
-                      <Anchor className="w-4 h-4 text-emerald-600" />
-                    </div>
-                    <div className="text-2xl font-black text-slate-900 font-mono">130 כלים</div>
-                    <p className="text-[10px] text-slate-500 font-semibold leading-tight">
-                      ג&apos;קים הידראוליים, כננות הרמה, פוליפאסט וגלגלות
-                    </p>
-                  </div>
-
-                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-700">מכונות צנרת והברגות</span>
-                      <Sparkles className="w-4 h-4 text-purple-600" />
-                    </div>
-                    <div className="text-2xl font-black text-slate-900 font-mono">50 מכונות</div>
-                    <p className="text-[10px] text-slate-500 font-semibold leading-tight">
-                      מכונות הברגה Ridgid, מסור סרט ומכונות לחיצה
-                    </p>
-                  </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1069,7 +1076,7 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                 <div>
                   <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
                     <Building2 className="w-4 h-4 text-blue-600" />
-                    <span>התפלגות ציוד לפי אתרים ומחסנים (5 מתקנים מבצעיים)</span>
+                    <span>התפלגות ציוד לפי אתרים ומחסנים ({data.facilityDistribution.length} מתקנים מבצעיים)</span>
                   </h3>
                   <p className="text-xs text-slate-500 mt-0.5">
                     פירוט נפח פעילות, כלים מושאלים וסטטוס בכל מתקן עם גישה מהירה לרשימת הכלים המלאה
@@ -2002,7 +2009,7 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                 </div>
                 <div>
                   <span className="text-slate-500 block text-[10px]">מנהל מאשר (Executive):</span>
-                  <span className="text-purple-950 font-black">מנהל כללי (Zatout01)</span>
+                  <span className="text-purple-950 font-black">{user?.fullName || 'מנהל כללי'} ({user?.username || orgDisplayName})</span>
                 </div>
                 <div>
                   <span className="text-slate-500 block text-[10px]">מספר מתקנים בביקורת:</span>
@@ -2021,25 +2028,25 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                 <div className="p-3.5 rounded-2xl bg-emerald-50/80 border border-emerald-200">
                   <span className="text-[11px] font-bold text-emerald-800 block">שווי רכישה מקורי</span>
                   <span className="text-xl font-black text-emerald-950 mt-1 block">
-                    ₪{data.totalFleetValue.toLocaleString()}
+                    ₪{(data.totalFleetValue ?? 0).toLocaleString()}
                   </span>
                 </div>
                 <div className="p-3.5 rounded-2xl bg-indigo-50/80 border border-indigo-200">
                   <span className="text-[11px] font-bold text-indigo-800 block">פחת מצטבר בספרים</span>
                   <span className="text-xl font-black text-indigo-950 mt-1 block">
-                    ₪{(data.depreciation?.accumulatedDepreciation ?? Math.round(data.totalFleetValue * 0.3)).toLocaleString()}
+                    ₪{(data.depreciation?.accumulatedDepreciation ?? 0).toLocaleString()}
                   </span>
                 </div>
                 <div className="p-3.5 rounded-2xl bg-purple-50/80 border border-purple-200">
                   <span className="text-[11px] font-bold text-purple-800 block">ערך נוכחי נקי בספרים</span>
                   <span className="text-xl font-black text-purple-950 mt-1 block">
-                    ₪{(data.depreciation?.currentBookValue ?? Math.round(data.totalFleetValue * 0.7)).toLocaleString()}
+                    ₪{(data.depreciation?.currentBookValue ?? 0).toLocaleString()}
                   </span>
                 </div>
                 <div className="p-3.5 rounded-2xl bg-amber-50/80 border border-amber-200">
                   <span className="text-[11px] font-bold text-amber-800 block">נזקים וחיובי קבלנים</span>
                   <span className="text-xl font-black text-amber-950 mt-1 block">
-                    ₪{(data.damageAttribution?.totalDamageCost ?? data.monthlyDamageCost).toLocaleString()}
+                    ₪{(data.damageAttribution?.totalDamageCost ?? data.monthlyDamageCost ?? 0).toLocaleString()}
                   </span>
                 </div>
               </div>
@@ -2089,7 +2096,7 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                   <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-center space-y-3">
                     <span className="text-xs font-bold text-slate-600 block">חתימת מנהל כללי (CEO / GM)</span>
                     <div className="h-12 border-b-2 border-dashed border-slate-300 flex items-center justify-center">
-                      <span className="font-serif italic text-purple-900 font-bold text-lg">Zatout01</span>
+                      <span className="font-serif italic text-purple-900 font-bold text-lg">{user?.username || user?.fullName || orgDisplayName}</span>
                     </div>
                     <span className="text-[10px] text-slate-400 block">תאריך: {new Date().toLocaleDateString('he-IL')}</span>
                   </div>
