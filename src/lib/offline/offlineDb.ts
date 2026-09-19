@@ -17,108 +17,127 @@ export interface SyncQueueItem<T = unknown> {
   errorMessage?: string;
 }
 
-const DB_NAME = 'tooly_offline_db';
+export function getActiveOrganizationId(): string {
+  if (typeof window === 'undefined') return 'default';
+  try {
+    const raw = localStorage.getItem('tooly_active_user');
+    if (raw) {
+      const user = JSON.parse(raw);
+      if (user?.organizationId) return user.organizationId;
+    }
+  } catch {}
+  return 'default';
+}
+
 const DB_VERSION = 3;
 
 const STORE_CACHED_ASSETS = 'cached_assets';
 const STORE_SYNC_QUEUE = 'sync_queue';
 
-let dbPromise: Promise<IDBDatabase> | null = null;
+const dbPromises = new Map<string, Promise<IDBDatabase>>();
 
 /**
- * Initializes or returns the singleton IndexedDB instance.
+ * Initializes or returns the tenant-partitioned IndexedDB instance.
+ * Dynamic database name: tooly_offline_db_${organizationId || 'default'}
  * Safe for SSR (resolves to null-guarded error if window is undefined).
  */
-export function getOfflineDb(): Promise<IDBDatabase> {
+export function getOfflineDb(organizationId?: string): Promise<IDBDatabase> {
   if (typeof window === 'undefined' || !window.indexedDB) {
     return Promise.reject(new Error('IndexedDB is only available in browser environment'));
   }
 
-  if (!dbPromise) {
-    dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
-      const request = window.indexedDB.open(DB_NAME, DB_VERSION);
+  const orgId = organizationId || getActiveOrganizationId() || 'default';
+  const dbName = `tooly_offline_db_${orgId}`;
 
-      request.onupgradeneeded = (event) => {
-        const db = (event.target as IDBOpenDBRequest).result;
-        const oldVersion = event.oldVersion;
-
-        // 1. Cached Assets Store
-        let assetStore: IDBObjectStore;
-        if (!db.objectStoreNames.contains(STORE_CACHED_ASSETS)) {
-          assetStore = db.createObjectStore(STORE_CACHED_ASSETS, {
-            keyPath: 'id',
-          });
-          assetStore.createIndex('qrCode', 'qrCode', { unique: false });
-          assetStore.createIndex('toolName', 'toolName', { unique: false });
-          assetStore.createIndex('status', 'status', { unique: false });
-          assetStore.createIndex('nfcUid', 'nfcUid', { unique: false });
-        } else {
-          assetStore = (event.target as IDBOpenDBRequest).transaction!.objectStore(STORE_CACHED_ASSETS);
-          if (!assetStore.indexNames.contains('nfcUid')) {
-            assetStore.createIndex('nfcUid', 'nfcUid', { unique: false });
-          }
-        }
-
-        // 2. Offline Sync Queue Store
-        let syncStore: IDBObjectStore;
-        if (!db.objectStoreNames.contains(STORE_SYNC_QUEUE)) {
-          syncStore = db.createObjectStore(STORE_SYNC_QUEUE, {
-            keyPath: 'id',
-          });
-          syncStore.createIndex('status', 'status', { unique: false });
-          syncStore.createIndex('timestamp', 'timestamp', { unique: false });
-          syncStore.createIndex('type', 'type', { unique: false });
-        } else {
-          syncStore = (event.target as IDBOpenDBRequest).transaction!.objectStore(STORE_SYNC_QUEUE);
-        }
-
-        // Production Reset: Purge demo records from cache and sync queue on upgrade to v3
-        if (oldVersion < 3) {
-          try {
-            assetStore.clear();
-            syncStore.clear();
-          } catch (err) {
-            console.warn('Error clearing legacy demo cache during DB upgrade:', err);
-          }
-        }
-      };
-
-      request.onsuccess = () => {
-        const db = request.result;
-
-        // Automatic client cleanup check for Production Reset
-        if (typeof window !== 'undefined') {
-          const PURGE_KEY = 'tooly_prod_reset_v3_purged';
-          if (!localStorage.getItem(PURGE_KEY)) {
-            try {
-              const tx = db.transaction([STORE_CACHED_ASSETS, STORE_SYNC_QUEUE], 'readwrite');
-              tx.objectStore(STORE_CACHED_ASSETS).clear();
-              tx.objectStore(STORE_SYNC_QUEUE).clear();
-              tx.oncomplete = () => {
-                localStorage.setItem(PURGE_KEY, 'true');
-                window.dispatchEvent(new CustomEvent('tooly-sync-queue-updated'));
-              };
-            } catch {
-              localStorage.setItem(PURGE_KEY, 'true');
-            }
-          }
-        }
-
-        resolve(db);
-      };
-
-      request.onerror = () => {
-        dbPromise = null;
-        reject(request.error || new Error('Failed to open IndexedDB'));
-      };
-
-      request.onblocked = () => {
-        console.warn('Tooly IndexedDB upgrade blocked by open tab');
-      };
-    });
+  const existing = dbPromises.get(dbName);
+  if (existing) {
+    return existing;
   }
 
-  return dbPromise;
+  const promise = new Promise<IDBDatabase>((resolve, reject) => {
+    const request = window.indexedDB.open(dbName, DB_VERSION);
+
+    request.onupgradeneeded = (event) => {
+      const db = (event.target as IDBOpenDBRequest).result;
+      const oldVersion = event.oldVersion;
+
+      // 1. Cached Assets Store
+      let assetStore: IDBObjectStore;
+      if (!db.objectStoreNames.contains(STORE_CACHED_ASSETS)) {
+        assetStore = db.createObjectStore(STORE_CACHED_ASSETS, {
+          keyPath: 'id',
+        });
+        assetStore.createIndex('qrCode', 'qrCode', { unique: false });
+        assetStore.createIndex('toolName', 'toolName', { unique: false });
+        assetStore.createIndex('status', 'status', { unique: false });
+        assetStore.createIndex('nfcUid', 'nfcUid', { unique: false });
+      } else {
+        assetStore = (event.target as IDBOpenDBRequest).transaction!.objectStore(STORE_CACHED_ASSETS);
+        if (!assetStore.indexNames.contains('nfcUid')) {
+          assetStore.createIndex('nfcUid', 'nfcUid', { unique: false });
+        }
+      }
+
+      // 2. Offline Sync Queue Store
+      let syncStore: IDBObjectStore;
+      if (!db.objectStoreNames.contains(STORE_SYNC_QUEUE)) {
+        syncStore = db.createObjectStore(STORE_SYNC_QUEUE, {
+          keyPath: 'id',
+        });
+        syncStore.createIndex('status', 'status', { unique: false });
+        syncStore.createIndex('timestamp', 'timestamp', { unique: false });
+        syncStore.createIndex('type', 'type', { unique: false });
+      } else {
+        syncStore = (event.target as IDBOpenDBRequest).transaction!.objectStore(STORE_SYNC_QUEUE);
+      }
+
+      // Production Reset: Purge demo records from cache and sync queue on upgrade to v3
+      if (oldVersion < 3) {
+        try {
+          assetStore.clear();
+          syncStore.clear();
+        } catch (err) {
+          console.warn('Error clearing legacy demo cache during DB upgrade:', err);
+        }
+      }
+    };
+
+    request.onsuccess = () => {
+      const db = request.result;
+
+      // Automatic client cleanup check for Production Reset
+      if (typeof window !== 'undefined') {
+        const PURGE_KEY = `tooly_prod_reset_v3_purged_${orgId}`;
+        if (!localStorage.getItem(PURGE_KEY)) {
+          try {
+            const tx = db.transaction([STORE_CACHED_ASSETS, STORE_SYNC_QUEUE], 'readwrite');
+            tx.objectStore(STORE_CACHED_ASSETS).clear();
+            tx.objectStore(STORE_SYNC_QUEUE).clear();
+            tx.oncomplete = () => {
+              localStorage.setItem(PURGE_KEY, 'true');
+              window.dispatchEvent(new CustomEvent('tooly-sync-queue-updated'));
+            };
+          } catch {
+            localStorage.setItem(PURGE_KEY, 'true');
+          }
+        }
+      }
+
+      resolve(db);
+    };
+
+    request.onerror = () => {
+      dbPromises.delete(dbName);
+      reject(request.error || new Error(`Failed to open IndexedDB ${dbName}`));
+    };
+
+    request.onblocked = () => {
+      console.warn(`Tooly IndexedDB upgrade blocked for ${dbName} by open tab`);
+    };
+  });
+
+  dbPromises.set(dbName, promise);
+  return promise;
 }
 
 // -------------------------------------------------------------
@@ -128,10 +147,15 @@ export function getOfflineDb(): Promise<IDBDatabase> {
 /**
  * Stores or updates an asset in local IndexedDB cache.
  */
-export async function cacheAsset(asset: ScannedAssetDetails): Promise<void> {
+export async function cacheAsset(asset: ScannedAssetDetails, organizationId?: string): Promise<void> {
   if (typeof window === 'undefined') return;
   try {
-    const db = await getOfflineDb();
+    const targetOrgId =
+      organizationId ||
+      asset.organizationId ||
+      ((asset as unknown as { organization_id?: string }).organization_id) ||
+      getActiveOrganizationId();
+    const db = await getOfflineDb(targetOrgId);
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_CACHED_ASSETS, 'readwrite');
       const store = tx.objectStore(STORE_CACHED_ASSETS);
@@ -148,10 +172,15 @@ export async function cacheAsset(asset: ScannedAssetDetails): Promise<void> {
 /**
  * Stores multiple assets in local cache in a single transaction.
  */
-export async function cacheAssets(assets: ScannedAssetDetails[]): Promise<void> {
+export async function cacheAssets(assets: ScannedAssetDetails[], organizationId?: string): Promise<void> {
   if (typeof window === 'undefined' || assets.length === 0) return;
   try {
-    const db = await getOfflineDb();
+    const targetOrgId =
+      organizationId ||
+      assets[0]?.organizationId ||
+      ((assets[0] as unknown as { organization_id?: string })?.organization_id) ||
+      getActiveOrganizationId();
+    const db = await getOfflineDb(targetOrgId);
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_CACHED_ASSETS, 'readwrite');
       const store = tx.objectStore(STORE_CACHED_ASSETS);
@@ -170,14 +199,15 @@ export async function cacheAssets(assets: ScannedAssetDetails[]): Promise<void> 
  * Finds an asset by QR code or NFC UID from IndexedDB.
  */
 export async function getCachedAssetByQr(
-  qrCode: string
+  qrCode: string,
+  organizationId?: string
 ): Promise<ScannedAssetDetails | null> {
   if (typeof window === 'undefined') return null;
   const cleanCode = qrCode.trim().toUpperCase();
   if (!cleanCode) return null;
 
   try {
-    const db = await getOfflineDb();
+    const db = await getOfflineDb(organizationId);
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_CACHED_ASSETS, 'readonly');
       const store = tx.objectStore(STORE_CACHED_ASSETS);
@@ -241,20 +271,22 @@ export async function getCachedAssetByQr(
  * Finds an asset by NFC UID specifically from IndexedDB.
  */
 export async function getCachedAssetByNfc(
-  nfcUid: string
+  nfcUid: string,
+  organizationId?: string
 ): Promise<ScannedAssetDetails | null> {
-  return getCachedAssetByQr(nfcUid);
+  return getCachedAssetByQr(nfcUid, organizationId);
 }
 
 /**
  * Finds an asset by its primary ID.
  */
 export async function getCachedAssetById(
-  id: string
+  id: string,
+  organizationId?: string
 ): Promise<ScannedAssetDetails | null> {
   if (typeof window === 'undefined') return null;
   try {
-    const db = await getOfflineDb();
+    const db = await getOfflineDb(organizationId);
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_CACHED_ASSETS, 'readonly');
       const store = tx.objectStore(STORE_CACHED_ASSETS);
@@ -272,10 +304,10 @@ export async function getCachedAssetById(
 /**
  * Retrieves all locally cached assets.
  */
-export async function getAllCachedAssets(): Promise<ScannedAssetDetails[]> {
+export async function getAllCachedAssets(organizationId?: string): Promise<ScannedAssetDetails[]> {
   if (typeof window === 'undefined') return [];
   try {
-    const db = await getOfflineDb();
+    const db = await getOfflineDb(organizationId);
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_CACHED_ASSETS, 'readonly');
       const store = tx.objectStore(STORE_CACHED_ASSETS);
@@ -295,11 +327,12 @@ export async function getAllCachedAssets(): Promise<ScannedAssetDetails[]> {
  */
 export async function updateCachedAsset(
   id: string,
-  updates: Partial<ScannedAssetDetails>
+  updates: Partial<ScannedAssetDetails>,
+  organizationId?: string
 ): Promise<ScannedAssetDetails | null> {
   if (typeof window === 'undefined') return null;
   try {
-    const db = await getOfflineDb();
+    const db = await getOfflineDb(organizationId);
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_CACHED_ASSETS, 'readwrite');
       const store = tx.objectStore(STORE_CACHED_ASSETS);
@@ -337,7 +370,8 @@ export async function updateCachedAsset(
  */
 export async function enqueueSyncAction<T = unknown>(
   type: SyncActionType,
-  payload: T
+  payload: T,
+  organizationId?: string
 ): Promise<SyncQueueItem<T>> {
   const item: SyncQueueItem<T> = {
     id: `sync_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
@@ -351,7 +385,7 @@ export async function enqueueSyncAction<T = unknown>(
   if (typeof window === 'undefined') return item;
 
   try {
-    const db = await getOfflineDb();
+    const db = await getOfflineDb(organizationId);
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_SYNC_QUEUE, 'readwrite');
       const store = tx.objectStore(STORE_SYNC_QUEUE);
@@ -373,11 +407,11 @@ export async function enqueueSyncAction<T = unknown>(
 /**
  * Retrieves all pending or failed items from the sync queue, sorted by timestamp ascending.
  */
-export async function getPendingSyncQueue(): Promise<SyncQueueItem[]> {
+export async function getPendingSyncQueue(organizationId?: string): Promise<SyncQueueItem[]> {
   if (typeof window === 'undefined') return [];
 
   try {
-    const db = await getOfflineDb();
+    const db = await getOfflineDb(organizationId);
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_SYNC_QUEUE, 'readonly');
       const store = tx.objectStore(STORE_SYNC_QUEUE);
@@ -404,12 +438,13 @@ export async function getPendingSyncQueue(): Promise<SyncQueueItem[]> {
 export async function updateSyncItemStatus(
   id: string,
   status: 'pending' | 'syncing' | 'failed',
-  errorMessage?: string
+  errorMessage?: string,
+  organizationId?: string
 ): Promise<void> {
   if (typeof window === 'undefined') return;
 
   try {
-    const db = await getOfflineDb();
+    const db = await getOfflineDb(organizationId);
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_SYNC_QUEUE, 'readwrite');
       const store = tx.objectStore(STORE_SYNC_QUEUE);
@@ -442,11 +477,11 @@ export async function updateSyncItemStatus(
 /**
  * Removes an item from the sync queue after successful sync.
  */
-export async function removeSyncItem(id: string): Promise<void> {
+export async function removeSyncItem(id: string, organizationId?: string): Promise<void> {
   if (typeof window === 'undefined') return;
 
   try {
-    const db = await getOfflineDb();
+    const db = await getOfflineDb(organizationId);
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_SYNC_QUEUE, 'readwrite');
       const store = tx.objectStore(STORE_SYNC_QUEUE);
@@ -466,11 +501,11 @@ export async function removeSyncItem(id: string): Promise<void> {
 /**
  * Gets the count of pending items in the sync queue.
  */
-export async function getPendingSyncCount(): Promise<number> {
+export async function getPendingSyncCount(organizationId?: string): Promise<number> {
   if (typeof window === 'undefined') return 0;
 
   try {
-    const items = await getPendingSyncQueue();
+    const items = await getPendingSyncQueue(organizationId);
     return items.length;
   } catch {
     return 0;
@@ -480,11 +515,11 @@ export async function getPendingSyncCount(): Promise<number> {
 /**
  * Clears the entire sync queue.
  */
-export async function clearSyncQueue(): Promise<void> {
+export async function clearSyncQueue(organizationId?: string): Promise<void> {
   if (typeof window === 'undefined') return;
 
   try {
-    const db = await getOfflineDb();
+    const db = await getOfflineDb(organizationId);
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_SYNC_QUEUE, 'readwrite');
       const store = tx.objectStore(STORE_SYNC_QUEUE);
@@ -504,10 +539,10 @@ export async function clearSyncQueue(): Promise<void> {
 /**
  * Clears all cached assets from IndexedDB.
  */
-export async function clearCachedAssets(): Promise<void> {
+export async function clearCachedAssets(organizationId?: string): Promise<void> {
   if (typeof window === 'undefined') return;
   try {
-    const db = await getOfflineDb();
+    const db = await getOfflineDb(organizationId);
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_CACHED_ASSETS, 'readwrite');
       const store = tx.objectStore(STORE_CACHED_ASSETS);
@@ -523,6 +558,6 @@ export async function clearCachedAssets(): Promise<void> {
 /**
  * Purges both cached assets and offline sync queue for a complete client reset.
  */
-export async function purgeAllOfflineData(): Promise<void> {
-  await Promise.all([clearCachedAssets(), clearSyncQueue()]);
+export async function purgeAllOfflineData(organizationId?: string): Promise<void> {
+  await Promise.all([clearCachedAssets(organizationId), clearSyncQueue(organizationId)]);
 }

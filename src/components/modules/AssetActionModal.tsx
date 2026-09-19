@@ -62,7 +62,7 @@ export default function AssetActionModal({
   onAddToCart,
   isInCart = false,
 }: AssetActionModalProps) {
-  const { role, user, openPinModal } = useAuth();
+  const { role, user, openPinModal, currentOrganization } = useAuth();
 
   // Tab Mode: auto-select Check-In if already checked_out, otherwise Check-Out
   const initialTab: ModalTab =
@@ -106,7 +106,7 @@ export default function AssetActionModal({
   const handleWriteNfc = async () => {
     if (!asset) return;
     setNfcWriteNotice('ממתין להצמדת תגית NFC לגב המכשיר...');
-    const ok = await writeNfcTag(asset.qrCode);
+    const ok = await writeNfcTag(asset.qrCode, currentOrganization?.slug);
     if (ok) {
       setNfcWriteNotice('תגית ה-NFC נצרבה בהצלחה! תומכת באייפון ובאנדרואיד.');
       setTimeout(() => setNfcWriteNotice(null), 4000);

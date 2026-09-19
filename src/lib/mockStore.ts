@@ -194,7 +194,11 @@ export function getMockWarehouses(
   }
   let list = includeInactive ? [...warehousesStore] : warehousesStore.filter((w) => w.isActive !== false);
   if (orgId) {
-    list = list.filter((w) => !w.organizationId || w.organizationId === orgId);
+    list = list.filter((w) =>
+      orgId === DEFAULT_ORGANIZATION.id
+        ? !w.organizationId || w.organizationId === orgId
+        : w.organizationId === orgId
+    );
   }
   return list;
 }
@@ -204,7 +208,11 @@ export function getMockWarehousesAdmin(organizationId?: string): WarehouseAdminI
   return warehouses.map((wh) => {
     const whAssets = assetsStore.filter(
       (a) =>
-        (!organizationId || !a.organizationId || a.organizationId === organizationId) &&
+        (organizationId
+          ? organizationId === DEFAULT_ORGANIZATION.id
+            ? !a.organizationId || a.organizationId === organizationId || a.organization_id === organizationId
+            : a.organizationId === organizationId || a.organization_id === organizationId
+          : true) &&
         (a.currentWarehouseId === wh.id ||
           a.current_warehouse_id === wh.id ||
           a.warehouseId === wh.id ||
@@ -40359,7 +40367,11 @@ export function addMockCategory(cat: Category): Category {
 
 export function getMockCategories(organizationId?: string): Category[] {
   if (organizationId) {
-    return MOCK_CATEGORIES.filter((c) => !c.organizationId || c.organizationId === organizationId);
+    return MOCK_CATEGORIES.filter((c) =>
+      organizationId === DEFAULT_ORGANIZATION.id
+        ? !c.organizationId || c.organizationId === organizationId
+        : c.organizationId === organizationId
+    );
   }
   return [...MOCK_CATEGORIES];
 }
@@ -40387,8 +40399,10 @@ export function appendMockAuditRecord(entry: AuditHistoryRecord): void {
  */
 export function getMockAssets(organizationId?: string): UnifiedAssetItem[] {
   if (organizationId) {
-    return assetsStore.filter(
-      (a) => !a.organizationId || a.organizationId === organizationId || a.organization_id === organizationId
+    return assetsStore.filter((a) =>
+      organizationId === DEFAULT_ORGANIZATION.id
+        ? !a.organizationId || a.organizationId === organizationId || a.organization_id === organizationId
+        : a.organizationId === organizationId || a.organization_id === organizationId
     );
   }
   return assetsStore;
@@ -40446,14 +40460,30 @@ function toScannedAssetDetails(asset: UnifiedAssetItem): ScannedAssetDetails {
  */
 export function getMockAssetByQr(
   qrCode: string,
-  facilityId?: string
+  facilityIdOrOrgId?: string,
+  organizationId?: string
 ): ScannedAssetDetails | null {
   const clean = qrCode.trim();
   if (!clean) return null;
   const cleanUpper = clean.toUpperCase();
 
+  let orgId = organizationId;
+  let facilityId = facilityIdOrOrgId;
+  if (!orgId && facilityId && (facilityId.length === 36 || getMockOrganizationById(facilityId))) {
+    orgId = facilityId;
+    facilityId = undefined;
+  }
+
+  const scopedAssets = orgId
+    ? assetsStore.filter((a) =>
+        orgId === DEFAULT_ORGANIZATION.id
+          ? !a.organizationId || a.organizationId === orgId || a.organization_id === orgId
+          : a.organizationId === orgId || a.organization_id === orgId
+      )
+    : assetsStore;
+
   // 1. Exact match on qr_code, nfc_uid, id, or serial_number
-  const exact = assetsStore.find(
+  const exact = scopedAssets.find(
     (a) =>
       a.qrCode.toUpperCase() === cleanUpper ||
       a.id.toUpperCase() === cleanUpper ||
@@ -40465,7 +40495,7 @@ export function getMockAssetByQr(
   }
 
   // 2. Suffix matching on qr_code, serial_number, and model_number
-  const suffixMatches = assetsStore.filter((a) => {
+  const suffixMatches = scopedAssets.filter((a) => {
     return (
       matchesCodeSuffix(a.qrCode, clean) ||
       (a.serialNumber && matchesCodeSuffix(a.serialNumber, clean)) ||
@@ -40655,7 +40685,11 @@ export function getMockPlantManagerAnalytics(organizationId?: string): PlantMana
   > = {};
 
   const activeWarehouses = organizationId
-    ? warehousesStore.filter((wh) => !wh.organizationId || wh.organizationId === organizationId)
+    ? warehousesStore.filter((wh) =>
+        organizationId === DEFAULT_ORGANIZATION.id
+          ? !wh.organizationId || wh.organizationId === organizationId
+          : wh.organizationId === organizationId
+      )
     : warehousesStore;
 
   activeWarehouses.forEach((wh) => {
@@ -40671,8 +40705,10 @@ export function getMockPlantManagerAnalytics(organizationId?: string): PlantMana
   });
 
   const activeAssets = organizationId
-    ? assetsStore.filter(
-        (a) => !a.organizationId || a.organizationId === organizationId || a.organization_id === organizationId
+    ? assetsStore.filter((a) =>
+        organizationId === DEFAULT_ORGANIZATION.id
+          ? !a.organizationId || a.organizationId === organizationId || a.organization_id === organizationId
+          : a.organizationId === organizationId || a.organization_id === organizationId
       )
     : assetsStore;
 
@@ -40748,7 +40784,7 @@ export function getMockPlantManagerAnalytics(organizationId?: string): PlantMana
     };
   });
 
-  const totalAssets = assetsStore.length;
+  const totalAssets = activeAssets.length;
   const utilizationRate = totalAssets > 0 ? Math.round((inUse / totalAssets) * 100) : 0;
   const complianceRate =
     totalAssets > 0
@@ -40757,7 +40793,7 @@ export function getMockPlantManagerAnalytics(organizationId?: string): PlantMana
 
   // Depreciation calculation: Straight-line based on asset age (assumed 5-year useful life, 20%/yr)
   let accumulatedDepreciation = 0;
-  assetsStore.forEach((asset) => {
+  activeAssets.forEach((asset) => {
     const ageInYears = asset.purchaseDate
       ? Math.max(0.2, (now - new Date(asset.purchaseDate).getTime()) / (365.25 * 86400 * 1000))
       : 1.5;
@@ -40769,14 +40805,22 @@ export function getMockPlantManagerAnalytics(organizationId?: string): PlantMana
   const depreciationRatePct =
     totalFleetValue > 0 ? Math.round((accumulatedDepreciation / totalFleetValue) * 100) : 0;
 
-  // Monthly damage from damage reports in history
+  // Monthly damage from damage reports in history scoped to organization
   let workerTotal = 0;
   let subcontractorTotal = 0;
   let companyTotal = 0;
   let monthlyDamageCost = 0;
   let damageIncidentCount = 0;
 
-  historyStore.forEach((log) => {
+  const activeHistory = organizationId
+    ? historyStore.filter((log) =>
+        organizationId === DEFAULT_ORGANIZATION.id
+          ? !log.organizationId || log.organizationId === organizationId
+          : log.organizationId === organizationId
+      )
+    : historyStore;
+
+  activeHistory.forEach((log) => {
     if (log.damageReport?.estimatedCost) {
       const cost = log.damageReport.estimatedCost;
       monthlyDamageCost += cost;
@@ -40835,7 +40879,11 @@ export function getMockStorekeeperOperations(
 ): StorekeeperOperationsPayload {
   const isAll = !warehouseId || warehouseId === 'all' || warehouseId.toLowerCase() === 'all';
   const activeWarehouses = organizationId
-    ? warehousesStore.filter((w) => !w.organizationId || w.organizationId === organizationId)
+    ? warehousesStore.filter((w) =>
+        organizationId === DEFAULT_ORGANIZATION.id
+          ? !w.organizationId || w.organizationId === organizationId
+          : w.organizationId === organizationId
+      )
     : warehousesStore;
 
   const currentWh = isAll
@@ -40856,8 +40904,10 @@ export function getMockStorekeeperOperations(
   let quarantinedCount = 0;
 
   const activeAssets = organizationId
-    ? assetsStore.filter(
-        (a) => !a.organizationId || a.organizationId === organizationId || a.organization_id === organizationId
+    ? assetsStore.filter((a) =>
+        organizationId === DEFAULT_ORGANIZATION.id
+          ? !a.organizationId || a.organizationId === organizationId || a.organization_id === organizationId
+          : a.organizationId === organizationId || a.organization_id === organizationId
       )
     : assetsStore;
 
@@ -40889,7 +40939,7 @@ export function getMockStorekeeperOperations(
           qrCode: asset.qrCode,
           workerName: asset.currentAssignedWorker || 'עובד שטח',
           workerPhone: asset.workerPhone,
-          warehouseName: currentWh.name,
+          warehouseName: asset.warehouseName || currentWh.name,
           expectedReturnDate: asset.expectedReturnDate,
           daysOverdue: days,
         });
@@ -40911,11 +40961,12 @@ export function getMockStorekeeperOperations(
     }
   });
 
-  // Calculate low stock per category for this facility
+  // Calculate low stock per category for this facility strictly within organization
+  const scopedCategories = getMockCategories(organizationId);
   const lowStockAlerts =
     whAssets.length === 0
       ? []
-      : MOCK_CATEGORIES.map((cat) => {
+      : scopedCategories.map((cat) => {
           const availInCat = whAssets.filter(
             (a) =>
               (a.category === cat.name ||
@@ -40951,8 +41002,10 @@ export function getMockStorekeeperOperations(
  */
 export function getMockCatalogData(warehouseId?: string, organizationId?: string): CatalogDataPayload {
   const activeAssets = organizationId
-    ? assetsStore.filter(
-        (a) => !a.organizationId || a.organizationId === organizationId || a.organization_id === organizationId
+    ? assetsStore.filter((a) =>
+        organizationId === DEFAULT_ORGANIZATION.id
+          ? !a.organizationId || a.organizationId === organizationId || a.organization_id === organizationId
+          : a.organizationId === organizationId || a.organization_id === organizationId
       )
     : assetsStore;
 
@@ -41040,7 +41093,11 @@ export function getMockAuditHistory(filters?: AuditHistoryFilters, organizationI
   let items = [...historyStore];
 
   if (organizationId) {
-    items = items.filter((item) => !item.organizationId || item.organizationId === organizationId);
+    items = items.filter((item) =>
+      organizationId === DEFAULT_ORGANIZATION.id
+        ? !item.organizationId || item.organizationId === organizationId
+        : item.organizationId === organizationId
+    );
   }
 
   if (filters?.action && filters.action !== 'all') {
@@ -41212,8 +41269,12 @@ export function getNextAvailableMockTagNumber(prefix: string = 'ZR-', organizati
   let maxNumber = 0;
 
   for (const asset of assetsStore) {
-    if (organizationId && asset.organizationId && asset.organizationId !== organizationId) {
-      continue;
+    if (organizationId) {
+      const isDefault = organizationId === DEFAULT_ORGANIZATION.id;
+      const matchesOrg = isDefault
+        ? !asset.organizationId || asset.organizationId === organizationId || asset.organization_id === organizationId
+        : asset.organizationId === organizationId || asset.organization_id === organizationId;
+      if (!matchesOrg) continue;
     }
     const qr = (asset.qrCode || '').trim().toUpperCase();
     if (cleanPrefix.startsWith('ZR')) {

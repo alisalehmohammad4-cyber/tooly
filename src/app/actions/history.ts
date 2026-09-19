@@ -2,7 +2,9 @@
 
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import type { DamageReport, GpsCoordinates } from '@/types/domain';
-import { getMockAuditHistory, getMockWarehouses } from '@/lib/mockStore';
+import { getMockAuditHistory, getMockWarehouses, DEFAULT_ORGANIZATION } from '@/lib/mockStore';
+
+const DEFAULT_ORGANIZATION_ID = DEFAULT_ORGANIZATION.id;
 
 export type AuditActionType =
   | 'CHECKOUT'
@@ -54,16 +56,38 @@ export interface AuditHistoryPayload {
   warehouses: Array<{ id: string; name: string; code: string }>;
 }
 
-const getFallbackWarehouses = () => getMockWarehouses();
+async function resolveActiveOrganizationId(providedOrgId?: string): Promise<string> {
+  if (providedOrgId && providedOrgId.trim()) {
+    return providedOrgId.trim();
+  }
+  try {
+    const { cookies } = await import('next/headers');
+    const cookieStore = await cookies();
+    const activeUserCookie = cookieStore.get('tooly_active_user');
+    if (activeUserCookie?.value) {
+      const decoded = decodeURIComponent(activeUserCookie.value);
+      const parsed = JSON.parse(decoded);
+      if (parsed?.organizationId) {
+        return parsed.organizationId;
+      }
+    }
+  } catch {
+    // In contexts where cookies() is unavailable
+  }
+  return DEFAULT_ORGANIZATION_ID;
+}
 
 /**
- * Retrieves chronological audit ledger entries.
+ * Retrieves chronological audit ledger entries strictly scoped by organization.
  */
 export async function getAuditHistory(
-  filters?: AuditHistoryFilters
+  filters?: AuditHistoryFilters,
+  organizationId?: string
 ): Promise<AuditHistoryPayload> {
+  const orgId = await resolveActiveOrganizationId(organizationId);
+
   if (!isSupabaseConfigured()) {
-    return getMockAuditHistory(filters);
+    return getMockAuditHistory(filters, orgId);
   }
 
   try {
@@ -83,11 +107,13 @@ export async function getAuditHistory(
         gps_lng,
         notes,
         created_at,
+        organization_id,
         assets:asset_id (
           id,
           qr_code,
           condition,
           current_warehouse_id,
+          organization_id,
           tool_models:tool_model_id (
             name,
             brand,
@@ -102,6 +128,13 @@ export async function getAuditHistory(
       `)
       .order('created_at', { ascending: false });
 
+    // Enforce tenant isolation on Supabase query
+    if (orgId === DEFAULT_ORGANIZATION_ID) {
+      query = query.or(`organization_id.eq.${orgId},organization_id.is.null`);
+    } else {
+      query = query.eq('organization_id', orgId);
+    }
+
     if (filters?.action && filters.action !== 'all') {
       query = query.eq('action', filters.action);
     }
@@ -110,7 +143,7 @@ export async function getAuditHistory(
 
     if (error || !rawRows || rawRows.length === 0) {
       console.warn('Using fallback audit trail history due to empty database or query error');
-      return getMockAuditHistory(filters);
+      return getMockAuditHistory(filters, orgId);
     }
 
     interface RawLedgerRow {
@@ -127,11 +160,13 @@ export async function getAuditHistory(
       gps_lng?: number | null;
       notes: string | null;
       created_at: string;
+      organization_id?: string | null;
       assets: {
         id: string;
         qr_code: string;
         condition: AuditHistoryRecord['condition'];
         current_warehouse_id: string;
+        organization_id?: string | null;
         tool_models: {
           name: string;
           brand: string;
@@ -172,6 +207,7 @@ export async function getAuditHistory(
           warehouseCode: row.assets?.warehouses?.code || 'FAC',
           notes: row.notes,
           createdAt: row.created_at,
+          organizationId: (row.organization_id as string) || orgId,
           expectedReturnDate: row.expected_return_date || null,
           signatureData: row.signature_data || null,
           accessoriesSnapshot: row.accessories_snapshot || null,
@@ -187,11 +223,11 @@ export async function getAuditHistory(
     return {
       records,
       totalCount: records.length,
-      warehouses: getFallbackWarehouses(),
+      warehouses: getMockWarehouses(false, orgId),
     };
   } catch (err) {
     console.error('getAuditHistory exception, returning fallback:', err);
-    return getMockAuditHistory(filters);
+    return getMockAuditHistory(filters, orgId);
   }
 }
 

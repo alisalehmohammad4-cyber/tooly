@@ -6,7 +6,7 @@ import type { AssetReservation, AssetStatus } from '@/types/domain';
 import { appendAuditHistoryEntry } from '@/app/actions/history';
 import {
   getMockWarehouses,
-  MOCK_CATEGORIES,
+  getMockCategories,
   getMockAssetByQr,
   addMockAsset,
   getMockAssets,
@@ -22,6 +22,27 @@ export interface OnboardFormData {
   categories: Array<{ id: string; name: string; slug: string; icon: string | null }>;
 }
 
+async function resolveActiveOrganizationId(providedOrgId?: string): Promise<string> {
+  if (providedOrgId && providedOrgId.trim()) {
+    return providedOrgId.trim();
+  }
+  try {
+    const { cookies } = await import('next/headers');
+    const cookieStore = await cookies();
+    const activeUserCookie = cookieStore.get('tooly_active_user');
+    if (activeUserCookie?.value) {
+      const decoded = decodeURIComponent(activeUserCookie.value);
+      const parsed = JSON.parse(decoded);
+      if (parsed?.organizationId) {
+        return parsed.organizationId;
+      }
+    }
+  } catch {
+    // In contexts where cookies() is unavailable
+  }
+  return DEFAULT_ORGANIZATION_ID;
+}
+
 export type OnboardAssetResult =
   | { success: true; assetId: string }
   | { success: false; error: string };
@@ -31,34 +52,34 @@ export type OnboardAssetResult =
  * Strictly filters out legacy English demo categories.
  */
 export async function getOnboardFormData(organizationId?: string): Promise<OnboardFormData> {
-  const orgId = organizationId || DEFAULT_ORGANIZATION_ID;
+  const orgId = await resolveActiveOrganizationId(organizationId);
 
   if (!isSupabaseConfigured()) {
     return {
       warehouses: getMockWarehouses(orgId).map((w) => ({ id: w.id, name: w.name, code: w.code })),
-      categories: MOCK_CATEGORIES.filter(
-        (c) => !isLegacyEnglishCategory(c) && (!c.organizationId || c.organizationId === orgId)
-      ).map((c) => ({
-        id: c.id,
-        name: c.name,
-        slug: c.slug,
-        icon: c.icon ?? null,
-      })),
+      categories: getMockCategories(orgId)
+        .filter((c) => !isLegacyEnglishCategory(c))
+        .map((c) => ({
+          id: c.id,
+          name: c.name,
+          slug: c.slug,
+          icon: c.icon ?? null,
+        })),
     };
   }
 
-  const [warehousesResponse, categoriesResponse] = await Promise.all([
-    supabase
-      .from('warehouses')
-      .select('id, name, code')
-      .eq('is_active', true)
-      .or(`organization_id.eq.${orgId},organization_id.is.null`),
-    supabase
-      .from('categories')
-      .select('id, name, slug, icon')
-      .or(`organization_id.eq.${orgId},organization_id.is.null`)
-      .order('display_order', { ascending: true }),
-  ]);
+  let whQuery = supabase.from('warehouses').select('id, name, code').eq('is_active', true);
+  let catQuery = supabase.from('categories').select('id, name, slug, icon').order('display_order', { ascending: true });
+
+  if (orgId === DEFAULT_ORGANIZATION_ID) {
+    whQuery = whQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
+    catQuery = catQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
+  } else {
+    whQuery = whQuery.eq('organization_id', orgId);
+    catQuery = catQuery.eq('organization_id', orgId);
+  }
+
+  const [warehousesResponse, categoriesResponse] = await Promise.all([whQuery, catQuery]);
 
   if (warehousesResponse.error) {
     console.error('Error fetching warehouses:', warehousesResponse.error.message);
@@ -79,14 +100,14 @@ export async function getOnboardFormData(organizationId?: string): Promise<Onboa
     categories:
       rawCategories.length > 0
         ? rawCategories
-        : MOCK_CATEGORIES.filter(
-            (c) => !isLegacyEnglishCategory(c) && (!c.organizationId || c.organizationId === orgId)
-          ).map((c) => ({
-            id: c.id,
-            name: c.name,
-            slug: c.slug,
-            icon: c.icon ?? null,
-          })),
+        : getMockCategories(orgId)
+            .filter((c) => !isLegacyEnglishCategory(c))
+            .map((c) => ({
+              id: c.id,
+              name: c.name,
+              slug: c.slug,
+              icon: c.icon ?? null,
+            })),
   };
 }
 
@@ -98,25 +119,32 @@ export async function checkQrCodeExists(qrCode: string, organizationId?: string)
   if (!sanitizedQr) {
     return false;
   }
-  const orgId = organizationId || DEFAULT_ORGANIZATION_ID;
+  const orgId = await resolveActiveOrganizationId(organizationId);
 
   if (!isSupabaseConfigured()) {
-    return Boolean(getMockAssetByQr(sanitizedQr, orgId));
+    return Boolean(getMockAssetByQr(sanitizedQr, undefined, orgId));
   }
 
-  const { data, error } = await supabase
-    .from('assets')
-    .select('id')
-    .eq('qr_code', sanitizedQr)
-    .or(`organization_id.eq.${orgId},organization_id.is.null`)
-    .maybeSingle();
+  try {
+    let query = supabase
+      .from('assets')
+      .select('id')
+      .eq('qr_code', sanitizedQr);
 
-  if (error) {
-    console.error('Error checking QR code existence:', error.message);
-    throw new Error(`Failed to check QR code: ${error.message}`);
+    if (orgId === DEFAULT_ORGANIZATION_ID) {
+      query = query.or(`organization_id.eq.${orgId},organization_id.is.null`);
+    } else {
+      query = query.eq('organization_id', orgId);
+    }
+
+    const { data, error } = await query.maybeSingle();
+    if (error) {
+      return Boolean(getMockAssetByQr(sanitizedQr, undefined, orgId));
+    }
+    return Boolean(data);
+  } catch {
+    return Boolean(getMockAssetByQr(sanitizedQr, undefined, orgId));
   }
-
-  return Boolean(data);
 }
 
 /**
@@ -126,7 +154,7 @@ export async function onboardAsset(
   rawInput: QuickOnboardInput,
   organizationId?: string
 ): Promise<OnboardAssetResult> {
-  const orgId = organizationId || DEFAULT_ORGANIZATION_ID;
+  const orgId = await resolveActiveOrganizationId(organizationId);
 
   // 1. Validate input schema
   const parsed = QuickOnboardSchema.safeParse(rawInput);
@@ -368,7 +396,7 @@ export async function getCatalogData(
   warehouseId?: string,
   organizationId?: string
 ): Promise<CatalogDataPayload> {
-  const orgId = organizationId || DEFAULT_ORGANIZATION_ID;
+  const orgId = await resolveActiveOrganizationId(organizationId);
   const cacheKey = `catalog_${orgId}_${warehouseId || 'all'}`;
   const cached = catalogCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
@@ -381,24 +409,26 @@ export async function getCatalogData(
 
   if (isSupabaseConfigured()) {
     try {
+      let whQuery = supabase.from('warehouses').select('id, name, code').eq('is_active', true);
+      let catQuery = supabase.from('categories').select('id, name, slug, icon').order('display_order', { ascending: true });
+      let astQuery = supabase.from('assets').select(
+        'id, qr_code, status, condition, current_assigned_worker, current_warehouse_id, warehouse_id, category_id, category_name, tool_name, brand, model_number, purchase_date, purchase_cost, order_number'
+      ).limit(10000);
+
+      if (orgId === DEFAULT_ORGANIZATION_ID) {
+        whQuery = whQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
+        catQuery = catQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
+        astQuery = astQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
+      } else {
+        whQuery = whQuery.eq('organization_id', orgId);
+        catQuery = catQuery.eq('organization_id', orgId);
+        astQuery = astQuery.eq('organization_id', orgId);
+      }
+
       const [warehousesRes, categoriesRes, assetsRes] = await Promise.all([
-        supabase
-          .from('warehouses')
-          .select('id, name, code')
-          .eq('is_active', true)
-          .or(`organization_id.eq.${orgId},organization_id.is.null`),
-        supabase
-          .from('categories')
-          .select('id, name, slug, icon')
-          .or(`organization_id.eq.${orgId},organization_id.is.null`)
-          .order('display_order', { ascending: true }),
-        supabase
-          .from('assets')
-          .select(
-            'id, qr_code, status, condition, current_assigned_worker, current_warehouse_id, warehouse_id, category_id, category_name, tool_name, brand, model_number, purchase_date, purchase_cost, order_number'
-          )
-          .or(`organization_id.eq.${orgId},organization_id.is.null`)
-          .limit(10000),
+        whQuery,
+        catQuery,
+        astQuery,
       ]);
 
       if (!warehousesRes.error && warehousesRes.data && warehousesRes.data.length > 0) {
@@ -508,14 +538,14 @@ export async function getCatalogData(
     warehousesList = getMockWarehouses(orgId).map((w) => ({ id: w.id, name: w.name, code: w.code }));
   }
   if (categoriesList.length === 0) {
-    categoriesList = MOCK_CATEGORIES.filter(
-      (c) => !isLegacyEnglishCategory(c) && (!c.organizationId || c.organizationId === orgId)
-    ).map((c) => ({
-      id: c.id,
-      name: c.name,
-      slug: c.slug,
-      icon: c.icon ?? null,
-    }));
+    categoriesList = getMockCategories(orgId)
+      .filter((c) => !isLegacyEnglishCategory(c))
+      .map((c) => ({
+        id: c.id,
+        name: c.name,
+        slug: c.slug,
+        icon: c.icon ?? null,
+      }));
   }
   if (allAssets.length === 0) {
     allAssets = getMockAssets(orgId).map((a) => ({
@@ -602,7 +632,7 @@ export async function getNextAvailableTagNumberAction(
   prefix: string = 'ZR-',
   organizationId?: string
 ): Promise<number> {
-  const orgId = organizationId || DEFAULT_ORGANIZATION_ID;
+  const orgId = await resolveActiveOrganizationId(organizationId);
   const cleanPrefix = prefix.trim().toUpperCase();
   let maxNumber = 0;
 
@@ -617,11 +647,18 @@ export async function getNextAvailableTagNumberAction(
     try {
       const isZr = cleanPrefix.startsWith('ZR');
       const prefixPattern = isZr ? 'ZR%' : `${cleanPrefix}%`;
-      const { data, error } = await supabase
+      let query = supabase
         .from('assets')
         .select('qr_code')
-        .or(`organization_id.eq.${orgId},organization_id.is.null`)
         .ilike('qr_code', prefixPattern);
+
+      if (orgId === DEFAULT_ORGANIZATION_ID) {
+        query = query.or(`organization_id.eq.${orgId},organization_id.is.null`);
+      } else {
+        query = query.eq('organization_id', orgId);
+      }
+
+      const { data, error } = await query;
 
       if (!error && data && data.length > 0) {
         for (const row of data) {

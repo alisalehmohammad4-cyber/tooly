@@ -47,7 +47,7 @@ export interface UseWebNfcReturn {
   nfcError: string | null;
   startScan: (onTagScanned: (tagId: string, rawUid?: string) => void) => Promise<boolean>;
   stopScan: () => void;
-  writeNfcTag: (assetCode: string) => Promise<boolean>;
+  writeNfcTag: (assetCode: string, orgSlug?: string) => Promise<boolean>;
 }
 
 /**
@@ -182,7 +182,7 @@ export function useWebNfc(): UseWebNfcReturn {
 
   // Write universal NDEF URL tag compatible with ANY modern iPhone & Android
   const writeNfcTag = useCallback(
-    async (assetCode: string): Promise<boolean> => {
+    async (assetCode: string, orgSlug?: string): Promise<boolean> => {
       const cleanCode = assetCode.trim();
       if (!cleanCode) {
         setNfcError('קוד כלי לא תקין לצריבה.');
@@ -203,7 +203,8 @@ export function useWebNfc(): UseWebNfcReturn {
 
         // Universal NDEF URL Deep-Link: iPhone XS-16 natively detects this in background
         const origin = window.location.origin;
-        const deepLinkUrl = `${origin}/?nfc=${encodeURIComponent(cleanCode)}`;
+        const slug = (orgSlug || 'zatout').trim();
+        const deepLinkUrl = `${origin}/?org=${encodeURIComponent(slug)}&tool=${encodeURIComponent(cleanCode)}`;
 
         await ndef.write({
           records: [

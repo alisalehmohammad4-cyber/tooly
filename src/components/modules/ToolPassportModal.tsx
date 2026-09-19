@@ -39,7 +39,7 @@ export default function ToolPassportModal({
   onClose,
   onAssetUpdated,
 }: ToolPassportModalProps) {
-  const { role, user, openPinModal } = useAuth();
+  const { role, user, openPinModal, currentOrganization } = useAuth();
   const { isWriting: isNfcWriting, writeNfcTag } = useWebNfc();
   const [nfcWriteStatus, setNfcWriteStatus] = useState<string | null>(null);
 
@@ -255,7 +255,7 @@ export default function ToolPassportModal({
   const handleWriteNfc = async () => {
     if (!currentAsset) return;
     setNfcWriteStatus('ממתין להצמדת תגית NFC לגב המכשיר...');
-    const ok = await writeNfcTag(currentAsset.qrCode);
+    const ok = await writeNfcTag(currentAsset.qrCode, currentOrganization?.slug);
     if (ok) {
       setNfcWriteStatus('תגית ה-NFC נצרבה בהצלחה! תומכת כעת ב-iPhone וב-Android.');
       setTimeout(() => setNfcWriteStatus(null), 4000);

@@ -34,6 +34,9 @@ type LabelFormat = 'tsc' | 'a4';
 export default function PrintTagsView() {
   const { currentOrganization } = useAuth();
 
+  const orgId = currentOrganization?.id || 'default';
+  const orgSlug = currentOrganization?.slug || 'zatout';
+
   // Mode selection: Tab A (Batch) vs Tab B (Reprint)
   const [activeTab, setActiveTab] = useState<PrintMode>('batch');
 
@@ -50,7 +53,10 @@ export default function PrintTagsView() {
   const [customCompanyName, setCustomCompanyName] = useState<string | null>(() => {
     if (typeof window !== 'undefined') {
       try {
-        return localStorage.getItem('tooly_company_name');
+        return (
+          localStorage.getItem(`tooly_company_name_${orgId}`) ||
+          localStorage.getItem('tooly_company_name')
+        );
       } catch (err) {
         console.warn('Error reading tooly_company_name from localStorage:', err);
       }
@@ -72,16 +78,19 @@ export default function PrintTagsView() {
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
 
   // Persist company name edits to localStorage
-  const handleCompanyNameChange = useCallback((value: string) => {
-    setCustomCompanyName(value);
-    if (typeof window !== 'undefined') {
-      try {
-        localStorage.setItem('tooly_company_name', value);
-      } catch (err) {
-        console.warn('Error saving tooly_company_name to localStorage:', err);
+  const handleCompanyNameChange = useCallback(
+    (value: string) => {
+      setCustomCompanyName(value);
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem(`tooly_company_name_${orgId}`, value);
+        } catch (err) {
+          console.warn('Error saving tooly_company_name to localStorage:', err);
+        }
       }
-    }
-  }, []);
+    },
+    [orgId]
+  );
 
   // 1. Auto-population: fetch highest existing serial from database and mockStore on mount / prefix change
   useEffect(() => {
@@ -94,7 +103,9 @@ export default function PrintTagsView() {
         // Check local storage for offline / last printed fallback
         let lastPrinted = 0;
         if (typeof window !== 'undefined') {
-          const stored = localStorage.getItem('tooly_last_printed_end_number');
+          const stored =
+            localStorage.getItem(`tooly_last_printed_end_number_${orgId}`) ||
+            localStorage.getItem('tooly_last_printed_end_number');
           if (stored) {
             const parsed = parseInt(stored, 10);
             if (!isNaN(parsed) && parsed > 0) {
@@ -121,7 +132,7 @@ export default function PrintTagsView() {
     return () => {
       isCurrent = false;
     };
-  }, [prefix, currentOrganization?.id]);
+  }, [prefix, currentOrganization?.id, orgId]);
 
   // Compute batch list of serials: strictly ${prefix}${num} without extra zero-padding
   const batchSerials = useMemo(() => {
@@ -143,10 +154,13 @@ export default function PrintTagsView() {
 
     const generateQrs = async () => {
       try {
+        const origin = typeof window !== 'undefined' ? window.location.origin : 'https://tooly.co.il';
+
         if (activeTab === 'batch') {
           const results = await Promise.all(
             batchSerials.map(async (serial) => {
-              const qrDataUrl = await QRCode.toDataURL(serial, {
+              const universalQrUrl = `${origin}/?org=${encodeURIComponent(orgSlug)}&tool=${encodeURIComponent(serial)}`;
+              const qrDataUrl = await QRCode.toDataURL(universalQrUrl, {
                 width: 360,
                 margin: 1,
                 errorCorrectionLevel: 'M',
@@ -178,7 +192,8 @@ export default function PrintTagsView() {
             return;
           }
 
-          const qrDataUrl = await QRCode.toDataURL(reprintAsset.qrCode, {
+          const universalQrUrl = `${origin}/?org=${encodeURIComponent(orgSlug)}&tool=${encodeURIComponent(reprintAsset.qrCode)}`;
+          const qrDataUrl = await QRCode.toDataURL(universalQrUrl, {
             width: 360,
             margin: 1,
             errorCorrectionLevel: 'M',
@@ -215,7 +230,7 @@ export default function PrintTagsView() {
     return () => {
       isCurrent = false;
     };
-  }, [activeTab, batchSerials, facilityText, reprintAsset, reprintQuantity]);
+  }, [activeTab, batchSerials, facilityText, reprintAsset, reprintQuantity, orgSlug]);
 
   // Handle Reprint Tool Search
   const handleSearchReprint = useCallback(async () => {
@@ -226,7 +241,7 @@ export default function PrintTagsView() {
     setReprintError(null);
 
     try {
-      const asset = await getAssetDetailsByQr(q);
+      const asset = await getAssetDetailsByQr(q, undefined, currentOrganization?.id);
       if (asset) {
         setReprintAsset(asset);
         setReprintError(null);
@@ -240,7 +255,7 @@ export default function PrintTagsView() {
     } finally {
       setIsSearchingReprint(false);
     }
-  }, [reprintSearchInput]);
+  }, [reprintSearchInput, currentOrganization]);
 
   const handleQuantitySelect = (qty: number) => {
     setQuantity(qty);
@@ -260,6 +275,7 @@ export default function PrintTagsView() {
       if (activeTab === 'batch') {
         const endNumber = startNumber + Math.max(1, Math.min(quantity, 200)) - 1;
         try {
+          localStorage.setItem(`tooly_last_printed_end_number_${orgId}`, String(endNumber));
           localStorage.setItem('tooly_last_printed_end_number', String(endNumber));
         } catch {
           // localStorage disabled or private mode

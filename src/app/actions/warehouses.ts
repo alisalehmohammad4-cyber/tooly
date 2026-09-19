@@ -35,6 +35,27 @@ export async function invalidateWarehouseCache(): Promise<void> {
   warehouseToolsCache.clear();
 }
 
+async function resolveActiveOrganizationId(providedOrgId?: string): Promise<string> {
+  if (providedOrgId && providedOrgId.trim()) {
+    return providedOrgId.trim();
+  }
+  try {
+    const { cookies } = await import('next/headers');
+    const cookieStore = await cookies();
+    const activeUserCookie = cookieStore.get('tooly_active_user');
+    if (activeUserCookie?.value) {
+      const decoded = decodeURIComponent(activeUserCookie.value);
+      const parsed = JSON.parse(decoded);
+      if (parsed?.organizationId) {
+        return parsed.organizationId;
+      }
+    }
+  } catch {
+    // In contexts where cookies() is unavailable
+  }
+  return DEFAULT_ORGANIZATION_ID;
+}
+
 /**
  * Retrieves all facilities and warehouses joined with live asset inventory metrics.
  * Scoped by organization and cached for 30 seconds to optimize executive dashboard performance.
@@ -42,7 +63,7 @@ export async function invalidateWarehouseCache(): Promise<void> {
 export async function getWarehousesAdminAction(
   organizationId?: string
 ): Promise<WarehouseAdminItem[]> {
-  const orgId = organizationId || DEFAULT_ORGANIZATION_ID;
+  const orgId = await resolveActiveOrganizationId(organizationId);
   const cached = adminWarehousesCache.get(orgId);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.data;
@@ -73,18 +94,24 @@ export async function getWarehousesAdminAction(
 
   if (isSupabaseConfigured()) {
     try {
-      const [whRes, assetsRes] = await Promise.all([
-        supabase
-          .from('warehouses')
-          .select('id, name, code, type, address, is_active, organization_id')
-          .or(`organization_id.eq.${orgId},organization_id.is.null`)
-          .order('name', { ascending: true }),
-        supabase
-          .from('assets')
-          .select('id, current_warehouse_id, status, organization_id')
-          .or(`organization_id.eq.${orgId},organization_id.is.null`)
-          .limit(10000),
-      ]);
+      let whQuery = supabase
+        .from('warehouses')
+        .select('id, name, code, type, address, is_active, organization_id')
+        .order('name', { ascending: true });
+      let astQuery = supabase
+        .from('assets')
+        .select('id, current_warehouse_id, status, organization_id')
+        .limit(10000);
+
+      if (orgId === DEFAULT_ORGANIZATION_ID) {
+        whQuery = whQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
+        astQuery = astQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
+      } else {
+        whQuery = whQuery.eq('organization_id', orgId);
+        astQuery = astQuery.eq('organization_id', orgId);
+      }
+
+      const [whRes, assetsRes] = await Promise.all([whQuery, astQuery]);
 
       if (!whRes.error && whRes.data && whRes.data.length > 0) {
         warehousesList = whRes.data.map((row: Record<string, unknown>) => ({
@@ -177,7 +204,7 @@ export async function createWarehouseAction(
   },
   organizationId?: string
 ): Promise<WarehouseActionResult> {
-  const orgId = organizationId || DEFAULT_ORGANIZATION_ID;
+  const orgId = await resolveActiveOrganizationId(organizationId);
   const cleanName = input.name.trim();
   const cleanCode = input.code.trim().toUpperCase();
 
@@ -470,7 +497,7 @@ export async function getWarehouseToolsAction(
     return [];
   }
 
-  const orgId = organizationId || DEFAULT_ORGANIZATION_ID;
+  const orgId = await resolveActiveOrganizationId(organizationId);
   const cacheKey = `${orgId}_${cleanWhId}`;
   const cached = warehouseToolsCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
@@ -483,31 +510,40 @@ export async function getWarehouseToolsAction(
     try {
       // Find matching warehouse by id or code to ensure robust resolution
       let targetWhId = cleanWhId;
-      const { data: wh } = await supabase
+      let whLookup = supabase
         .from('warehouses')
         .select('id, code')
-        .or(`organization_id.eq.${orgId},organization_id.is.null`)
-        .or(`id.eq.${cleanWhId},code.eq.${cleanWhId}`)
-        .maybeSingle();
+        .or(`id.eq.${cleanWhId},code.eq.${cleanWhId}`);
+
+      let astQuery = supabase
+        .from('assets')
+        .select(
+          'id, name, tool_name, qr_code, serial_number, category_id, category_name, status, current_assigned_worker, order_number'
+        )
+        .or(`current_warehouse_id.eq.${targetWhId},warehouse_id.eq.${targetWhId}`)
+        .limit(5000);
+
+      let catQuery = supabase
+        .from('categories')
+        .select('id, name');
+
+      if (orgId === DEFAULT_ORGANIZATION_ID) {
+        whLookup = whLookup.or(`organization_id.eq.${orgId},organization_id.is.null`);
+        astQuery = astQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
+        catQuery = catQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
+      } else {
+        whLookup = whLookup.eq('organization_id', orgId);
+        astQuery = astQuery.eq('organization_id', orgId);
+        catQuery = catQuery.eq('organization_id', orgId);
+      }
+
+      const { data: wh } = await whLookup.maybeSingle();
 
       if (wh?.id) {
         targetWhId = wh.id;
       }
 
-      const [assetsRes, categoriesRes] = await Promise.all([
-        supabase
-          .from('assets')
-          .select(
-            'id, name, tool_name, qr_code, serial_number, category_id, category_name, status, current_assigned_worker, order_number'
-          )
-          .or(`organization_id.eq.${orgId},organization_id.is.null`)
-          .or(`current_warehouse_id.eq.${targetWhId},warehouse_id.eq.${targetWhId}`)
-          .limit(5000),
-        supabase
-          .from('categories')
-          .select('id, name')
-          .or(`organization_id.eq.${orgId},organization_id.is.null`),
-      ]);
+      const [assetsRes, categoriesRes] = await Promise.all([astQuery, catQuery]);
 
       if (!assetsRes.error && assetsRes.data && assetsRes.data.length > 0) {
         const catMap = new Map<string, string>();

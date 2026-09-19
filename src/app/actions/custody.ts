@@ -74,12 +74,33 @@ export type BulkCustodyActionResult =
     }
   | { success: false; error: string };
 
+import { cookies } from 'next/headers';
 import {
   getMockAssetByQr,
   mutateMockAsset,
   getMockAssets,
   getMockWarehouses,
+  DEFAULT_ORGANIZATION,
 } from '@/lib/mockStore';
+
+export async function resolveActiveOrganizationId(providedOrgId?: string): Promise<string> {
+  if (providedOrgId && providedOrgId.trim()) {
+    return providedOrgId.trim();
+  }
+  try {
+    const cookieStore = await cookies();
+    const raw = cookieStore.get('tooly_active_user')?.value;
+    if (raw) {
+      const parsed = JSON.parse(decodeURIComponent(raw));
+      if (parsed?.organizationId) {
+        return parsed.organizationId;
+      }
+    }
+  } catch {
+    // Fallback if cookies() is inaccessible
+  }
+  return DEFAULT_ORGANIZATION.id;
+}
 
 // In-memory fallback dataset synchronized with unified mockStore
 const FALLBACK_CUSTODY_ASSETS: Record<string, ScannedAssetDetails> = {};
@@ -107,6 +128,7 @@ function initCustodyAssets() {
       lockReason: a.lockReason,
       expectedReturnDate: a.expectedReturnDate,
       accessories: a.accessories,
+      organizationId: a.organizationId || DEFAULT_ORGANIZATION.id,
     };
   });
 }
@@ -206,15 +228,18 @@ function mapJoinedRowToScannedAsset(row: JoinedAssetData): ScannedAssetDetails {
  */
 export async function getAssetDetailsByQr(
   qrCode: string,
-  facilityId?: string
+  facilityId?: string,
+  organizationId?: string
 ): Promise<ScannedAssetDetails | null> {
   const cleanQr = qrCode.trim();
   if (!cleanQr) return null;
 
+  const orgId = await resolveActiveOrganizationId(organizationId);
+
   if (isSupabaseConfigured()) {
     try {
       // 1. First, attempt exact match on qr_code, nfc_uid, or id
-      const { data: exactData, error: exactError } = await supabase
+      let exactQuery = supabase
         .from('assets')
         .select(`
           id,
@@ -244,15 +269,22 @@ export async function getAssetDetailsByQr(
             code
           )
         `)
-        .or(`qr_code.eq.${cleanQr},nfc_uid.eq.${cleanQr},id.eq.${cleanQr}`)
-        .maybeSingle();
+        .or(`qr_code.eq.${cleanQr},nfc_uid.eq.${cleanQr},id.eq.${cleanQr}`);
+
+      if (orgId === DEFAULT_ORGANIZATION.id) {
+        exactQuery = exactQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
+      } else {
+        exactQuery = exactQuery.eq('organization_id', orgId);
+      }
+
+      const { data: exactData, error: exactError } = await exactQuery.maybeSingle();
 
       if (!exactError && exactData) {
         return mapJoinedRowToScannedAsset(exactData as unknown as JoinedAssetData);
       }
 
       // 2. Suffix matching in Supabase: qr_code ILIKE '%' || input
-      const { data: suffixData, error: suffixError } = await supabase
+      let suffixQuery = supabase
         .from('assets')
         .select(`
           id,
@@ -284,6 +316,14 @@ export async function getAssetDetailsByQr(
         `)
         .ilike('qr_code', `%${cleanQr}`);
 
+      if (orgId === DEFAULT_ORGANIZATION.id) {
+        suffixQuery = suffixQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
+      } else {
+        suffixQuery = suffixQuery.eq('organization_id', orgId);
+      }
+
+      const { data: suffixData, error: suffixError } = await suffixQuery;
+
       if (!suffixError && suffixData && suffixData.length > 0) {
         const typedRows = suffixData as unknown as JoinedAssetData[];
         const best = pickBestAssetMatch(typedRows, cleanQr, facilityId);
@@ -296,8 +336,8 @@ export async function getAssetDetailsByQr(
     }
   }
 
-  // Fallback lookup from unified mockStore (with suffix and facility disambiguation)
-  const mockItem = getMockAssetByQr(cleanQr, facilityId);
+  // Fallback lookup from unified mockStore (with suffix, facility, and organization disambiguation)
+  const mockItem = getMockAssetByQr(cleanQr, facilityId, orgId);
   if (mockItem) {
     return mockItem;
   }
@@ -306,15 +346,24 @@ export async function getAssetDetailsByQr(
   // 1. Exact match
   const normalized = cleanQr.toUpperCase();
   for (const key of Object.keys(FALLBACK_CUSTODY_ASSETS)) {
-    if (key.toUpperCase() === normalized) {
-      return { ...FALLBACK_CUSTODY_ASSETS[key] };
+    const a = FALLBACK_CUSTODY_ASSETS[key];
+    const matchesOrg =
+      orgId === DEFAULT_ORGANIZATION.id
+        ? !a.organizationId || a.organizationId === orgId
+        : a.organizationId === orgId;
+    if (matchesOrg && key.toUpperCase() === normalized) {
+      return { ...a };
     }
   }
 
   // 2. Suffix match in fallback registry
-  const fallbackMatches = Object.values(FALLBACK_CUSTODY_ASSETS).filter((a) =>
-    matchesCodeSuffix(a.qrCode, cleanQr)
-  );
+  const fallbackMatches = Object.values(FALLBACK_CUSTODY_ASSETS).filter((a) => {
+    const matchesOrg =
+      orgId === DEFAULT_ORGANIZATION.id
+        ? !a.organizationId || a.organizationId === orgId
+        : a.organizationId === orgId;
+    return matchesOrg && matchesCodeSuffix(a.qrCode, cleanQr);
+  });
   if (fallbackMatches.length > 0) {
     const bestFallback = pickBestAssetMatch(fallbackMatches, cleanQr, facilityId);
     if (bestFallback) {
@@ -323,6 +372,71 @@ export async function getAssetDetailsByQr(
   }
 
   return null;
+}
+
+/**
+ * Retrieves full asset details by NFC UID, strictly scoped to active organization.
+ */
+export async function getAssetDetailsByNfc(
+  nfcUid: string,
+  facilityId?: string,
+  organizationId?: string
+): Promise<ScannedAssetDetails | null> {
+  const cleanUid = nfcUid.trim();
+  if (!cleanUid) return null;
+
+  const orgId = await resolveActiveOrganizationId(organizationId);
+
+  if (isSupabaseConfigured()) {
+    try {
+      let query = supabase
+        .from('assets')
+        .select(`
+          id,
+          qr_code,
+          nfc_uid,
+          status,
+          condition,
+          current_assigned_worker,
+          current_warehouse_id,
+          version,
+          purchase_date,
+          purchase_cost,
+          warranty_until,
+          safety_inspection_due,
+          is_locked,
+          lock_reason,
+          reservation,
+          tool_models:tool_model_id (
+            id,
+            name,
+            brand,
+            model_number
+          ),
+          warehouses:current_warehouse_id (
+            id,
+            name,
+            code
+          )
+        `)
+        .eq('nfc_uid', cleanUid);
+
+      if (orgId === DEFAULT_ORGANIZATION.id) {
+        query = query.or(`organization_id.eq.${orgId},organization_id.is.null`);
+      } else {
+        query = query.eq('organization_id', orgId);
+      }
+
+      const { data, error } = await query.maybeSingle();
+      if (!error && data) {
+        return mapJoinedRowToScannedAsset(data as unknown as JoinedAssetData);
+      }
+    } catch (err) {
+      console.warn('Supabase query error in getAssetDetailsByNfc:', err);
+    }
+  }
+
+  return getAssetDetailsByQr(cleanUid, facilityId, orgId);
 }
 
 /**
@@ -351,7 +465,9 @@ export async function bulkCheckoutAssetAction(
     notes,
   } = parsed.data;
 
-  // 1. Pre-validation: Enforce Administrative Lockout & Periodic Safety Inspection Due
+  const orgId = await resolveActiveOrganizationId();
+
+  // 1. Pre-validation: Enforce Administrative Lockout & Periodic Safety Inspection Due & Tenant Ownership
   for (const id of assetIds) {
     let targetAsset: ScannedAssetDetails | null = null;
     for (const key of Object.keys(FALLBACK_CUSTODY_ASSETS)) {
@@ -361,11 +477,35 @@ export async function bulkCheckoutAssetAction(
       }
     }
     if (targetAsset) {
+      const isOwner =
+        orgId === DEFAULT_ORGANIZATION.id
+          ? !targetAsset.organizationId || targetAsset.organizationId === orgId
+          : targetAsset.organizationId === orgId;
+      if (!isOwner) {
+        return {
+          success: false,
+          error: 'לא ניתן לנפק ציוד שאינו שייך לארגון הפעיל',
+        };
+      }
       const lockCheck = checkToolLockout(targetAsset);
       if (!lockCheck.allowed) {
         return {
           success: false,
           error: assetIds.length === 1 ? lockCheck.error! : `${targetAsset.toolName} (${targetAsset.qrCode}): ${lockCheck.error}`,
+        };
+      }
+    }
+
+    const anyMockAsset = getMockAssets().find((a) => a.id === id);
+    if (anyMockAsset) {
+      const isOwner =
+        orgId === DEFAULT_ORGANIZATION.id
+          ? !anyMockAsset.organizationId || anyMockAsset.organizationId === orgId
+          : anyMockAsset.organizationId === orgId;
+      if (!isOwner) {
+        return {
+          success: false,
+          error: 'לא ניתן לנפק ציוד שאינו שייך לארגון הפעיל',
         };
       }
     }
@@ -375,10 +515,10 @@ export async function bulkCheckoutAssetAction(
 
   if (isSupabaseConfigured()) {
     try {
-      // 1. Fetch current assets to verify existence and lockout
+      // 1. Fetch current assets to verify existence, lockout, and tenant isolation
       const { data: currentAssets, error: fetchErr } = await supabase
         .from('assets')
-        .select('id, version, status, is_locked, lock_reason, safety_inspection_due')
+        .select('id, version, status, is_locked, lock_reason, safety_inspection_due, organization_id')
         .in('id', assetIds);
 
       if (fetchErr) {
@@ -392,8 +532,20 @@ export async function bulkCheckoutAssetAction(
         };
       }
 
-      // Check lockouts in DB
+      // Check tenant ownership & lockouts in DB
       for (const item of currentAssets) {
+        const itemOrgId = (item.organization_id as string) || DEFAULT_ORGANIZATION.id;
+        const isOwner =
+          orgId === DEFAULT_ORGANIZATION.id
+            ? !item.organization_id || itemOrgId === orgId
+            : itemOrgId === orgId;
+        if (!isOwner) {
+          return {
+            success: false,
+            error: 'לא ניתן לנפק ציוד שאינו שייך לארגון הפעיל',
+          };
+        }
+
         if (item.is_locked) {
           return {
             success: false,
@@ -796,17 +948,80 @@ export async function transferAssetAction(
   }
 
   const { assetId, targetWarehouseId, gps, notes } = parsed.data;
+  const orgId = await resolveActiveOrganizationId();
+
+  // 1. Verify destination warehouse belongs to active organization
+  const mockWh = getMockWarehouses(true, orgId).find((w) => w.id === targetWarehouseId || w.code === targetWarehouseId);
+  let isWhValid = Boolean(mockWh);
+
+  if (isSupabaseConfigured()) {
+    try {
+      const { data: dbWh } = await supabase
+        .from('warehouses')
+        .select('id, organization_id')
+        .eq('id', targetWarehouseId)
+        .maybeSingle();
+
+      if (dbWh) {
+        const whOrg = (dbWh.organization_id as string) || DEFAULT_ORGANIZATION.id;
+        isWhValid =
+          orgId === DEFAULT_ORGANIZATION.id
+            ? !dbWh.organization_id || whOrg === orgId
+            : whOrg === orgId;
+      }
+    } catch {}
+  }
+
+  if (!isWhValid) {
+    return {
+      success: false,
+      error: 'לא ניתן להעביר ציוד למתקן שאינו שייך לארגון זה',
+    };
+  }
+
+  // 2. Verify asset belongs to active organization
+  let isAssetValid = false;
+  const mockAsset = getMockAssets().find((a) => a.id === assetId);
+  if (mockAsset) {
+    isAssetValid =
+      orgId === DEFAULT_ORGANIZATION.id
+        ? !mockAsset.organizationId || mockAsset.organizationId === orgId
+        : mockAsset.organizationId === orgId;
+  }
+  for (const key of Object.keys(FALLBACK_CUSTODY_ASSETS)) {
+    const fAsset = FALLBACK_CUSTODY_ASSETS[key];
+    if (fAsset.id === assetId) {
+      isAssetValid =
+        orgId === DEFAULT_ORGANIZATION.id
+          ? !fAsset.organizationId || fAsset.organizationId === orgId
+          : fAsset.organizationId === orgId;
+      break;
+    }
+  }
 
   if (isSupabaseConfigured()) {
     try {
       const { data: currentAsset, error: fetchErr } = await supabase
         .from('assets')
-        .select('id, version')
+        .select('id, version, organization_id')
         .eq('id', assetId)
         .single();
 
       if (fetchErr || !currentAsset) {
         return { success: false, error: 'Asset not found in database.' };
+      }
+
+      const assetOrg = (currentAsset.organization_id as string) || DEFAULT_ORGANIZATION.id;
+      const isAssetOwner =
+        orgId === DEFAULT_ORGANIZATION.id
+          ? !currentAsset.organization_id || assetOrg === orgId
+          : assetOrg === orgId;
+
+      if (!isAssetOwner) {
+        return {
+          success: false,
+          error: 'לא ניתן להעביר ציוד למתקן שאינו שייך לארגון זה',
+        };
       }
 
       const nextVersion = (currentAsset.version || 1) + 1;
@@ -828,6 +1043,7 @@ export async function transferAssetAction(
         asset_id: assetId,
         action: 'TRANSFER_RECEIVE',
         performed_by: 'Field Agent',
+        organization_id: orgId,
         gps_lat: gps?.lat ?? null,
         gps_lng: gps?.lng ?? null,
         notes: notes || `Transferred to warehouse ${targetWarehouseId}`,
@@ -836,6 +1052,11 @@ export async function transferAssetAction(
       const msg = err instanceof Error ? err.message : 'Database error';
       return { success: false, error: msg };
     }
+  } else if (!isAssetValid) {
+    return {
+      success: false,
+      error: 'לא ניתן להעביר ציוד למתקן שאינו שייך לארגון זה',
+    };
   }
 
   const targetWhMeta = getWarehouseMeta(targetWarehouseId);

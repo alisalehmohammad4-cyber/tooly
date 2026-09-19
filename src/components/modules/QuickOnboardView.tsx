@@ -310,8 +310,25 @@ export default function QuickOnboardView({
   // Handle successful QR detection
   const handleScanSuccess = useCallback(
     async (decodedText: string) => {
-      const cleanQr = decodedText.trim();
+      let cleanQr = decodedText.trim();
       if (!cleanQr) return;
+
+      // Extract tool code from universal deep-link URLs (e.g. https://.../?org=...&tool=ZR-1099 or ?nfc=ZR-1099)
+      if (cleanQr.includes('?') && (cleanQr.includes('tool=') || cleanQr.includes('nfc='))) {
+        try {
+          const origin = typeof window !== 'undefined' ? window.location.origin : 'https://tooly.co.il';
+          const urlObj = new URL(cleanQr, origin);
+          const extractedTool = urlObj.searchParams.get('tool') || urlObj.searchParams.get('nfc');
+          if (extractedTool) {
+            cleanQr = extractedTool.trim();
+          }
+        } catch {
+          const match = cleanQr.match(/[?&](?:tool|nfc)=([^&#]+)/);
+          if (match && match[1]) {
+            cleanQr = decodeURIComponent(match[1]).trim();
+          }
+        }
+      }
 
       const now = Date.now();
       // Debounce duplicate frames of the exact same QR code within 1.5 seconds
@@ -337,16 +354,16 @@ export default function QuickOnboardView({
 
         // Check IndexedDB cache first if offline, or attempt network fetch
         if (typeof navigator !== 'undefined' && !navigator.onLine) {
-          existing = await getCachedAssetByQr(cleanQr);
+          existing = await getCachedAssetByQr(cleanQr, currentOrganization?.id);
         } else {
           try {
-            existing = await getAssetDetailsByQr(cleanQr);
+            existing = await getAssetDetailsByQr(cleanQr, undefined, currentOrganization?.id);
             if (existing) {
-              await cacheAsset(existing);
+              await cacheAsset(existing, currentOrganization?.id);
             }
           } catch (netErr) {
             console.warn('Network call failed, checking local IndexedDB cache:', netErr);
-            existing = await getCachedAssetByQr(cleanQr);
+            existing = await getCachedAssetByQr(cleanQr, currentOrganization?.id);
           }
         }
 

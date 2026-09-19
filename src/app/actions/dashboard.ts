@@ -124,33 +124,74 @@ export interface StorekeeperOperationsPayload {
 // Fallback dataset for instant preview and offline development
 const getFallbackWarehouses = (orgId?: string) => getMockWarehouses(false, orgId);
 
+// Fast in-memory cache for executive analytics and warehouse operations (30-second TTL)
+interface CacheEntry<T> {
+  data: T;
+  expiresAt: number;
+}
+const analyticsCache = new Map<string, CacheEntry<PlantManagerAnalyticsPayload>>();
+const storekeeperOpsCache = new Map<string, CacheEntry<StorekeeperOperationsPayload>>();
+
+async function resolveActiveOrganizationId(providedOrgId?: string): Promise<string> {
+  if (providedOrgId && providedOrgId.trim()) {
+    return providedOrgId.trim();
+  }
+  try {
+    const { cookies } = await import('next/headers');
+    const cookieStore = await cookies();
+    const activeUserCookie = cookieStore.get('tooly_active_user');
+    if (activeUserCookie?.value) {
+      const decoded = decodeURIComponent(activeUserCookie.value);
+      const parsed = JSON.parse(decoded);
+      if (parsed?.organizationId) {
+        return parsed.organizationId;
+      }
+    }
+  } catch {
+    // In contexts where cookies() is unavailable
+  }
+  return DEFAULT_ORGANIZATION_ID;
+}
+
 /**
  * Retrieves executive analytics and safety compliance data for Factory & Plant Managers.
  */
 export async function getPlantManagerAnalytics(
   organizationId?: string
 ): Promise<PlantManagerAnalyticsPayload> {
-  const orgId = organizationId || DEFAULT_ORGANIZATION_ID;
+  const orgId = await resolveActiveOrganizationId(organizationId);
+  const cacheKey = `analytics_${orgId}`;
+  const cached = analyticsCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.data;
+  }
 
   if (isSupabaseConfigured()) {
     try {
-      const [assetsRes, warehousesRes, ledgerRes] = await Promise.all([
-        supabase
-          .from('assets')
-          .select('*, tool_models(name, brand, model_number, category_id), warehouses(name, code)')
-          .or(`organization_id.eq.${orgId},organization_id.is.null`)
-          .limit(10000),
-        supabase
-          .from('warehouses')
-          .select('*')
-          .eq('is_active', true)
-          .or(`organization_id.eq.${orgId},organization_id.is.null`),
-        supabase
-          .from('custody_ledger')
-          .select('*')
-          .or(`organization_id.eq.${orgId},organization_id.is.null`)
-          .gte('created_at', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()),
-      ]);
+      let astQuery = supabase
+        .from('assets')
+        .select('*, tool_models(name, brand, model_number, category_id), warehouses(name, code)')
+        .limit(10000);
+      let whQuery = supabase
+        .from('warehouses')
+        .select('*')
+        .eq('is_active', true);
+      let ledgerQuery = supabase
+        .from('custody_ledger')
+        .select('*')
+        .gte('created_at', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString());
+
+      if (orgId === DEFAULT_ORGANIZATION_ID) {
+        astQuery = astQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
+        whQuery = whQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
+        ledgerQuery = ledgerQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
+      } else {
+        astQuery = astQuery.eq('organization_id', orgId);
+        whQuery = whQuery.eq('organization_id', orgId);
+        ledgerQuery = ledgerQuery.eq('organization_id', orgId);
+      }
+
+      const [assetsRes, warehousesRes, ledgerRes] = await Promise.all([astQuery, whQuery, ledgerQuery]);
 
       if (!assetsRes.error && assetsRes.data && assetsRes.data.length > 0) {
         const rawAssets = assetsRes.data;
@@ -273,7 +314,7 @@ export async function getPlantManagerAnalytics(
         const subcontractorTotal = Math.round(totalDamageCost * 0.35);
         const companyTotal = totalDamageCost - workerTotal - subcontractorTotal;
 
-        return {
+        const payload: PlantManagerAnalyticsPayload = {
           totalFleetValue,
           depreciation: {
             totalAcquisitionCost: totalFleetValue,
@@ -305,6 +346,8 @@ export async function getPlantManagerAnalytics(
           facilityDistribution,
           highRiskOverdueAssets: overdueList.sort((a, b) => b.daysOverdue - a.daysOverdue),
         };
+        analyticsCache.set(cacheKey, { data: payload, expiresAt: Date.now() + 30000 });
+        return payload;
       }
     } catch (err) {
       console.warn('[getPlantManagerAnalytics] Supabase query fallback:', err);
@@ -312,7 +355,9 @@ export async function getPlantManagerAnalytics(
   }
 
   // Fallback unified dataset for instant rich presentation and offline preview
-  return getMockPlantManagerAnalytics(orgId);
+  const fallbackPayload = getMockPlantManagerAnalytics(orgId);
+  analyticsCache.set(cacheKey, { data: fallbackPayload, expiresAt: Date.now() + 30000 });
+  return fallbackPayload;
 }
 
 /**
@@ -322,10 +367,16 @@ export async function getStorekeeperOperations(
   warehouseId?: string,
   organizationId?: string
 ): Promise<StorekeeperOperationsPayload> {
-  const orgId = organizationId || DEFAULT_ORGANIZATION_ID;
+  const orgId = await resolveActiveOrganizationId(organizationId);
   const fallbackWarehouses = getFallbackWarehouses(orgId);
   const isAll = warehouseId === 'all' || warehouseId === 'ALL';
   const selectedWhId = isAll ? 'all' : (warehouseId || fallbackWarehouses[0]?.id || 'all');
+  const cacheKey = `storekeeper_ops_${orgId}_${selectedWhId}`;
+  const cached = storekeeperOpsCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.data;
+  }
+
   const currentWh = isAll
     ? { id: 'all', name: 'כלל המחסנים (All Depots)', code: 'ALL' }
     : (fallbackWarehouses.find((w) => w.id === selectedWhId) ||
@@ -337,8 +388,14 @@ export async function getStorekeeperOperations(
       let query = supabase
         .from('assets')
         .select('*, tool_models(name, brand, model_number, category_id)')
-        .or(`organization_id.eq.${orgId},organization_id.is.null`)
         .limit(10000);
+
+      if (orgId === DEFAULT_ORGANIZATION_ID) {
+        query = query.or(`organization_id.eq.${orgId},organization_id.is.null`);
+      } else {
+        query = query.eq('organization_id', orgId);
+      }
+
       if (!isAll) {
         query = query.eq('current_warehouse_id', selectedWhId);
       }
@@ -395,7 +452,7 @@ export async function getStorekeeperOperations(
           }
         });
 
-        return {
+        const opsPayload: StorekeeperOperationsPayload = {
           warehouse: currentWh,
           allWarehouses: fallbackWarehouses,
           returnsDueToday,
@@ -420,6 +477,8 @@ export async function getStorekeeperOperations(
           availableCount,
           checkedOutCount,
         };
+        storekeeperOpsCache.set(cacheKey, { data: opsPayload, expiresAt: Date.now() + 30000 });
+        return opsPayload;
       }
     } catch (err) {
       console.warn('[getStorekeeperOperations] Supabase query fallback:', err);
@@ -427,5 +486,7 @@ export async function getStorekeeperOperations(
   }
 
   // Fallback operational data for storekeeper derived strictly from unified store
-  return getMockStorekeeperOperations(selectedWhId, orgId);
+  const fallbackStorekeeper = getMockStorekeeperOperations(selectedWhId, orgId);
+  storekeeperOpsCache.set(cacheKey, { data: fallbackStorekeeper, expiresAt: Date.now() + 30000 });
+  return fallbackStorekeeper;
 }
