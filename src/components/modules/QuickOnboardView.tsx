@@ -206,8 +206,7 @@ export default function QuickOnboardView({
     setIsSuggestingQr(true);
     const activePrefix = currentOrganization?.serialPrefix || 'ZR-';
     try {
-      const nextNum = await getNextAvailableTagNumberAction(activePrefix, currentOrganization?.id);
-      const suggested = `${activePrefix}${nextNum}`;
+      const suggested = await getNextAvailableTagNumberAction(currentOrganization?.id);
       setQrCode(suggested);
       setManualQrInput(suggested);
       setQrWarning(null);

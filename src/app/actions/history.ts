@@ -2,9 +2,7 @@
 
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import type { DamageReport, GpsCoordinates } from '@/types/domain';
-import { getMockAuditHistory, getMockWarehouses, DEFAULT_ORGANIZATION } from '@/lib/mockStore';
-
-const DEFAULT_ORGANIZATION_ID = DEFAULT_ORGANIZATION.id;
+import { getMockAuditHistory, getMockWarehouses } from '@/lib/mockStore';
 
 export type AuditActionType =
   | 'CHECKOUT'
@@ -58,7 +56,7 @@ export interface AuditHistoryPayload {
 
 import { getServerSessionOrgId } from '@/lib/auth/session';
 
-async function resolveActiveOrganizationId(providedOrgId?: string): Promise<string | null> {
+export async function resolveActiveOrganizationId(providedOrgId?: string): Promise<string | null> {
   return getServerSessionOrgId(providedOrgId);
 }
 
@@ -116,12 +114,8 @@ export async function getAuditHistory(
       `)
       .order('created_at', { ascending: false });
 
-    // Enforce tenant isolation on Supabase query
-    if (orgId === DEFAULT_ORGANIZATION_ID) {
-      query = query.or(`organization_id.eq.${orgId},organization_id.is.null`);
-    } else {
-      query = query.eq('organization_id', orgId);
-    }
+    // Enforce strict tenant isolation on Supabase query
+    query = query.eq('organization_id', orgId);
 
     if (filters?.action && filters.action !== 'all') {
       query = query.eq('action', filters.action);

@@ -53,6 +53,20 @@ export function getMockOrganizationBySlug(slug: string): Organization | undefine
   return MOCK_ORGANIZATIONS.find((o) => o.slug.toLowerCase() === clean);
 }
 
+export const getMockOrganization = getMockOrganizationById;
+
+export function updateMockOrganization(
+  id: string,
+  patch: Partial<Organization>
+): Organization | null {
+  const org = MOCK_ORGANIZATIONS.find((o) => o.id === id);
+  if (!org) return null;
+  if (patch.name !== undefined) org.name = patch.name;
+  if (patch.serialPrefix !== undefined) org.serialPrefix = patch.serialPrefix;
+  if (patch.defaultCurrency !== undefined) org.defaultCurrency = patch.defaultCurrency;
+  return org;
+}
+
 export function addMockOrganization(org: Organization): Organization {
   const existingIdx = MOCK_ORGANIZATIONS.findIndex(
     (o) => o.id === org.id || o.slug.toLowerCase() === org.slug.toLowerCase()

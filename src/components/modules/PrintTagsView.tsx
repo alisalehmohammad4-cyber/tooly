@@ -16,7 +16,7 @@ import {
   Layers,
 } from 'lucide-react';
 import AppLayout from '@/components/layout/AppLayout';
-import { getNextAvailableTagNumberAction } from '@/app/actions/assets';
+import { calculateNextTagNumber } from '@/app/actions/assets';
 import { getAssetDetailsByQr, type ScannedAssetDetails } from '@/app/actions/custody';
 import { useAuth } from '@/context/AuthContext';
 
@@ -98,7 +98,7 @@ export default function PrintTagsView() {
 
     const fetchNextSequentialNumber = async () => {
       try {
-        const nextNum = await getNextAvailableTagNumberAction(prefix, currentOrganization?.id);
+        const nextNum = await calculateNextTagNumber(currentOrganization?.id, prefix);
 
         // Check local storage for offline / last printed fallback
         let lastPrinted = 0;

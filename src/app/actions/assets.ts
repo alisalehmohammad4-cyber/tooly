@@ -1,6 +1,6 @@
 'use server';
 
-import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { supabase, supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase';
 import { QuickOnboardSchema, type QuickOnboardInput } from '@/core/assets/onboard.schema';
 import type { AssetReservation, AssetStatus } from '@/types/domain';
 import { appendAuditHistoryEntry } from '@/app/actions/history';
@@ -13,6 +13,7 @@ import {
   getMockAssets,
   getMockCatalogData,
   getNextAvailableMockTagNumber,
+  getMockOrganization,
   isLegacyEnglishCategory,
   DEFAULT_ORGANIZATION,
 } from '@/lib/mockStore';
@@ -57,13 +58,8 @@ export async function getOnboardFormData(organizationId?: string): Promise<Onboa
   let whQuery = supabase.from('warehouses').select('id, name, code').eq('is_active', true);
   let catQuery = supabase.from('categories').select('id, name, slug, icon').order('display_order', { ascending: true });
 
-  if (orgId === DEFAULT_ORGANIZATION_ID) {
-    whQuery = whQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
-    catQuery = catQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
-  } else {
-    whQuery = whQuery.eq('organization_id', orgId);
-    catQuery = catQuery.eq('organization_id', orgId);
-  }
+  whQuery = whQuery.eq('organization_id', orgId);
+  catQuery = catQuery.eq('organization_id', orgId);
 
   const [warehousesResponse, categoriesResponse] = await Promise.all([whQuery, catQuery]);
 
@@ -117,9 +113,7 @@ export async function checkQrCodeExists(qrCode: string, organizationId?: string)
       .select('id')
       .eq('qr_code', sanitizedQr);
 
-    if (orgId === DEFAULT_ORGANIZATION_ID) {
-      query = query.or(`organization_id.eq.${orgId},organization_id.is.null`);
-    } else if (orgId) {
+    if (orgId) {
       query = query.eq('organization_id', orgId);
     }
 
@@ -198,7 +192,7 @@ export async function onboardAsset(
       .eq('category_id', input.categoryId)
       .eq('name', input.toolName)
       .eq('brand', input.brand)
-      .or(`organization_id.eq.${orgId},organization_id.is.null`)
+      .eq('organization_id', orgId)
       .maybeSingle();
 
     if (findModelError) {
@@ -266,6 +260,7 @@ export async function onboardAsset(
         notes: 'Initial field enrollment via Quick Onboard',
         gps_lat: input.gps?.lat ?? null,
         gps_lng: input.gps?.lng ?? null,
+        organization_id: orgId,
       });
 
     if (ledgerError) {
@@ -584,37 +579,29 @@ export async function getCatalogData(
  * Detects the highest sequential tag number in either live Supabase or mock store.
  * e.g., across all ZR- codes (like ZR-282, ZR-1098) -> returns max + 1 (1099).
  */
-export async function getNextAvailableTagNumberAction(
-  prefix: string = 'ZR-',
-  organizationId?: string
+export async function calculateNextTagNumber(
+  orgId?: string | null,
+  prefix: string = 'TOOL-'
 ): Promise<number> {
-  const orgId = await resolveActiveOrganizationId(organizationId);
   const cleanPrefix = prefix.trim().toUpperCase();
   let maxNumber = 0;
 
-  // 1. Check mock store assets (contains all 1016 imported Excel assets, max 1098)
+  // 1. Check mock store assets
   const mockNext = getNextAvailableMockTagNumber(cleanPrefix, orgId ?? undefined);
   if (mockNext > 1) {
     maxNumber = Math.max(maxNumber, mockNext - 1);
   }
 
   // 2. Check live Supabase assets (if configured and has items)
-  if (isSupabaseConfigured()) {
+  if (isSupabaseConfigured() && orgId) {
     try {
       const isZr = cleanPrefix.startsWith('ZR');
       const prefixPattern = isZr ? 'ZR%' : `${cleanPrefix}%`;
-      let query = supabase
+      const { data, error } = await supabaseAdmin
         .from('assets')
         .select('qr_code')
+        .eq('organization_id', orgId)
         .ilike('qr_code', prefixPattern);
-
-      if (orgId === DEFAULT_ORGANIZATION_ID) {
-        query = query.or(`organization_id.eq.${orgId},organization_id.is.null`);
-      } else {
-        query = query.eq('organization_id', orgId);
-      }
-
-      const { data, error } = await query;
 
       if (!error && data && data.length > 0) {
         for (const row of data) {
@@ -637,7 +624,35 @@ export async function getNextAvailableTagNumberAction(
     return maxNumber + 1;
   }
 
-  return cleanPrefix.startsWith('ZR') ? 1099 : 1;
+  return (cleanPrefix.startsWith('ZR') && orgId === DEFAULT_ORGANIZATION.id) ? 1099 : 1;
+}
+
+/**
+ * Returns the next available fully-formatted tag identifier for an organization.
+ * Fetches dynamic serial_prefix from Supabase or mock store.
+ */
+export async function getNextAvailableTagNumberAction(customOrgId?: string): Promise<string> {
+  const orgId = customOrgId || (await resolveActiveOrganizationId());
+
+  let prefix = 'TOOL-';
+  if (isSupabaseConfigured() && orgId) {
+    try {
+      const { data: org } = await supabaseAdmin
+        .from('organizations')
+        .select('serial_prefix')
+        .eq('id', orgId)
+        .single();
+      if (org?.serial_prefix) prefix = org.serial_prefix;
+    } catch (err) {
+      console.warn('Error fetching organization serial_prefix from Supabase:', err);
+    }
+  } else if (orgId) {
+    const mockOrg = getMockOrganization(orgId);
+    if (mockOrg?.serialPrefix) prefix = mockOrg.serialPrefix;
+  }
+
+  const nextNum = await calculateNextTagNumber(orgId, prefix);
+  return `${prefix}${String(nextNum).padStart(4, '0')}`;
 }
 
 
