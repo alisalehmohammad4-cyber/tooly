@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import NetworkSyncPill from '@/components/common/NetworkSyncPill';
+import RegisterOrganizationModal from '@/components/modules/RegisterOrganizationModal';
 
 interface PortalLandingViewProps {
   onOpenScanner: () => void;
@@ -32,6 +33,7 @@ export default function PortalLandingView({
   const [password, setPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -88,6 +90,14 @@ export default function PortalLandingView({
           </div>
 
           <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setIsRegisterModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-bold transition-all cursor-pointer shadow-xs"
+            >
+              <Building2 className="w-3.5 h-3.5" />
+              <span>הקמת ארגון חדש</span>
+            </button>
             <NetworkSyncPill />
           </div>
         </div>
@@ -248,6 +258,18 @@ export default function PortalLandingView({
                     </>
                   )}
                 </button>
+
+                <div className="mt-4 pt-3.5 border-t border-slate-100 flex items-center justify-between text-xs">
+                  <span className="text-slate-500 font-medium">חברה / קבלן חדש?</span>
+                  <button
+                    type="button"
+                    onClick={() => setIsRegisterModalOpen(true)}
+                    className="text-blue-600 hover:text-blue-700 font-extrabold hover:underline cursor-pointer flex items-center gap-1"
+                  >
+                    <Building2 className="w-3.5 h-3.5" />
+                    <span>פתיחת ארגון חדש</span>
+                  </button>
+                </div>
               </form>
             </div>
           </div>
@@ -281,6 +303,11 @@ export default function PortalLandingView({
           </div>
         </div>
       </footer>
+
+      <RegisterOrganizationModal
+        isOpen={isRegisterModalOpen}
+        onClose={() => setIsRegisterModalOpen(false)}
+      />
     </div>
   );
 }

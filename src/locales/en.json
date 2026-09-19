@@ -64,5 +64,12 @@
     "he": "עברית",
     "en": "English",
     "ar": "العربية"
+  },
+  "onboarding": {
+    "title": "Register New Organization on Tooly",
+    "subtitle": "Provision isolated workspace, base warehouse, and master administrator",
+    "step1": "Company Info",
+    "step2": "Master Admin",
+    "step3": "Warehouse & Confirm"
   }
 }

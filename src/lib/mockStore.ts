@@ -30,6 +30,33 @@ export const DEFAULT_ORGANIZATION: Organization = {
   defaultCurrency: 'ILS',
 };
 
+export const MOCK_ORGANIZATIONS: Organization[] = [DEFAULT_ORGANIZATION];
+
+export function getMockOrganizations(): Organization[] {
+  return [...MOCK_ORGANIZATIONS];
+}
+
+export function getMockOrganizationById(id: string): Organization | undefined {
+  return MOCK_ORGANIZATIONS.find((o) => o.id === id);
+}
+
+export function getMockOrganizationBySlug(slug: string): Organization | undefined {
+  const clean = slug.trim().toLowerCase();
+  return MOCK_ORGANIZATIONS.find((o) => o.slug.toLowerCase() === clean);
+}
+
+export function addMockOrganization(org: Organization): Organization {
+  const existingIdx = MOCK_ORGANIZATIONS.findIndex(
+    (o) => o.id === org.id || o.slug.toLowerCase() === org.slug.toLowerCase()
+  );
+  if (existingIdx !== -1) {
+    MOCK_ORGANIZATIONS[existingIdx] = { ...org };
+  } else {
+    MOCK_ORGANIZATIONS.push({ ...org });
+  }
+  return org;
+}
+
 export interface WarehouseAdminItem {
   id: string;
   name: string;
@@ -206,6 +233,7 @@ export function getMockWarehousesAdmin(organizationId?: string): WarehouseAdminI
 }
 
 export function addMockWarehouse(input: {
+  id?: string;
   name: string;
   code: string;
   type: WarehouseType;
@@ -213,7 +241,7 @@ export function addMockWarehouse(input: {
   organizationId?: string;
 }): Warehouse {
   const newWh: Warehouse = {
-    id: `wh-${input.code.toLowerCase().replace(/[^a-z0-9]/g, '-') || Date.now().toString(36)}`,
+    id: input.id || `wh-${input.code.toLowerCase().replace(/[^a-z0-9]/g, '-') || Date.now().toString(36)}`,
     name: input.name.trim(),
     code: input.code.trim().toUpperCase(),
     type: input.type,
@@ -40316,6 +40344,26 @@ for (const a of MOCK_ASSETS) {
 for (const c of MOCK_CATEGORIES) {
   if (!c.organizationId) c.organizationId = DEFAULT_ORGANIZATION.id;
 }
+
+export function addMockCategory(cat: Category): Category {
+  const existingIdx = MOCK_CATEGORIES.findIndex(
+    (c) => c.id === cat.id || (c.slug && c.slug === cat.slug && c.organizationId === cat.organizationId)
+  );
+  if (existingIdx !== -1) {
+    MOCK_CATEGORIES[existingIdx] = { ...cat };
+  } else {
+    MOCK_CATEGORIES.push({ ...cat });
+  }
+  return cat;
+}
+
+export function getMockCategories(organizationId?: string): Category[] {
+  if (organizationId) {
+    return MOCK_CATEGORIES.filter((c) => !c.organizationId || c.organizationId === organizationId);
+  }
+  return [...MOCK_CATEGORIES];
+}
+
 
 // 4. Authoritative Audit History Records (Populated automatically from assets)
 export const MOCK_AUDIT_LOGS: AuditHistoryRecord[] = generateInitialAuditRecords(MOCK_ASSETS);

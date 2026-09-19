@@ -96,6 +96,7 @@ export async function authenticateUserAction(
                   ? getWarehouseNameById(dbUserByPin.assigned_warehouse_id)
                   : undefined),
               isActive: dbUserByPin.is_active !== false,
+              organizationId: (dbUserByPin.organization_id as string) || DEFAULT_ORGANIZATION_ID,
             },
           };
         }
@@ -143,6 +144,7 @@ export async function authenticateUserAction(
                 ? getWarehouseNameById(dbUserByName.assigned_warehouse_id)
                 : undefined),
             isActive: dbUserByName.is_active !== false,
+            organizationId: (dbUserByName.organization_id as string) || DEFAULT_ORGANIZATION_ID,
           },
         };
       }
@@ -152,6 +154,20 @@ export async function authenticateUserAction(
   }
 
   // 2. Authoritative Mock Store Authentication
+  // Sync in-memory store with any newly registered mock users
+  for (const mockUser of MOCK_USERS) {
+    const existIdx = USERS_STORE.findIndex(
+      (u) =>
+        u.id === mockUser.id ||
+        (mockUser.username && u.username?.toLowerCase() === mockUser.username.toLowerCase())
+    );
+    if (existIdx !== -1) {
+      USERS_STORE[existIdx] = mockUser;
+    } else {
+      USERS_STORE.push(mockUser);
+    }
+  }
+
   // Direct PIN matching
   if (!cleanSecret && cleanId.length >= 4) {
     const matchedByPin = USERS_STORE.find((u) => u.pinCode === cleanId);

@@ -11,7 +11,7 @@ import React, {
 } from 'react';
 import type { AppUser, UserRole, Organization } from '@/types/domain';
 import { authenticateUserAction } from '@/app/actions/users';
-import { DEFAULT_ORGANIZATION } from '@/lib/mockStore';
+import { DEFAULT_ORGANIZATION, getMockOrganizationById } from '@/lib/mockStore';
 
 export const DEFAULT_WORKER_USER: AppUser = {
   id: 'usr-worker',
@@ -179,6 +179,7 @@ interface AuthContextType {
     identifier: string,
     secret?: string
   ) => Promise<{ success: boolean; error?: string; user?: AppUser }>;
+  loginAsUser: (newUser: AppUser) => void;
   switchToWorker: () => void;
   isPinModalOpen: boolean;
   pinDialogMessage?: string;
@@ -419,6 +420,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
+  const loginAsUser = useCallback((newUser: AppUser) => {
+    persistUserToStorage(newUser);
+    notifyAuthSubscribers();
+    setIsPinModalOpen(false);
+    setPinDialogMessage(undefined);
+    pinSuccessCallbackRef.current = null;
+  }, []);
+
   const switchToWorker = useCallback(() => {
     clearUserFromStorage();
     notifyAuthSubscribers();
@@ -435,7 +444,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const isAdmin = isGeneralManager;
     const canSwitchDepots = isGeneralManager || isChiefOperations;
     const currentOrganization: Organization = user.organizationId
-      ? { ...DEFAULT_ORGANIZATION, id: user.organizationId }
+      ? getMockOrganizationById(user.organizationId) || { ...DEFAULT_ORGANIZATION, id: user.organizationId }
       : DEFAULT_ORGANIZATION;
 
     return {
@@ -452,6 +461,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       assignedWarehouseName: user.assignedWarehouseName,
       loginWithPin,
       loginWithCredentials,
+      loginAsUser,
       switchToWorker,
       isPinModalOpen,
       pinDialogMessage,
@@ -465,6 +475,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       pinDialogMessage,
       loginWithPin,
       loginWithCredentials,
+      loginAsUser,
       switchToWorker,
       openPinModal,
       closePinModal,
