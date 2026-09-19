@@ -43174,6 +43174,7 @@ export const MOCK_USERS: AppUser[] = [
     assignedWarehouseName: 'כלל המפעל והפרויקטים',
     isActive: true,
     organizationId: DEFAULT_ORGANIZATION.id,
+    organization_id: DEFAULT_ORGANIZATION.id,
     createdAt: '2023-11-01T10:00:00.000Z',
   },
   {
@@ -43186,6 +43187,7 @@ export const MOCK_USERS: AppUser[] = [
     assignedWarehouseName: 'מחסן ראשי',
     isActive: true,
     organizationId: '11111111-1111-1111-1111-111111111111',
+    organization_id: '11111111-1111-1111-1111-111111111111',
     createdAt: '2026-01-01T10:00:00.000Z',
   },
 ];
@@ -43198,9 +43200,11 @@ export function getMockUsers(organizationId?: string): AppUser[] {
 }
 
 export function addMockUser(user: AppUser): AppUser {
+  const org = user.organizationId || user.organization_id || DEFAULT_ORGANIZATION.id;
   const userWithOrg: AppUser = {
     ...user,
-    organizationId: user.organizationId || DEFAULT_ORGANIZATION.id,
+    organizationId: org,
+    organization_id: org,
   };
   const existingIdx = MOCK_USERS.findIndex(
     (u) =>

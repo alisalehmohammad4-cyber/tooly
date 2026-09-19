@@ -127,6 +127,7 @@ export interface AppUser {
   assignedWarehouseName?: string;
   isActive?: boolean;
   organizationId?: string;
+  organization_id?: string;
   createdAt?: string;
 }
 

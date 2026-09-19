@@ -10,7 +10,11 @@ import React, {
   useSyncExternalStore,
 } from 'react';
 import type { AppUser, UserRole, Organization } from '@/types/domain';
-import { authenticateUserAction } from '@/app/actions/users';
+import {
+  authenticateUserAction,
+  setActiveUserSessionAction,
+  clearActiveUserSessionAction,
+} from '@/app/actions/users';
 import { DEFAULT_ORGANIZATION, getMockOrganizationById } from '@/lib/mockStore';
 
 export const DEFAULT_WORKER_USER: AppUser = {
@@ -18,6 +22,7 @@ export const DEFAULT_WORKER_USER: AppUser = {
   fullName: 'עובד שטח',
   role: 'worker',
   organizationId: DEFAULT_ORGANIZATION.id,
+  organization_id: DEFAULT_ORGANIZATION.id,
 };
 
 export const PREDEFINED_USERS: Record<string, AppUser> = {
@@ -29,6 +34,7 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
     role: 'general_manager',
     pinCode: '1952',
     organizationId: DEFAULT_ORGANIZATION.id,
+    organization_id: DEFAULT_ORGANIZATION.id,
     assignedWarehouseId: undefined,
     assignedWarehouseName: 'כלל המפעל והפרויקטים',
     isActive: true,
@@ -40,6 +46,7 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
     role: 'general_manager',
     pinCode: '1952',
     organizationId: DEFAULT_ORGANIZATION.id,
+    organization_id: DEFAULT_ORGANIZATION.id,
     assignedWarehouseId: undefined,
     assignedWarehouseName: 'כלל המפעל והפרויקטים',
     isActive: true,
@@ -51,6 +58,7 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
     role: 'general_manager',
     pinCode: '1952',
     organizationId: DEFAULT_ORGANIZATION.id,
+    organization_id: DEFAULT_ORGANIZATION.id,
     assignedWarehouseId: undefined,
     assignedWarehouseName: 'כלל המפעל והפרויקטים',
     isActive: true,
@@ -62,6 +70,7 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
     role: 'general_manager',
     pinCode: '1952',
     organizationId: DEFAULT_ORGANIZATION.id,
+    organization_id: DEFAULT_ORGANIZATION.id,
     assignedWarehouseId: undefined,
     assignedWarehouseName: 'כלל המפעל והפרויקטים',
     isActive: true,
@@ -75,6 +84,7 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
     role: 'chief_operations',
     pinCode: '2026',
     organizationId: DEFAULT_ORGANIZATION.id,
+    organization_id: DEFAULT_ORGANIZATION.id,
     assignedWarehouseId: undefined,
     assignedWarehouseName: 'כלל המחסנים (All Depots)',
     isActive: true,
@@ -86,6 +96,7 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
     role: 'chief_operations',
     pinCode: '2026',
     organizationId: DEFAULT_ORGANIZATION.id,
+    organization_id: DEFAULT_ORGANIZATION.id,
     assignedWarehouseId: undefined,
     assignedWarehouseName: 'כלל המחסנים (All Depots)',
     isActive: true,
@@ -97,6 +108,7 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
     role: 'chief_operations',
     pinCode: '2026',
     organizationId: DEFAULT_ORGANIZATION.id,
+    organization_id: DEFAULT_ORGANIZATION.id,
     assignedWarehouseId: undefined,
     assignedWarehouseName: 'כלל המחסנים (All Depots)',
     isActive: true,
@@ -110,6 +122,7 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
     role: 'storekeeper',
     pinCode: '1111',
     organizationId: DEFAULT_ORGANIZATION.id,
+    organization_id: DEFAULT_ORGANIZATION.id,
     assignedWarehouseId: 'wh-main-01',
     assignedWarehouseName: "מחסן מרכזי - אגף א'",
     isActive: true,
@@ -121,6 +134,7 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
     role: 'storekeeper',
     pinCode: '1111',
     organizationId: DEFAULT_ORGANIZATION.id,
+    organization_id: DEFAULT_ORGANIZATION.id,
     assignedWarehouseId: 'wh-main-01',
     assignedWarehouseName: "מחסן מרכזי - אגף א'",
     isActive: true,
@@ -132,6 +146,7 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
     role: 'storekeeper',
     pinCode: '1234',
     organizationId: DEFAULT_ORGANIZATION.id,
+    organization_id: DEFAULT_ORGANIZATION.id,
     assignedWarehouseId: 'wh-site-02',
     assignedWarehouseName: "אתר בנייה - מכולה ב'",
     isActive: true,
@@ -143,6 +158,7 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
     role: 'storekeeper',
     pinCode: '1234',
     organizationId: DEFAULT_ORGANIZATION.id,
+    organization_id: DEFAULT_ORGANIZATION.id,
     assignedWarehouseId: 'wh-site-02',
     assignedWarehouseName: "אתר בנייה - מכולה ב'",
     isActive: true,
@@ -156,6 +172,7 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
     role: 'general_manager',
     pinCode: '9999',
     organizationId: DEFAULT_ORGANIZATION.id,
+    organization_id: DEFAULT_ORGANIZATION.id,
     assignedWarehouseId: undefined,
     assignedWarehouseName: 'כלל המפעל והפרויקטים',
     isActive: true,
@@ -169,6 +186,7 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
     role: 'general_manager',
     pinCode: '1234',
     organizationId: '11111111-1111-1111-1111-111111111111',
+    organization_id: '11111111-1111-1111-1111-111111111111',
     assignedWarehouseId: 'wh-salehali-main',
     assignedWarehouseName: 'מחסן ראשי (MAIN-01)',
     isActive: true,
@@ -255,6 +273,38 @@ function getAuthSnapshot(): string {
           parsed.role === 'supervisor' ||
           parsed.role === 'admin')
       ) {
+        // Auto-heal existing browser storage / cookie missing organization_id for Zatout01
+        const isZatout =
+          parsed.username?.toLowerCase() === 'zatout01' ||
+          parsed.username?.toLowerCase().includes('zatout') ||
+          parsed.fullName?.includes('זעתות') ||
+          parsed.fullName?.includes('סאמי') ||
+          parsed.fullName?.toLowerCase().includes('zatout');
+
+        const effectiveOrg =
+          parsed.organizationId ||
+          parsed.organization_id ||
+          (isZatout ? DEFAULT_ORGANIZATION.id : undefined);
+
+        if (effectiveOrg && (!parsed.organization_id || !parsed.organizationId)) {
+          parsed.organizationId = effectiveOrg;
+          parsed.organization_id = effectiveOrg;
+          const repaired = JSON.stringify(parsed);
+          localStorage.setItem(STORAGE_KEY, repaired);
+          if (typeof sessionStorage !== 'undefined') {
+            sessionStorage.setItem(STORAGE_KEY, repaired);
+          }
+          document.cookie = `${STORAGE_KEY}=${encodeURIComponent(
+            repaired
+          )}; path=/; max-age=2592000; SameSite=Lax`;
+          if (parsed.id !== 'usr-worker') {
+            document.cookie = `tooly_org_id=${encodeURIComponent(
+              effectiveOrg
+            )}; path=/; max-age=2592000; SameSite=Lax`;
+          }
+          return repaired;
+        }
+
         return raw;
       }
     }
@@ -271,20 +321,38 @@ function getAuthServerSnapshot(): string {
 function persistUserToStorage(userToSave: AppUser) {
   if (typeof window === 'undefined') return;
   try {
-    const serialized = JSON.stringify(userToSave);
+    const isZatout =
+      userToSave.username?.toLowerCase() === 'zatout01' ||
+      userToSave.username?.toLowerCase().includes('zatout') ||
+      userToSave.fullName?.includes('זעתות') ||
+      userToSave.fullName?.includes('סאמי') ||
+      userToSave.fullName?.toLowerCase().includes('zatout');
+
+    const effectiveOrg =
+      userToSave.organizationId ||
+      userToSave.organization_id ||
+      (isZatout ? DEFAULT_ORGANIZATION.id : undefined);
+
+    const safeUserToSave: AppUser = {
+      ...userToSave,
+      organizationId: effectiveOrg,
+      organization_id: effectiveOrg,
+    };
+
+    const serialized = JSON.stringify(safeUserToSave);
     localStorage.setItem(STORAGE_KEY, serialized);
     if (typeof sessionStorage !== 'undefined') {
       sessionStorage.setItem(STORAGE_KEY, serialized);
     }
-    // Persist session cookie for 24-hour shift
+    // Persist session cookie for 30 days
     document.cookie = `${STORAGE_KEY}=${encodeURIComponent(
       serialized
-    )}; path=/; max-age=86400; SameSite=Lax`;
+    )}; path=/; max-age=2592000; SameSite=Lax`;
 
-    if (userToSave.organizationId && userToSave.id !== 'usr-worker') {
+    if (effectiveOrg && safeUserToSave.id !== 'usr-worker') {
       document.cookie = `tooly_org_id=${encodeURIComponent(
-        userToSave.organizationId
-      )}; path=/; max-age=86400; SameSite=Lax`;
+        effectiveOrg
+      )}; path=/; max-age=2592000; SameSite=Lax`;
     } else {
       document.cookie = `tooly_org_id=; path=/; max-age=0; SameSite=Lax`;
     }
@@ -444,6 +512,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const loginAsUser = useCallback((newUser: AppUser) => {
     persistUserToStorage(newUser);
+    void setActiveUserSessionAction(newUser).catch(() => {});
     notifyAuthSubscribers();
     setIsPinModalOpen(false);
     setPinDialogMessage(undefined);
@@ -452,6 +521,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const switchToWorker = useCallback(() => {
     clearUserFromStorage();
+    void clearActiveUserSessionAction().catch(() => {});
     notifyAuthSubscribers();
     setIsPinModalOpen(false);
     setPinDialogMessage(undefined);

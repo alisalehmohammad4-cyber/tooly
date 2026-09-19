@@ -31,6 +31,65 @@ export interface AuthActionResult {
   user?: AppUser;
 }
 
+async function setSessionCookies(user: AppUser): Promise<void> {
+  try {
+    const { cookies } = await import('next/headers');
+    const cookieStore = await cookies();
+    const serialized = encodeURIComponent(JSON.stringify(user));
+    cookieStore.set('tooly_active_user', serialized, {
+      path: '/',
+      maxAge: 60 * 60 * 24 * 30, // 30 days
+      sameSite: 'lax',
+    });
+
+    const orgId = user.organizationId || user.organization_id;
+    if (orgId && user.id !== 'usr-worker') {
+      cookieStore.set('tooly_org_id', orgId, {
+        path: '/',
+        maxAge: 60 * 60 * 24 * 30,
+        sameSite: 'lax',
+      });
+    }
+  } catch (err) {
+    console.warn('[setSessionCookies] Could not set cookies:', err);
+  }
+}
+
+export async function setActiveUserSessionAction(user: AppUser): Promise<{ success: boolean }> {
+  const isZatout =
+    user.username?.toLowerCase() === 'zatout01' ||
+    user.username?.toLowerCase().includes('zatout') ||
+    user.fullName?.includes('זעתות') ||
+    user.fullName?.includes('סאמי') ||
+    user.fullName?.toLowerCase().includes('zatout');
+
+  const effectiveOrg =
+    user.organizationId ||
+    user.organization_id ||
+    (isZatout ? DEFAULT_ORGANIZATION_ID : undefined);
+
+  const safeUser: AppUser = {
+    ...user,
+    organizationId: effectiveOrg,
+    organization_id: effectiveOrg,
+  };
+
+  await setSessionCookies(safeUser);
+  return { success: true };
+}
+
+export async function clearActiveUserSessionAction(): Promise<{ success: boolean }> {
+  try {
+    const { cookies } = await import('next/headers');
+    const cookieStore = await cookies();
+    cookieStore.delete('tooly_active_user');
+    cookieStore.delete('tooly_org_id');
+  } catch {
+    // Ignore in contexts where cookies is unavailable
+  }
+  return { success: true };
+}
+
 /**
  * Authenticates user credentials via username & PIN/password or directly via PIN.
  * Queries Supabase `app_users` table when configured, with synchronized mock fallback.
@@ -48,7 +107,7 @@ export async function authenticateUserAction(
     try {
       const serverClient = getSupabaseServerClient();
 
-      // Ensure the authoritative admin user exists in Supabase app_users
+      // Ensure the authoritative admin user exists in Supabase app_users with explicit organization_id
       if (cleanIdLower === 'zatout01' || cleanId === '1952' || cleanSecret === '1952') {
         try {
           await serverClient.from('app_users').upsert(
@@ -58,6 +117,7 @@ export async function authenticateUserAction(
               pin_code: '1952',
               role: 'general_manager',
               is_active: true,
+              organization_id: DEFAULT_ORGANIZATION_ID,
             },
             { onConflict: 'username' }
           );
@@ -81,23 +141,39 @@ export async function authenticateUserAction(
               error: 'משתמש זה הושבת על ידי הנהלת המפעל. פנה למנהל המערכת.',
             };
           }
+
+          const isZatout =
+            dbUserByPin.username?.toLowerCase() === 'zatout01' ||
+            dbUserByPin.username?.toLowerCase().includes('zatout') ||
+            dbUserByPin.full_name?.includes('זעתות') ||
+            dbUserByPin.full_name?.includes('סאמי') ||
+            dbUserByPin.full_name?.toLowerCase().includes('zatout');
+          const effectiveOrg =
+            (dbUserByPin.organization_id as string) ||
+            (isZatout ? DEFAULT_ORGANIZATION_ID : undefined);
+
+          const returnedUser: AppUser = {
+            id: dbUserByPin.id ? String(dbUserByPin.id) : `usr-${dbUserByPin.username}`,
+            fullName: dbUserByPin.full_name || 'משתמש מערכת',
+            username: dbUserByPin.username,
+            role: dbUserByPin.role,
+            pinCode: dbUserByPin.pin_code,
+            assignedWarehouseId: dbUserByPin.assigned_warehouse_id,
+            assignedWarehouseName:
+              dbUserByPin.assigned_warehouse_name ||
+              (dbUserByPin.assigned_warehouse_id
+                ? getWarehouseNameById(dbUserByPin.assigned_warehouse_id)
+                : undefined),
+            isActive: dbUserByPin.is_active !== false,
+            organizationId: effectiveOrg || DEFAULT_ORGANIZATION_ID,
+            organization_id: effectiveOrg || DEFAULT_ORGANIZATION_ID,
+          };
+
+          await setSessionCookies(returnedUser);
+
           return {
             success: true,
-            user: {
-              id: dbUserByPin.id ? String(dbUserByPin.id) : `usr-${dbUserByPin.username}`,
-              fullName: dbUserByPin.full_name || 'משתמש מערכת',
-              username: dbUserByPin.username,
-              role: dbUserByPin.role,
-              pinCode: dbUserByPin.pin_code,
-              assignedWarehouseId: dbUserByPin.assigned_warehouse_id,
-              assignedWarehouseName:
-                dbUserByPin.assigned_warehouse_name ||
-                (dbUserByPin.assigned_warehouse_id
-                  ? getWarehouseNameById(dbUserByPin.assigned_warehouse_id)
-                  : undefined),
-              isActive: dbUserByPin.is_active !== false,
-              organizationId: (dbUserByPin.organization_id as string) || DEFAULT_ORGANIZATION_ID,
-            },
+            user: returnedUser,
           };
         }
       }
@@ -129,23 +205,38 @@ export async function authenticateUserAction(
           };
         }
 
+        const isZatout =
+          dbUserByName.username?.toLowerCase() === 'zatout01' ||
+          dbUserByName.username?.toLowerCase().includes('zatout') ||
+          dbUserByName.full_name?.includes('זעתות') ||
+          dbUserByName.full_name?.includes('סאמי') ||
+          dbUserByName.full_name?.toLowerCase().includes('zatout');
+        const effectiveOrg =
+          (dbUserByName.organization_id as string) ||
+          (isZatout ? DEFAULT_ORGANIZATION_ID : undefined);
+
+        const returnedUser: AppUser = {
+          id: dbUserByName.id ? String(dbUserByName.id) : `usr-${dbUserByName.username}`,
+          fullName: dbUserByName.full_name || 'משתמש מערכת',
+          username: dbUserByName.username,
+          role: dbUserByName.role,
+          pinCode: dbUserByName.pin_code,
+          assignedWarehouseId: dbUserByName.assigned_warehouse_id,
+          assignedWarehouseName:
+            dbUserByName.assigned_warehouse_name ||
+            (dbUserByName.assigned_warehouse_id
+              ? getWarehouseNameById(dbUserByName.assigned_warehouse_id)
+              : undefined),
+          isActive: dbUserByName.is_active !== false,
+          organizationId: effectiveOrg || DEFAULT_ORGANIZATION_ID,
+          organization_id: effectiveOrg || DEFAULT_ORGANIZATION_ID,
+        };
+
+        await setSessionCookies(returnedUser);
+
         return {
           success: true,
-          user: {
-            id: dbUserByName.id ? String(dbUserByName.id) : `usr-${dbUserByName.username}`,
-            fullName: dbUserByName.full_name || 'משתמש מערכת',
-            username: dbUserByName.username,
-            role: dbUserByName.role,
-            pinCode: dbUserByName.pin_code,
-            assignedWarehouseId: dbUserByName.assigned_warehouse_id,
-            assignedWarehouseName:
-              dbUserByName.assigned_warehouse_name ||
-              (dbUserByName.assigned_warehouse_id
-                ? getWarehouseNameById(dbUserByName.assigned_warehouse_id)
-                : undefined),
-            isActive: dbUserByName.is_active !== false,
-            organizationId: (dbUserByName.organization_id as string) || DEFAULT_ORGANIZATION_ID,
-          },
+          user: returnedUser,
         };
       }
     } catch (sbErr) {
@@ -178,7 +269,24 @@ export async function authenticateUserAction(
           error: 'משתמש זה הושבת על ידי הנהלת המפעל. פנה למנהל המערכת.',
         };
       }
-      return { success: true, user: matchedByPin };
+      const isZatout =
+        matchedByPin.username?.toLowerCase() === 'zatout01' ||
+        matchedByPin.username?.toLowerCase().includes('zatout') ||
+        matchedByPin.fullName?.includes('זעתות') ||
+        matchedByPin.fullName?.includes('סאמי') ||
+        matchedByPin.fullName?.toLowerCase().includes('zatout');
+      const effectiveOrg =
+        matchedByPin.organizationId ||
+        matchedByPin.organization_id ||
+        (isZatout ? DEFAULT_ORGANIZATION_ID : undefined);
+
+      const safeUser: AppUser = {
+        ...matchedByPin,
+        organizationId: effectiveOrg || DEFAULT_ORGANIZATION_ID,
+        organization_id: effectiveOrg || DEFAULT_ORGANIZATION_ID,
+      };
+      await setSessionCookies(safeUser);
+      return { success: true, user: safeUser };
     }
   }
 
@@ -221,7 +329,24 @@ export async function authenticateUserAction(
     };
   }
 
-  return { success: true, user: matchedUser };
+  const isZatout =
+    matchedUser.username?.toLowerCase() === 'zatout01' ||
+    matchedUser.username?.toLowerCase().includes('zatout') ||
+    matchedUser.fullName?.includes('זעתות') ||
+    matchedUser.fullName?.includes('סאמי') ||
+    matchedUser.fullName?.toLowerCase().includes('zatout');
+  const effectiveOrg =
+    matchedUser.organizationId ||
+    matchedUser.organization_id ||
+    (isZatout ? DEFAULT_ORGANIZATION_ID : undefined);
+
+  const safeUser: AppUser = {
+    ...matchedUser,
+    organizationId: effectiveOrg || DEFAULT_ORGANIZATION_ID,
+    organization_id: effectiveOrg || DEFAULT_ORGANIZATION_ID,
+  };
+  await setSessionCookies(safeUser);
+  return { success: true, user: safeUser };
 }
 
 /**
@@ -260,6 +385,7 @@ export async function getStorekeepersListAction(organizationId?: string): Promis
             email: row.email,
             phone: row.phone,
             organizationId: (row.organization_id as string) || orgId,
+            organization_id: (row.organization_id as string) || orgId,
             assignedWarehouseId: row.assigned_warehouse_id,
             assignedWarehouseName: row.assigned_warehouse_id
               ? getWarehouseNameById(row.assigned_warehouse_id)
@@ -297,6 +423,7 @@ export async function getStorekeepersListAction(organizationId?: string): Promis
               email: row.email,
               phone: row.phone,
               organizationId: (row.organization_id as string) || orgId,
+              organization_id: (row.organization_id as string) || orgId,
               assignedWarehouseId: row.assigned_warehouse_id,
               assignedWarehouseName: row.assigned_warehouse_id
                 ? getWarehouseNameById(row.assigned_warehouse_id)
@@ -331,6 +458,7 @@ export async function getStorekeepersListAction(organizationId?: string): Promis
                 pinCode: row.pin_code,
                 role: row.role || 'storekeeper',
                 organizationId: (row.organization_id as string) || orgId,
+                organization_id: (row.organization_id as string) || orgId,
                 assignedWarehouseId: row.assigned_warehouse_id,
                 assignedWarehouseName:
                   row.assigned_warehouse_name ||
