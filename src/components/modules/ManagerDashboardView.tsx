@@ -133,10 +133,13 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
 
   // Derived effective warehouse ID for form dropdown
   const effectiveAssignedWarehouseId = useMemo(() => {
+    if (newAssignedWarehouseId === 'all') {
+      return 'all';
+    }
     if (availableFacilities.some((f) => f.warehouseId === newAssignedWarehouseId)) {
       return newAssignedWarehouseId;
     }
-    return availableFacilities[0]?.warehouseId || newAssignedWarehouseId;
+    return availableFacilities[0]?.warehouseId || newAssignedWarehouseId || 'all';
   }, [availableFacilities, newAssignedWarehouseId]);
 
   // Load storekeepers list
@@ -356,6 +359,11 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
 
     try {
       const activeOrgId = currentOrganization?.id || user?.organizationId || user?.organization_id;
+      const warehouseIdToSend =
+        newUserRole === 'chief_operations'
+          ? 'all'
+          : effectiveAssignedWarehouseId || 'all';
+
       const res = await createStorekeeperAction({
         name: newFullName,
         fullName: newFullName,
@@ -363,8 +371,8 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
         pin: newPinCode,
         pinCode: newPinCode,
         role: newUserRole,
-        assignedWarehouseId:
-          newUserRole === 'chief_operations' ? undefined : effectiveAssignedWarehouseId,
+        warehouseId: warehouseIdToSend,
+        assignedWarehouseId: warehouseIdToSend === 'all' ? undefined : warehouseIdToSend,
         email: newEmail,
         phone: newPhone,
         organizationId: activeOrgId,
@@ -1557,6 +1565,7 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                           onChange={(e) => setNewAssignedWarehouseId(e.target.value)}
                           className="w-full bg-white border border-purple-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-bold focus:border-purple-600 focus:outline-none"
                         >
+                          <option value="all">🌐 כלל המחסנים (ללא שיוך מחסן ספציפי)</option>
                           {availableFacilities.map((fac) => (
                             <option key={fac.warehouseId} value={fac.warehouseId}>
                               {fac.warehouseName} [{fac.warehouseCode}]

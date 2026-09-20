@@ -456,6 +456,7 @@ export interface CreateStorekeeperInput {
   pin?: string;
   pinCode?: string;
   role?: 'storekeeper' | 'chief_operations' | 'general_manager' | 'admin' | 'supervisor' | string;
+  warehouseId?: string;
   assignedWarehouseId?: string;
   assigned_warehouse_id?: string;
   email?: string;
@@ -471,170 +472,226 @@ export type CreateUserInput = CreateStorekeeperInput;
  * Permanently inserts the record into Supabase `public.app_users` table with tenant isolation.
  */
 export async function createStorekeeperAction(
-  input: CreateStorekeeperInput
+  formData: CreateStorekeeperInput | any
 ): Promise<{ success: boolean; error?: string; message?: string; user?: AppUser }> {
-  const rawName = (input.name || input.fullName || '').trim();
-  const rawPin = (input.pin || input.pinCode || '').trim();
-  const effectiveOrg = input.organizationId || input.organization_id;
-  const orgId = (await resolveActiveOrganizationId(effectiveOrg)) || DEFAULT_ORGANIZATION_ID;
+  try {
+    const rawData =
+      typeof formData?.entries === 'function'
+        ? Object.fromEntries(formData.entries())
+        : (formData || {});
 
-  if (!rawName || rawName.length < 2) {
-    return { success: false, error: 'שם מלא חייב להכיל לפחות 2 תווים.' };
-  }
+    const rawName = (rawData.name || rawData.fullName || '').trim();
+    const rawPin = (rawData.pin || rawData.pinCode || '').trim();
+    const cleanUsername = rawData.username?.trim() || null;
+    const effectiveOrg = rawData.organizationId || rawData.organization_id;
+    const orgId = (await resolveActiveOrganizationId(effectiveOrg)) || DEFAULT_ORGANIZATION_ID;
 
-  if (!rawPin || rawPin.length < 4) {
-    return { success: false, error: 'קוד כניסה (PIN) חייב להכיל לפחות 4 ספרות.' };
-  }
+    if (!rawName || rawName.length < 2) {
+      return { success: false, error: 'שם מלא חייב להכיל לפחות 2 תווים.' };
+    }
 
-  const role = (input.role as any) || 'storekeeper';
-  const isChief = role === 'chief_operations';
-  const rawWh = input.assignedWarehouseId || input.assigned_warehouse_id;
-  const assignedWarehouse = isChief || rawWh === 'all' || !rawWh ? null : rawWh;
+    if (!rawPin || rawPin.length < 4) {
+      return { success: false, error: 'קוד כניסה (PIN) חייב להכיל לפחות 4 ספרות.' };
+    }
 
-  if (!isChief && !assignedWarehouse && role === 'storekeeper') {
-    return { success: false, error: 'נא לבחור מחסן / אתר באחריות המחסנאי.' };
-  }
+    const role = (rawData.role as any) || 'storekeeper';
+    const isChief = role === 'chief_operations';
 
-  const warehouseName = isChief
-    ? 'כלל המחסנים (All Depots)'
-    : (assignedWarehouse ? getWarehouseNameById(assignedWarehouse) : undefined);
+    // 1. Sanitize assigned_warehouse_id:
+    // When the user selects "כלל המחסנים", the frontend sends warehouseId: 'all' (or empty string "").
+    // In Postgres, this is a UUID column and throws `invalid input syntax for type uuid: "all"`.
+    // Ensure it is strictly converted to null:
+    const rawWarehouseId = rawData.warehouseId ?? rawData.assignedWarehouseId ?? rawData.assigned_warehouse_id;
+    const assignedWarehouseId =
+      rawWarehouseId &&
+      rawWarehouseId !== 'all' &&
+      typeof rawWarehouseId === 'string' &&
+      rawWarehouseId.trim() !== '' &&
+      !isChief
+        ? rawWarehouseId.trim()
+        : null;
 
-  const userId = randomUUID();
-  const userPhone = input.phone?.trim() || null;
-  const cleanUsername =
-    input.username?.trim().toLowerCase() ||
-    rawName.toLowerCase().replace(/\s+/g, '_') ||
-    `user_${Date.now().toString(36)}`;
-  const userEmail = input.email?.trim() || `${cleanUsername}@company.local`;
+    const warehouseName =
+      isChief || !assignedWarehouseId
+        ? 'כלל המחסנים (All Depots)'
+        : getWarehouseNameById(assignedWarehouseId);
 
-  // 1. Permanent insert into Supabase public.app_users
-  if (isSupabaseConfigured()) {
-    const payload = {
-      id: userId,
-      organization_id: orgId,
-      name: rawName,
-      role: role,
-      pin: rawPin,
-      phone: userPhone,
-      assigned_warehouse_id: assignedWarehouse,
-      is_active: true,
-    };
+    const userId = randomUUID();
+    const userPhone = rawData.phone?.trim() || null;
+    const userEmail =
+      rawData.email?.trim() ||
+      (cleanUsername ? `${cleanUsername}@company.local` : `${userId.slice(0, 8)}@company.local`);
 
-    let { data, error } = await supabaseAdmin
-      .from('app_users')
-      .insert(payload)
-      .select()
-      .single();
+    // 2. Safe Error Handling and Supabase Insert
+    if (isSupabaseConfigured()) {
+      try {
+        const payload: Record<string, any> = {
+          id: userId,
+          organization_id: orgId,
+          name: rawName,
+          // Map username: Ensure username: formData.username || null is passed to the insert payload
+          username: formData.username || cleanUsername || null,
+          role: role,
+          pin: rawPin,
+          phone: userPhone,
+          // Sanitize assigned_warehouse_id strictly to null if 'all' or not selected
+          assigned_warehouse_id: assignedWarehouseId,
+          is_active: true,
+        };
 
-    if (error) {
-      console.warn("Primary insert failed, attempting schema-adaptive fallback:", error);
-      // Fallback: If table has extra constraints like full_name or pin_code from older seed migrations:
-      const fallbackPayload = {
-        ...payload,
-        full_name: rawName,
-        pin_code: rawPin,
-        username: cleanUsername,
-      };
-      const retry = await supabaseAdmin
-        .from('app_users')
-        .insert(fallbackPayload)
-        .select()
-        .single();
+        let { data, error } = await supabaseAdmin
+          .from('app_users')
+          .insert(payload)
+          .select()
+          .single();
 
-      if (retry.error) {
-        console.error("Failed to insert user into Supabase:", retry.error);
-        throw new Error(`Failed to insert user: ${retry.error.message || error.message}`);
+        // If Postgres throws invalid syntax for UUID (e.g. non-UUID warehouse string), retry with null
+        if (error && error.message?.includes('invalid input syntax for type uuid') && payload.assigned_warehouse_id) {
+          console.warn("[createStorekeeperAction] Non-UUID warehouse ID passed, retrying with null:", error.message);
+          payload.assigned_warehouse_id = null;
+          const retryUuid = await supabaseAdmin
+            .from('app_users')
+            .insert(payload)
+            .select()
+            .single();
+          data = retryUuid.data;
+          error = retryUuid.error;
+        }
+
+        // Schema-adaptive fallback: If table has extra constraints like full_name or pin_code from older seed migrations:
+        if (error && (error.message?.includes('full_name') || error.message?.includes('pin_code'))) {
+          console.warn("Primary insert failed, attempting schema-adaptive fallback:", error);
+          const fallbackPayload = {
+            ...payload,
+            full_name: rawName,
+            pin_code: rawPin,
+            username: formData.username || cleanUsername || rawName.toLowerCase().replace(/\s+/g, '_'),
+          };
+          const retry = await supabaseAdmin
+            .from('app_users')
+            .insert(fallbackPayload)
+            .select()
+            .single();
+
+          data = retry.data;
+          error = retry.error;
+        }
+
+        // Safe Error Handling: return { success: false, error: error.message } instead of throwing
+        if (error) {
+          console.error("Failed to insert user into Supabase:", error);
+          return {
+            success: false,
+            error: error.message || 'שגיאה בשמירת המשתמש במסד הנתונים',
+          };
+        }
+
+        // Revalidate dashboard routes safely
+        try {
+          revalidatePath('/dashboard/manager');
+          revalidatePath('/dashboard/warehouse');
+        } catch (e) {
+          console.warn('revalidatePath warning:', e);
+        }
+
+        const returnedUser: AppUser = {
+          id: data?.id ? String(data.id) : userId,
+          fullName: data?.name || data?.full_name || rawName,
+          username: data?.username || cleanUsername || undefined,
+          email: data?.email || userEmail,
+          phone: data?.phone || userPhone || undefined,
+          role: (data?.role as any) || role,
+          pinCode: data?.pin || data?.pin_code || rawPin,
+          organizationId: data?.organization_id || orgId,
+          organization_id: data?.organization_id || orgId,
+          assignedWarehouseId:
+            isChief || !assignedWarehouseId
+              ? undefined
+              : (data?.assigned_warehouse_id || assignedWarehouseId || undefined),
+          assignedWarehouseName: warehouseName,
+          isActive: data?.is_active !== false,
+          createdAt: data?.created_at || new Date().toISOString(),
+        };
+
+        // Keep in-memory cache in sync
+        addMockUser(returnedUser);
+        const existIdx = USERS_STORE.findIndex((u) => u.id === returnedUser.id);
+        if (existIdx !== -1) {
+          USERS_STORE[existIdx] = returnedUser;
+        } else {
+          USERS_STORE.unshift(returnedUser);
+        }
+
+        return {
+          success: true,
+          message:
+            isChief || !assignedWarehouseId
+              ? `המשתמש ${returnedUser.fullName} נוסף בהצלחה עם סמכות לכלל המחסנים.`
+              : `המחסנאי ${returnedUser.fullName} נוסף בהצלחה ושויך ל-${warehouseName}.`,
+          user: returnedUser,
+        };
+      } catch (insertError: any) {
+        console.error("Supabase insert exception:", insertError);
+        return {
+          success: false,
+          error: insertError?.message || 'שגיאה בשמירת המשתמש במסד הנתונים',
+        };
       }
-      data = retry.data;
     }
 
-    // Revalidate dashboard routes immediately
-    try {
-      revalidatePath('/dashboard/manager');
-      revalidatePath('/dashboard/warehouse');
-    } catch (e) {
-      console.warn('revalidatePath warning:', e);
-    }
-
-    const returnedUser: AppUser = {
-      id: data?.id ? String(data.id) : userId,
-      fullName: data?.name || data?.full_name || rawName,
-      username: data?.username || cleanUsername,
-      email: data?.email || userEmail,
-      phone: data?.phone || userPhone || undefined,
-      role: (data?.role as any) || role,
-      pinCode: data?.pin || data?.pin_code || rawPin,
-      organizationId: data?.organization_id || orgId,
-      organization_id: data?.organization_id || orgId,
-      assignedWarehouseId: isChief ? undefined : (data?.assigned_warehouse_id || assignedWarehouse || undefined),
+    // Offline / mock fallback when Supabase is strictly not configured
+    const mockNewUser: AppUser = {
+      id: userId,
+      fullName: rawName,
+      username: cleanUsername || undefined,
+      email: userEmail,
+      phone: userPhone || undefined,
+      role: role as any,
+      pinCode: rawPin,
+      organizationId: orgId,
+      organization_id: orgId,
+      assignedWarehouseId: isChief ? undefined : (assignedWarehouseId || undefined),
       assignedWarehouseName: warehouseName,
-      isActive: data?.is_active !== false,
-      createdAt: data?.created_at || new Date().toISOString(),
+      isActive: true,
+      createdAt: new Date().toISOString(),
     };
 
-    // Keep in-memory cache in sync
-    addMockUser(returnedUser);
-    const existIdx = USERS_STORE.findIndex((u) => u.id === returnedUser.id);
-    if (existIdx !== -1) {
-      USERS_STORE[existIdx] = returnedUser;
-    } else {
-      USERS_STORE.unshift(returnedUser);
-    }
+    addMockUser(mockNewUser);
+    USERS_STORE.unshift(mockNewUser);
 
     return {
       success: true,
-      message: isChief
-        ? `אחראי התפעול הראשי ${returnedUser.fullName} נוסף בהצלחה עם סמכות לכלל המחסנים.`
-        : `המחסנאי ${returnedUser.fullName} נוסף בהצלחה ושויך ל-${warehouseName || 'מחסן שטח'}.`,
-      user: returnedUser,
+      message:
+        isChief || !assignedWarehouseId
+          ? `המשתמש ${mockNewUser.fullName} נוסף בהצלחה עם סמכות לכלל המחסנים.`
+          : `המחסנאי ${mockNewUser.fullName} נוסף בהצלחה ושויך ל-${warehouseName}.`,
+      user: mockNewUser,
+    };
+  } catch (err: any) {
+    console.error("Unhandled exception in createStorekeeperAction:", err);
+    return {
+      success: false,
+      error: err?.message || 'שגיאה לא צפויה ביצירת המשתמש',
     };
   }
-
-  // Offline / mock fallback when Supabase is strictly not configured
-  const mockNewUser: AppUser = {
-    id: userId,
-    fullName: rawName,
-    username: cleanUsername,
-    email: userEmail,
-    phone: userPhone || undefined,
-    role: role as any,
-    pinCode: rawPin,
-    organizationId: orgId,
-    organization_id: orgId,
-    assignedWarehouseId: isChief ? undefined : (assignedWarehouse || undefined),
-    assignedWarehouseName: warehouseName,
-    isActive: true,
-    createdAt: new Date().toISOString(),
-  };
-
-  addMockUser(mockNewUser);
-  USERS_STORE.unshift(mockNewUser);
-
-  return {
-    success: true,
-    message: isChief
-      ? `אחראי התפעול הראשי ${mockNewUser.fullName} נוסף בהצלחה עם סמכות לכלל המחסנים.`
-      : `המחסנאי ${mockNewUser.fullName} נוסף בהצלחה ושויך ל-${warehouseName || 'מחסן שטח'}.`,
-    user: mockNewUser,
-  };
 }
 
 export async function createUserAction(
-  input: CreateStorekeeperInput
+  formData: CreateStorekeeperInput | any
 ): Promise<{ success: boolean; error?: string; message?: string; user?: AppUser }> {
-  return createStorekeeperAction(input);
+  return createStorekeeperAction(formData);
 }
 
 export async function createAppUserAction(
-  input: CreateStorekeeperInput
+  formData: CreateStorekeeperInput | any
 ): Promise<{ success: boolean; error?: string; message?: string; user?: AppUser }> {
-  return createStorekeeperAction(input);
+  return createStorekeeperAction(formData);
 }
 
 export async function onboardUserAction(
-  input: CreateStorekeeperInput
+  formData: CreateStorekeeperInput | any
 ): Promise<{ success: boolean; error?: string; message?: string; user?: AppUser }> {
-  return createStorekeeperAction(input);
+  return createStorekeeperAction(formData);
 }
 
 /**
