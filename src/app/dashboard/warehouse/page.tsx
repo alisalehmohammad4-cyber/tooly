@@ -21,5 +21,11 @@ export default async function WarehouseDashboardPage(props: WarehouseDashboardPa
   const orgParam = searchParams?.org || searchParams?.organizationId;
   const operationsData = await getStorekeeperOperations(warehouseId, orgParam);
 
-  return <WarehouseDashboardView key={`${orgParam || 'session'}_${warehouseId || 'all'}`} initialData={operationsData} />;
+  return (
+    <WarehouseDashboardView
+      key={`${orgParam || 'session'}_${warehouseId || 'all'}`}
+      initialData={operationsData}
+      warehouses={operationsData.warehouses}
+    />
+  );
 }

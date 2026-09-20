@@ -26,7 +26,7 @@ import {
   Package,
   Plus,
 } from 'lucide-react';
-import type { StorekeeperOperationsPayload } from '@/app/actions/dashboard';
+import type { StorekeeperOperationsPayload, WarehouseOption } from '@/app/actions/dashboard';
 import { getStorekeeperOperations } from '@/app/actions/dashboard';
 import AppLayout from '@/components/layout/AppLayout';
 import ToolPassportModal from '@/components/modules/ToolPassportModal';
@@ -40,10 +40,12 @@ import { reconcileStockAction } from '@/app/actions/warehouses';
 
 interface WarehouseDashboardViewProps {
   initialData: StorekeeperOperationsPayload;
+  warehouses?: WarehouseOption[];
 }
 
 export default function WarehouseDashboardView({
   initialData,
+  warehouses: propWarehouses,
 }: WarehouseDashboardViewProps) {
   const {
     assignedWarehouseId,
@@ -51,6 +53,8 @@ export default function WarehouseDashboardView({
     isGeneralManager,
     isStorekeeper,
     canSwitchDepots,
+    currentOrganization,
+    user,
   } = useAuth();
   const [data, setData] = useState<StorekeeperOperationsPayload>(initialData);
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>(() => {
@@ -63,12 +67,15 @@ export default function WarehouseDashboardView({
   const [passportAsset, setPassportAsset] = useState<ScannedAssetDetails | null>(null);
   const [isPassportOpen, setIsPassportOpen] = useState<boolean>(false);
 
+  const warehouses = propWarehouses || data.warehouses || data.allWarehouses || [];
+
   // Chief Operations: Inter-Depot Transfer Modal State
   const [isTransferModalOpen, setIsTransferModalOpen] = useState<boolean>(false);
   const [transferQrCode, setTransferQrCode] = useState<string>('');
   const [transferTargetWhId, setTransferTargetWhId] = useState<string>(() => {
-    const firstOther = initialData.allWarehouses.find((w) => w.id !== initialData.warehouse.id);
-    return firstOther ? firstOther.id : 'wh-site-02';
+    const whList = propWarehouses || initialData.warehouses || initialData.allWarehouses || [];
+    const firstOther = whList.find((w) => w.id !== initialData.warehouse.id);
+    return firstOther ? firstOther.id : (whList[0]?.id || 'wh-site-02');
   });
   const [transferNotes, setTransferNotes] = useState<string>('');
   const [isTransferring, setIsTransferring] = useState<boolean>(false);
@@ -91,14 +98,24 @@ export default function WarehouseDashboardView({
     setSelectedWarehouseId(newId);
     setIsLoadingWarehouse(true);
     try {
-      const updated = await getStorekeeperOperations(newId);
+      const activeOrgId = currentOrganization?.id || user?.organizationId;
+      const updated = await getStorekeeperOperations(newId, activeOrgId);
       setData(updated);
+      if (typeof window !== 'undefined') {
+        const url = new URL(window.location.href);
+        if (newId === 'all') {
+          url.searchParams.delete('warehouse');
+        } else {
+          url.searchParams.set('warehouse', newId);
+        }
+        window.history.replaceState(null, '', url.toString());
+      }
     } catch (err) {
       console.warn('Error loading warehouse operations:', err);
     } finally {
       setIsLoadingWarehouse(false);
     }
-  }, []);
+  }, [currentOrganization?.id, user?.organizationId]);
 
   // Sync warehouse for storekeeper if scoped
   React.useEffect(() => {
@@ -269,12 +286,10 @@ export default function WarehouseDashboardView({
                       : 'bg-blue-50 border-blue-200 text-blue-950 focus:border-blue-600 cursor-pointer'
                   }`}
                 >
-                  {canSwitchDepots && (
-                    <option value="all">🌐 כלל המחסנים (All Depots)</option>
-                  )}
-                  {data.allWarehouses.map((wh) => (
-                    <option key={wh.id} value={wh.id}>
-                      {wh.name} [{wh.code}]
+                  <option value="all">כלל המחסנים (All Depots)</option>
+                  {warehouses?.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.name} {w.code ? `(${w.code})` : ''}
                     </option>
                   ))}
                 </select>
@@ -740,11 +755,11 @@ export default function WarehouseDashboardView({
                   onChange={(e) => setTransferTargetWhId(e.target.value)}
                   className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-bold focus:border-indigo-600 focus:outline-none"
                 >
-                  {data.allWarehouses
-                    .filter((w) => w.id !== selectedWarehouseId)
+                  {warehouses
+                    ?.filter((w) => w.id !== selectedWarehouseId)
                     .map((wh) => (
                       <option key={wh.id} value={wh.id}>
-                        {wh.name} [{wh.code}]
+                        {wh.name} {wh.code ? `(${wh.code})` : ''}
                       </option>
                     ))}
                 </select>

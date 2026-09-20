@@ -43027,9 +43027,18 @@ export function getMockStorekeeperOperations(
           };
         }).filter((alert) => alert.availableCount <= alert.minStockThreshold);
 
+  const mockWhList = getMockWarehouses(false, organizationId).map((w) => ({
+    id: w.id,
+    name: w.name,
+    code: w.code,
+    type: w.type,
+    is_active: w.isActive,
+  }));
+
   return {
     warehouse: currentWh,
-    allWarehouses: getMockWarehouses(false, organizationId).map((w) => ({ id: w.id, name: w.name, code: w.code })),
+    warehouses: mockWhList,
+    allWarehouses: mockWhList,
     returnsDueToday,
     overdueAssets: overdueAssets.sort((a, b) => b.daysOverdue - a.daysOverdue),
     lowStockAlerts,

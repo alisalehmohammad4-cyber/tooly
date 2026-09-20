@@ -1,6 +1,6 @@
 'use server';
 
-import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { supabase, supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase';
 import {
   getMockPlantManagerAnalytics,
   getMockStorekeeperOperations,
@@ -116,9 +116,18 @@ export interface LowStockAlert {
   status: 'critical' | 'low';
 }
 
+export interface WarehouseOption {
+  id: string;
+  name: string;
+  code?: string | null;
+  type?: string | null;
+  is_active?: boolean | null;
+}
+
 export interface StorekeeperOperationsPayload {
-  warehouse: { id: string; name: string; code: string };
-  allWarehouses: Array<{ id: string; name: string; code: string }>;
+  warehouse: { id: string; name: string; code?: string | null };
+  warehouses: WarehouseOption[];
+  allWarehouses: WarehouseOption[];
   returnsDueToday: StorekeeperReturnDue[];
   overdueAssets: StorekeeperOverdueAsset[];
   lowStockAlerts: LowStockAlert[];
@@ -182,6 +191,7 @@ const EMPTY_PLANT_MANAGER_ANALYTICS: PlantManagerAnalyticsPayload = {
 
 const EMPTY_STOREKEEPER_PAYLOAD: StorekeeperOperationsPayload = {
   warehouse: { id: 'all', name: 'כלל המחסנים (All Depots)', code: 'ALL' },
+  warehouses: [],
   allWarehouses: [],
   returnsDueToday: [],
   overdueAssets: [],
@@ -493,7 +503,7 @@ export async function getStorekeeperOperations(
     return EMPTY_STOREKEEPER_PAYLOAD;
   }
 
-  const isAll = warehouseId === 'all' || warehouseId === 'ALL';
+  const isAll = !warehouseId || warehouseId === 'all' || warehouseId === 'ALL';
   const cacheKey = `storekeeper_ops_${orgId}_${warehouseId || 'all'}`;
   const cached = storekeeperOpsCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
@@ -508,14 +518,19 @@ export async function getStorekeeperOperations(
 
   try {
     // Fetch tenant warehouses strictly from Supabase
-    const { data: tenantWhs } = await supabase
+    const { data: warehouses } = await supabaseAdmin
       .from('warehouses')
-      .select('id, name, code')
-      .eq('is_active', true)
+      .select('id, name, code, type, is_active')
       .eq('organization_id', orgId)
-      .order('name', { ascending: true });
+      .order('name');
 
-    const warehousesList = tenantWhs || [];
+    const warehousesList: WarehouseOption[] = (warehouses || []).map((w) => ({
+      id: w.id,
+      name: w.name,
+      code: w.code || '',
+      type: w.type,
+      is_active: w.is_active,
+    }));
     const selectedWhId = isAll ? 'all' : (warehouseId || warehousesList[0]?.id || 'all');
 
     const currentWh = isAll
@@ -523,7 +538,7 @@ export async function getStorekeeperOperations(
       : (warehousesList.find((w) => w.id === selectedWhId) ||
          warehousesList[0] || { id: selectedWhId || 'all', name: 'כלל המחסנים (All Depots)', code: 'ALL' });
 
-    let query = supabase
+    let query = supabaseAdmin
       .from('assets')
       .select('*, tool_models(name, brand, model_number, category_id)')
       .eq('organization_id', orgId);
@@ -540,7 +555,7 @@ export async function getStorekeeperOperations(
         let page = 1;
         const pageSize = 1000;
         while (true) {
-          let pQuery = supabase
+          let pQuery = supabaseAdmin
             .from('assets')
             .select('*, tool_models(name, brand, model_number, category_id)')
             .eq('organization_id', orgId);
@@ -608,6 +623,7 @@ export async function getStorekeeperOperations(
 
     const opsPayload: StorekeeperOperationsPayload = {
       warehouse: currentWh,
+      warehouses: warehouses || [],
       allWarehouses: warehousesList,
       returnsDueToday,
       overdueAssets: overdueAssets.sort((a, b) => b.daysOverdue - a.daysOverdue),
