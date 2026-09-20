@@ -20,6 +20,11 @@ import {
   PenTool,
   History as HistoryIcon,
   MapPin,
+  X,
+  Printer,
+  CheckSquare,
+  ShieldCheck,
+  FileSignature,
 } from 'lucide-react';
 import type {
   AuditHistoryPayload,
@@ -188,6 +193,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedAction, setSelectedAction] = useState<string>('all');
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>('all');
+  const [selectedReceiptRecord, setSelectedReceiptRecord] = useState<AuditHistoryRecord | null>(null);
 
   // Filter records in-memory
   const filteredRecords = useMemo(() => {
@@ -312,7 +318,15 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
               >
                 {/* Header: Action Badge & Timestamp */}
                 <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
-                  {renderActionBadge(item.action)}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {renderActionBadge(item.action)}
+                    {item.isTagVerified && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-300 shadow-2xs">
+                        <CheckSquare className="w-3 h-3 text-emerald-600" />
+                        <span>תג מאומת</span>
+                      </span>
+                    )}
+                  </div>
                   <div className="flex items-center gap-1 text-[11px] font-bold text-slate-500">
                     <Clock className="w-3 h-3 text-blue-500" />
                     <span>{formatTimestamp(item.createdAt)}</span>
@@ -395,14 +409,25 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
                               <PenTool className="w-3 h-3 text-blue-600" />
                               <span>חתימת העובד (דיגיטלית)</span>
                             </div>
-                            <div className="h-8 w-24 bg-white rounded border border-slate-200 overflow-hidden flex items-center justify-center p-0.5">
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img
-                                src={item.signatureData}
-                                alt="חתימת העובד"
-                                className="max-h-full max-w-full object-contain"
-                              />
-                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedReceiptRecord(item)}
+                              className="py-1 px-2.5 rounded-xl bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-900 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 shadow-2xs"
+                              title="לחץ לפתיחת שובר מסירה חתום"
+                            >
+                              <div className="h-5 w-12 bg-white rounded border border-blue-200 overflow-hidden flex items-center justify-center p-0.5">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={item.signatureData}
+                                  alt="חתימת העובד"
+                                  className="max-h-full max-w-full object-contain"
+                                />
+                              </div>
+                              <span className="flex items-center gap-1">
+                                <FileSignature className="w-3 h-3 text-blue-600" />
+                                <span>הצג שובר</span>
+                              </span>
+                            </button>
                           </div>
                         )}
                       </div>
@@ -486,6 +511,159 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
           </div>
         )}
       </div>
+
+      {/* SIGNED DELIVERY RECEIPT INSPECTION MODAL */}
+      {selectedReceiptRecord && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white border-2 border-blue-200 rounded-3xl max-w-lg w-full shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 max-h-[92vh] flex flex-col">
+            {/* Receipt Modal Header */}
+            <div className="p-5 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-600/50 flex items-center justify-center border border-blue-400/30">
+                  <FileSignature className="w-5 h-5 text-blue-200" />
+                </div>
+                <div>
+                  <h3 className="font-black text-sm text-white">שובר מסירה וקבלת ציוד דיגיטלי</h3>
+                  <p className="text-[11px] text-blue-200 font-mono" dir="ltr">
+                    DOC-ID: {selectedReceiptRecord.id.slice(0, 12)}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedReceiptRecord(null)}
+                className="p-1 rounded-lg hover:bg-white/10 text-white cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Receipt Modal Body */}
+            <div className="p-5 overflow-y-auto space-y-4 flex-1">
+              {/* Verification Status Badge */}
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                {selectedReceiptRecord.isTagVerified ? (
+                  <div className="flex items-center gap-1.5 p-2 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs font-black">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>תג QR פיזי מאומת ומודבק על גבי הכלי</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5 p-2 rounded-xl bg-slate-50 border border-slate-200 text-slate-700 text-xs font-bold">
+                    <span>ניפוק סטנדרטי</span>
+                  </div>
+                )}
+
+                <div className="text-[11px] text-slate-500 font-bold flex items-center gap-1">
+                  <Clock className="w-3.5 h-3.5 text-blue-600" />
+                  <span>{formatTimestamp(selectedReceiptRecord.signedAt || selectedReceiptRecord.createdAt)}</span>
+                </div>
+              </div>
+
+              {/* Equipment Card */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+                <span className="text-[11px] font-black text-slate-500 uppercase tracking-wider block">
+                  פרטי כלי העבודה
+                </span>
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <span className="font-mono text-xs font-black text-blue-900 bg-blue-100 px-2 py-0.5 rounded border border-blue-200" dir="ltr">
+                        {selectedReceiptRecord.qrCode}
+                      </span>
+                      <span className="text-[11px] font-bold text-slate-600 uppercase">
+                        {selectedReceiptRecord.brand}
+                      </span>
+                    </div>
+                    <h4 className="text-base font-black text-slate-900">{selectedReceiptRecord.toolName}</h4>
+                    {selectedReceiptRecord.modelNumber && (
+                      <p className="text-xs text-slate-500 font-mono mt-0.5" dir="ltr">
+                        דגם: {selectedReceiptRecord.modelNumber}
+                      </p>
+                    )}
+                  </div>
+                  <div className="text-left text-xs font-bold text-slate-600">
+                    <div>מתקן / אתר:</div>
+                    <span className="text-slate-900">{selectedReceiptRecord.warehouseName}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Recipient Details */}
+              <div className="p-3.5 rounded-2xl bg-amber-50/70 border border-amber-200 space-y-1.5">
+                <span className="text-[11px] font-black text-amber-900 uppercase tracking-wider block">
+                  פרטי מקבל הציוד בשטח
+                </span>
+                <div className="flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2">
+                    <UserCheck className="w-4 h-4 text-amber-700" />
+                    <span className="font-black text-slate-900">
+                      {selectedReceiptRecord.targetWorker || selectedReceiptRecord.performedBy}
+                    </span>
+                  </div>
+                  {selectedReceiptRecord.workerPhone && (
+                    <div className="flex items-center gap-1 font-mono font-bold text-slate-700" dir="ltr">
+                      <Phone className="w-3.5 h-3.5 text-blue-600" />
+                      <span>{selectedReceiptRecord.workerPhone}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Digital Signature Inspection Box */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black text-slate-900 flex items-center gap-1.5">
+                    <PenTool className="w-3.5 h-3.5 text-blue-600" />
+                    <span>חתימה דיגיטלית של מקבל הציוד</span>
+                  </span>
+                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                    מאומת דיגיטלית ✓
+                  </span>
+                </div>
+
+                <div className="w-full h-32 bg-white rounded-xl border-2 border-slate-300 flex items-center justify-center p-2 overflow-hidden shadow-inner">
+                  {selectedReceiptRecord.signatureData ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={selectedReceiptRecord.signatureData}
+                      alt="חתימת מקבל הציוד"
+                      className="max-h-full max-w-full object-contain filter contrast-125"
+                    />
+                  ) : (
+                    <span className="text-xs text-slate-400 font-bold">אין חתימה זמינה</span>
+                  )}
+                </div>
+
+                <p className="text-[10px] text-slate-500 font-medium leading-relaxed">
+                  הנני מאשר בזאת קבלת הכלי המפורט לעיל במצב תקין ומקבל אחריות מלאה להחזקתו, שימושו הבטוח והחזרתו למחסן.
+                </p>
+              </div>
+            </div>
+
+            {/* Footer Actions */}
+            <div className="p-4 border-t border-slate-100 flex items-center justify-between gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  if (typeof window !== 'undefined') window.print();
+                }}
+                className="py-2 px-3.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
+              >
+                <Printer className="w-3.5 h-3.5 text-blue-600" />
+                <span>הדפס שובר</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedReceiptRecord(null)}
+                className="py-2 px-5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-black cursor-pointer transition-all active:scale-95"
+              >
+                סגור
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </AppLayout>
   );
 }

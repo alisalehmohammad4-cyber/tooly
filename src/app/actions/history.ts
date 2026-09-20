@@ -34,6 +34,8 @@ export interface AuditHistoryRecord {
   organizationId?: string;
   expectedReturnDate?: string | null;
   signatureData?: string | null;
+  isTagVerified?: boolean | null;
+  signedAt?: string | null;
   accessoriesSnapshot?: {
     batteriesCount: number;
     hasCharger: boolean;
@@ -145,6 +147,9 @@ export async function getAuditHistory(
       worker_phone?: string | null;
       expected_return_date?: string | null;
       signature_data?: string | null;
+      signature_svg?: string | null;
+      is_tag_verified?: boolean | null;
+      signed_at?: string | null;
       accessories_snapshot?: AuditHistoryRecord['accessoriesSnapshot'];
       damage_report?: DamageReport | null;
       gps_lat?: number | null;
@@ -200,7 +205,13 @@ export async function getAuditHistory(
           createdAt: row.created_at,
           organizationId: (row.organization_id as string) || orgId,
           expectedReturnDate: row.expected_return_date || null,
-          signatureData: row.signature_data || null,
+          signatureData: row.signature_data || row.signature_svg || null,
+          isTagVerified:
+            row.is_tag_verified ??
+            (row.notes?.includes('תג פיזי מאומת (כן)') ||
+              row.notes?.includes('אישור תיוג פיזי') ||
+              false),
+          signedAt: row.signed_at || (row.signature_data || row.signature_svg ? row.created_at : null),
           accessoriesSnapshot: row.accessories_snapshot || null,
           damageReport: row.damage_report || null,
           gps:
