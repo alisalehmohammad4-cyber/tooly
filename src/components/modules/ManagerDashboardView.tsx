@@ -143,14 +143,17 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
   const loadStorekeepers = useCallback(async () => {
     setIsLoadingStorekeepers(true);
     try {
-      const list = await getStorekeepersListAction(currentOrganization?.id);
-      setStorekeepers(list);
+      const activeOrgId = currentOrganization?.id || user?.organizationId || user?.organization_id;
+      const list = await getStorekeepersListAction(activeOrgId);
+      if (Array.isArray(list)) {
+        setStorekeepers(list);
+      }
     } catch (err) {
       console.warn('Error loading storekeepers:', err);
     } finally {
       setIsLoadingStorekeepers(false);
     }
-  }, [currentOrganization]);
+  }, [currentOrganization, user]);
 
   // Load warehouses list
   const loadWarehouses = useCallback(async () => {
@@ -256,6 +259,9 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
     }
 
     try {
+      // Optimistically remove from UI
+      setStorekeepers((prev) => prev.filter((u) => u.id !== user.id));
+
       const res = await deleteStorekeeperAction(user.id);
       if (res.success) {
         setFeedbackMessage({
@@ -268,18 +274,33 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
           text: res.error || 'שגיאה במחיקת המשתמש.',
           type: 'error',
         });
+        await loadStorekeepers();
       }
     } catch {
       setFeedbackMessage({
         text: 'שגיאת רשת במחיקת המשתמש.',
         type: 'error',
       });
+      await loadStorekeepers();
     }
   };
 
   // Handle warehouse reassignment
   const handleWarehouseReassign = async (userId: string, newWarehouseId: string) => {
     try {
+      const wh = availableFacilities.find((f) => f.warehouseId === newWarehouseId);
+      setStorekeepers((prev) =>
+        prev.map((u) =>
+          u.id === userId
+            ? {
+                ...u,
+                assignedWarehouseId: newWarehouseId,
+                assignedWarehouseName: wh?.warehouseName || u.assignedWarehouseName,
+              }
+            : u
+        )
+      );
+
       const res = await updateStorekeeperWarehouseAction(userId, newWarehouseId);
       if (res.success) {
         setFeedbackMessage({
@@ -292,9 +313,11 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
           text: res.error || 'שגיאה בעדכון שיוך המחסן',
           type: 'error',
         });
+        await loadStorekeepers();
       }
     } catch {
       setFeedbackMessage({ text: 'שגיאה בעדכון שיוך המחסן', type: 'error' });
+      await loadStorekeepers();
     }
   };
 
@@ -302,6 +325,10 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
   const handleToggleActive = async (userId: string, currentStatus?: boolean) => {
     const newStatus = !(currentStatus ?? true);
     try {
+      setStorekeepers((prev) =>
+        prev.map((u) => (u.id === userId ? { ...u, isActive: newStatus } : u))
+      );
+
       const res = await toggleUserActiveAction(userId, newStatus);
       if (res.success) {
         setFeedbackMessage({
@@ -314,6 +341,7 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
           text: res.error || 'שגיאה בעדכון סטטוס המשתמש',
           type: 'error',
         });
+        await loadStorekeepers();
       }
     } catch {
       setFeedbackMessage({ text: 'שגיאה בעדכון סטטוס המשתמש', type: 'error' });
@@ -327,16 +355,19 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
     setIsSavingUser(true);
 
     try {
+      const activeOrgId = currentOrganization?.id || user?.organizationId || user?.organization_id;
       const res = await createStorekeeperAction({
+        name: newFullName,
         fullName: newFullName,
         username: newUsername,
+        pin: newPinCode,
         pinCode: newPinCode,
         role: newUserRole,
         assignedWarehouseId:
           newUserRole === 'chief_operations' ? undefined : effectiveAssignedWarehouseId,
         email: newEmail,
         phone: newPhone,
-        organizationId: currentOrganization?.id,
+        organizationId: activeOrgId,
       });
 
       if (res.success) {
@@ -344,6 +375,15 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
           text: res.message || 'משתמש תפעול חדש נוצר בהצלחה',
           type: 'success',
         });
+
+        // Immediately append newly created user to local storekeepers state so it displays instantly
+        if (res.user) {
+          setStorekeepers((prev) => {
+            const filtered = prev.filter((u) => u.id !== res.user!.id);
+            return [res.user!, ...filtered];
+          });
+        }
+
         setNewFullName('');
         setNewUsername('');
         setNewPinCode('');
@@ -351,6 +391,8 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
         setNewPhone('');
         setNewUserRole('storekeeper');
         setIsAddModalOpen(false);
+
+        // Re-fetch storekeepers list from server to stay 100% in sync
         await loadStorekeepers();
       } else {
         setFormError(res.error || 'שגיאה ביצירת המשתמש');

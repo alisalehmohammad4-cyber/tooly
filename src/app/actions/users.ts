@@ -1,6 +1,7 @@
 'use server';
 
 import { randomUUID } from 'crypto';
+import { revalidatePath } from 'next/cache';
 import type { AppUser } from '@/types/domain';
 import { isSupabaseConfigured, getSupabaseServerClient, supabaseAdmin } from '@/lib/supabase';
 import { getServerSessionOrgId } from '@/lib/auth/session';
@@ -359,27 +360,39 @@ export async function authenticateUserAction(
 }
 
 /**
- * Retrieves all users for an organization from Supabase public.app_users table.
- * Strictly reads from Supabase when configured, only falling back to mockStore if Supabase is not configured.
+ * Retrieves the list of enterprise operators (Chief Operations & Storekeepers) for the Manager Dashboard.
+ * Queries Supabase app_users table directly with tenant isolation.
  */
-export async function getUsersAction(organizationId?: string): Promise<AppUser[]> {
+export async function getStorekeepersAction(organizationId?: string): Promise<AppUser[]> {
   const orgId = (await resolveActiveOrganizationId(organizationId)) || DEFAULT_ORGANIZATION_ID;
 
   if (isSupabaseConfigured()) {
     try {
-      const { data: dbUsers, error } = await supabaseAdmin
+      let { data: dbUsers, error } = await supabaseAdmin
         .from('app_users')
         .select('*')
-        .eq('organization_id', orgId);
+        .eq('organization_id', orgId)
+        .order('created_at', { ascending: false });
 
-      if (!error && dbUsers) {
+      if (error && error.message?.includes('created_at')) {
+        const fallback = await supabaseAdmin
+          .from('app_users')
+          .select('*')
+          .eq('organization_id', orgId);
+        dbUsers = fallback.data;
+        error = fallback.error;
+      }
+
+      if (error) {
+        console.error("Failed to query storekeepers from Supabase:", error);
+      } else if (dbUsers) {
         if (dbUsers.length > 0) {
           const mappedUsers: AppUser[] = dbUsers.map((row) => ({
             id: String(row.id),
             fullName: row.name || row.full_name || 'משתמש מערכת',
             username:
               row.username ||
-              (row.email ? row.email.split('@')[0] : `user_${String(row.id).slice(0, 6)}`),
+              (row.email ? row.email.split('@')[0] : (row.name ? row.name.toLowerCase().replace(/\s+/g, '_') : `user_${String(row.id).slice(0, 6)}`)),
             pinCode: row.pin || row.pin_code || '',
             role: row.role || 'storekeeper',
             email: row.email,
@@ -389,12 +402,14 @@ export async function getUsersAction(organizationId?: string): Promise<AppUser[]
             assignedWarehouseId: row.assigned_warehouse_id,
             assignedWarehouseName:
               row.assigned_warehouse_name ||
-              (row.assigned_warehouse_id ? getWarehouseNameById(row.assigned_warehouse_id) : undefined),
+              (row.assigned_warehouse_id
+                ? getWarehouseNameById(row.assigned_warehouse_id)
+                : (row.role === 'chief_operations' ? 'כלל המחסנים (All Depots)' : undefined)),
             isActive: row.is_active !== false,
             createdAt: row.created_at,
           }));
 
-          // Keep in-memory cache in sync
+          // Sync into USERS_STORE
           for (const mapped of mappedUsers) {
             const idx = USERS_STORE.findIndex((u) => u.id === mapped.id);
             if (idx !== -1) {
@@ -406,8 +421,7 @@ export async function getUsersAction(organizationId?: string): Promise<AppUser[]
 
           return mappedUsers;
         } else {
-          // If no users exist yet for this tenant in DB (e.g. fresh default org before any creation),
-          // check if mockStore has initial fallback users for this org
+          // If no users exist yet for this tenant in DB
           const localOrgUsers = USERS_STORE.filter(
             (u) => (!orgId || !u.organizationId || u.organizationId === orgId)
           );
@@ -416,37 +430,22 @@ export async function getUsersAction(organizationId?: string): Promise<AppUser[]
           }
           return [];
         }
-      } else if (error) {
-        console.warn('[getUsersAction] Error querying app_users:', error.message);
       }
     } catch (err) {
-      console.warn('[getUsersAction] Failed to query Supabase app_users, falling back to mock:', err);
+      console.warn('[getStorekeepersAction] Failed to query Supabase app_users, falling back to mock:', err);
     }
   }
 
-  // Fallback to mockStore only when Supabase is strictly not configured
   return USERS_STORE.filter(
     (u) => (!orgId || !u.organizationId || u.organizationId === orgId)
   );
 }
 
-/**
- * Retrieves the list of enterprise operators (Chief Operations & Storekeepers) for the Manager Dashboard.
- * Queries Supabase app_users table directly with tenant isolation.
- */
-export async function getStorekeepersAction(organizationId?: string): Promise<AppUser[]> {
-  const users = await getUsersAction(organizationId);
-  return users.filter(
-    (u) =>
-      u.role === 'storekeeper' ||
-      u.role === 'chief_operations' ||
-      u.role === 'supervisor' ||
-      u.role === 'general_manager' ||
-      u.role === 'admin'
-  );
+export async function getStorekeepersListAction(organizationId?: string): Promise<AppUser[]> {
+  return getStorekeepersAction(organizationId);
 }
 
-export async function getStorekeepersListAction(organizationId?: string): Promise<AppUser[]> {
+export async function getUsersAction(organizationId?: string): Promise<AppUser[]> {
   return getStorekeepersAction(organizationId);
 }
 
@@ -474,64 +473,132 @@ export type CreateUserInput = CreateStorekeeperInput;
 export async function createStorekeeperAction(
   input: CreateStorekeeperInput
 ): Promise<{ success: boolean; error?: string; message?: string; user?: AppUser }> {
-  const rawName = input.name || input.fullName || '';
-  const rawPin = input.pin || input.pinCode || '';
+  const rawName = (input.name || input.fullName || '').trim();
+  const rawPin = (input.pin || input.pinCode || '').trim();
   const effectiveOrg = input.organizationId || input.organization_id;
   const orgId = (await resolveActiveOrganizationId(effectiveOrg)) || DEFAULT_ORGANIZATION_ID;
 
-  if (!rawName.trim() || rawName.trim().length < 2) {
+  if (!rawName || rawName.length < 2) {
     return { success: false, error: 'שם מלא חייב להכיל לפחות 2 תווים.' };
   }
 
-  if (!rawPin.trim() || rawPin.trim().length < 4) {
+  if (!rawPin || rawPin.length < 4) {
     return { success: false, error: 'קוד כניסה (PIN) חייב להכיל לפחות 4 ספרות.' };
   }
 
   const role = (input.role as any) || 'storekeeper';
   const isChief = role === 'chief_operations';
-  const assignedWhId = input.assignedWarehouseId || input.assigned_warehouse_id;
+  const rawWh = input.assignedWarehouseId || input.assigned_warehouse_id;
+  const assignedWarehouse = isChief || rawWh === 'all' || !rawWh ? null : rawWh;
 
-  if (!isChief && !assignedWhId && role === 'storekeeper') {
+  if (!isChief && !assignedWarehouse && role === 'storekeeper') {
     return { success: false, error: 'נא לבחור מחסן / אתר באחריות המחסנאי.' };
-  }
-
-  const cleanName = rawName.trim();
-  const cleanPin = rawPin.trim();
-  const cleanUsername =
-    input.username?.trim().toLowerCase() ||
-    cleanName.toLowerCase().replace(/\s+/g, '_') ||
-    `user_${Date.now().toString(36)}`;
-
-  // Duplicate PIN / username check
-  const existingInStore = USERS_STORE.find(
-    (u) =>
-      (!orgId || !u.organizationId || u.organizationId === orgId) &&
-      (u.username?.toLowerCase() === cleanUsername || u.pinCode === cleanPin)
-  );
-  if (existingInStore) {
-    return {
-      success: false,
-      error: `שם משתמש "${cleanUsername}" או קוד PIN כבר תפוסים במערכת. אנא בחר פרטים שונים.`,
-    };
   }
 
   const warehouseName = isChief
     ? 'כלל המחסנים (All Depots)'
-    : (assignedWhId ? getWarehouseNameById(assignedWhId) : undefined);
-  const assignedWarehouse = isChief ? null : (assignedWhId || null);
+    : (assignedWarehouse ? getWarehouseNameById(assignedWarehouse) : undefined);
 
   const userId = randomUUID();
-  const userEmail = input.email?.trim() || `${cleanUsername}@company.local`;
   const userPhone = input.phone?.trim() || null;
+  const cleanUsername =
+    input.username?.trim().toLowerCase() ||
+    rawName.toLowerCase().replace(/\s+/g, '_') ||
+    `user_${Date.now().toString(36)}`;
+  const userEmail = input.email?.trim() || `${cleanUsername}@company.local`;
 
-  const newUser: AppUser = {
+  // 1. Permanent insert into Supabase public.app_users
+  if (isSupabaseConfigured()) {
+    const payload = {
+      id: userId,
+      organization_id: orgId,
+      name: rawName,
+      role: role,
+      pin: rawPin,
+      phone: userPhone,
+      assigned_warehouse_id: assignedWarehouse,
+      is_active: true,
+    };
+
+    let { data, error } = await supabaseAdmin
+      .from('app_users')
+      .insert(payload)
+      .select()
+      .single();
+
+    if (error) {
+      console.warn("Primary insert failed, attempting schema-adaptive fallback:", error);
+      // Fallback: If table has extra constraints like full_name or pin_code from older seed migrations:
+      const fallbackPayload = {
+        ...payload,
+        full_name: rawName,
+        pin_code: rawPin,
+        username: cleanUsername,
+      };
+      const retry = await supabaseAdmin
+        .from('app_users')
+        .insert(fallbackPayload)
+        .select()
+        .single();
+
+      if (retry.error) {
+        console.error("Failed to insert user into Supabase:", retry.error);
+        throw new Error(`Failed to insert user: ${retry.error.message || error.message}`);
+      }
+      data = retry.data;
+    }
+
+    // Revalidate dashboard routes immediately
+    try {
+      revalidatePath('/dashboard/manager');
+      revalidatePath('/dashboard/warehouse');
+    } catch (e) {
+      console.warn('revalidatePath warning:', e);
+    }
+
+    const returnedUser: AppUser = {
+      id: data?.id ? String(data.id) : userId,
+      fullName: data?.name || data?.full_name || rawName,
+      username: data?.username || cleanUsername,
+      email: data?.email || userEmail,
+      phone: data?.phone || userPhone || undefined,
+      role: (data?.role as any) || role,
+      pinCode: data?.pin || data?.pin_code || rawPin,
+      organizationId: data?.organization_id || orgId,
+      organization_id: data?.organization_id || orgId,
+      assignedWarehouseId: isChief ? undefined : (data?.assigned_warehouse_id || assignedWarehouse || undefined),
+      assignedWarehouseName: warehouseName,
+      isActive: data?.is_active !== false,
+      createdAt: data?.created_at || new Date().toISOString(),
+    };
+
+    // Keep in-memory cache in sync
+    addMockUser(returnedUser);
+    const existIdx = USERS_STORE.findIndex((u) => u.id === returnedUser.id);
+    if (existIdx !== -1) {
+      USERS_STORE[existIdx] = returnedUser;
+    } else {
+      USERS_STORE.unshift(returnedUser);
+    }
+
+    return {
+      success: true,
+      message: isChief
+        ? `אחראי התפעול הראשי ${returnedUser.fullName} נוסף בהצלחה עם סמכות לכלל המחסנים.`
+        : `המחסנאי ${returnedUser.fullName} נוסף בהצלחה ושויך ל-${warehouseName || 'מחסן שטח'}.`,
+      user: returnedUser,
+    };
+  }
+
+  // Offline / mock fallback when Supabase is strictly not configured
+  const mockNewUser: AppUser = {
     id: userId,
-    fullName: cleanName,
+    fullName: rawName,
     username: cleanUsername,
     email: userEmail,
     phone: userPhone || undefined,
-    role: role,
-    pinCode: cleanPin,
+    role: role as any,
+    pinCode: rawPin,
     organizationId: orgId,
     organization_id: orgId,
     assignedWarehouseId: isChief ? undefined : (assignedWarehouse || undefined),
@@ -540,94 +607,25 @@ export async function createStorekeeperAction(
     createdAt: new Date().toISOString(),
   };
 
-  // 1. Permanent insertion into Supabase public.app_users
-  if (isSupabaseConfigured()) {
-    try {
-      const insertPayload: Record<string, any> = {
-        id: userId,
-        organization_id: orgId,
-        name: cleanName,
-        full_name: cleanName,
-        role: role,
-        pin: cleanPin,
-        pin_code: cleanPin,
-        username: cleanUsername,
-        assigned_warehouse_id: assignedWarehouse,
-        assigned_warehouse_name: warehouseName || null,
-        email: userEmail,
-        phone: userPhone,
-        is_active: true,
-        created_at: new Date().toISOString(),
-      };
-
-      const { error: insertErr } = await supabaseAdmin.from('app_users').insert(insertPayload);
-
-      if (insertErr) {
-        console.warn('[createStorekeeperAction] Primary insert failed, retrying with schema-adaptive upsert:', insertErr.message);
-        const retryResult = await supabaseAdmin.from('app_users').upsert({
-          id: userId,
-          organization_id: orgId,
-          name: cleanName,
-          full_name: cleanName,
-          role: role,
-          pin: cleanPin,
-          pin_code: cleanPin,
-          username: cleanUsername,
-          assigned_warehouse_id: assignedWarehouse,
-          assigned_warehouse_name: warehouseName || null,
-          is_active: true,
-          created_at: new Date().toISOString(),
-        }, { onConflict: 'id' });
-
-        if (retryResult.error) {
-          console.warn('[createStorekeeperAction] Upsert retry also returned warning:', retryResult.error.message);
-        }
-      }
-
-      // Mirror to legacy users table for backward compatibility if present
-      try {
-        await supabaseAdmin.from('users').upsert({
-          id: userId,
-          email: userEmail,
-          name: cleanName,
-          role: role,
-          assigned_warehouse_id: assignedWarehouse,
-          phone: userPhone,
-          is_active: true,
-          organization_id: orgId,
-        }, { onConflict: 'id' });
-      } catch {}
-    } catch (sbErr) {
-      console.error('[createStorekeeperAction] Error inserting into Supabase app_users:', sbErr);
-    }
-  }
-
-  // 2. Sync to in-memory store so current process / offline fallback has the user immediately
-  addMockUser(newUser);
-  if (!MOCK_USERS.some((u) => u.id === newUser.id)) {
-    MOCK_USERS.push(newUser);
-  }
-  const existIdx = USERS_STORE.findIndex(
-    (u) =>
-      u.id === newUser.id ||
-      (newUser.username && u.username?.toLowerCase() === newUser.username.toLowerCase())
-  );
-  if (existIdx !== -1) {
-    USERS_STORE[existIdx] = newUser;
-  } else {
-    USERS_STORE.push(newUser);
-  }
+  addMockUser(mockNewUser);
+  USERS_STORE.unshift(mockNewUser);
 
   return {
     success: true,
     message: isChief
-      ? `אחראי התפעול הראשי ${newUser.fullName} נוסף בהצלחה עם סמכות לכלל המחסנים.`
-      : `המחסנאי ${newUser.fullName} נוסף בהצלחה ושויך ל-${warehouseName || 'מחסן שטח'}.`,
-    user: newUser,
+      ? `אחראי התפעול הראשי ${mockNewUser.fullName} נוסף בהצלחה עם סמכות לכלל המחסנים.`
+      : `המחסנאי ${mockNewUser.fullName} נוסף בהצלחה ושויך ל-${warehouseName || 'מחסן שטח'}.`,
+    user: mockNewUser,
   };
 }
 
 export async function createUserAction(
+  input: CreateStorekeeperInput
+): Promise<{ success: boolean; error?: string; message?: string; user?: AppUser }> {
+  return createStorekeeperAction(input);
+}
+
+export async function createAppUserAction(
   input: CreateStorekeeperInput
 ): Promise<{ success: boolean; error?: string; message?: string; user?: AppUser }> {
   return createStorekeeperAction(input);

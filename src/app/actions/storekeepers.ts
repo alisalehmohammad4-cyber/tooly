@@ -6,6 +6,7 @@ export {
   getUsersAction,
   createStorekeeperAction,
   createUserAction,
+  createAppUserAction,
   onboardUserAction,
   deleteStorekeeperAction,
   updateUserRoleAction,
