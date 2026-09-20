@@ -7,6 +7,7 @@ import { getMockAuditHistory, getMockWarehouses } from '@/lib/mockStore';
 export type AuditActionType =
   | 'CHECKOUT'
   | 'CHECKIN'
+  | 'TRANSFER_INIT'
   | 'TRANSFER_RECEIVE'
   | 'MAINTENANCE_FLAG'
   | 'ONBOARD'

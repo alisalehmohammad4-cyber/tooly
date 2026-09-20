@@ -688,6 +688,8 @@ export interface UnifiedAssetItem {
   originalTaskId?: string;
   orderNumber?: string | null;
   order_number?: string | null;
+  tagNumber?: string | null;
+  tag_number?: string | null;
   organizationId?: string;
   organization_id?: string;
 }

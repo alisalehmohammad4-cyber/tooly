@@ -153,11 +153,18 @@ function renderActionBadge(action: AuditActionType) {
           <span>החזרת כלי למחסן</span>
         </span>
       );
+    case 'TRANSFER_INIT':
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black bg-indigo-50 text-indigo-900 border border-indigo-300 shadow-sm">
+          <Truck className="w-3.5 h-3.5 text-indigo-600" />
+          <span>יציאה לשינוע (בין אתרים)</span>
+        </span>
+      );
     case 'TRANSFER_RECEIVE':
       return (
         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black bg-blue-50 text-blue-900 border border-blue-300 shadow-sm">
           <Truck className="w-3.5 h-3.5 text-blue-600" />
-          <span>העברה לאתר אחר</span>
+          <span>קליטת ציוד משינוע</span>
         </span>
       );
     case 'MAINTENANCE_FLAG':
