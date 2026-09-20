@@ -2,6 +2,8 @@
 
 export {
   getStorekeepersListAction,
+  getStorekeepersAction,
+  getUsersAction,
   createStorekeeperAction,
   createUserAction,
   onboardUserAction,

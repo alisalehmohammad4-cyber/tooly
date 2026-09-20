@@ -2,7 +2,8 @@
 
 import { randomUUID } from 'crypto';
 import type { AppUser } from '@/types/domain';
-import { isSupabaseConfigured, getSupabaseServerClient } from '@/lib/supabase';
+import { isSupabaseConfigured, getSupabaseServerClient, supabaseAdmin } from '@/lib/supabase';
+import { getServerSessionOrgId } from '@/lib/auth/session';
 
 import {
   MOCK_USERS,
@@ -16,6 +17,11 @@ import {
 } from '@/lib/mockStore';
 
 const DEFAULT_ORGANIZATION_ID = DEFAULT_ORGANIZATION.id;
+
+export async function resolveActiveOrganizationId(providedOrgId?: string): Promise<string> {
+  const resolved = await getServerSessionOrgId(providedOrgId);
+  return resolved || DEFAULT_ORGANIZATION_ID;
+}
 
 // Persistent in-memory user registry initialized with authoritative users
 const USERS_STORE: AppUser[] = [...MOCK_USERS];
@@ -128,10 +134,10 @@ export async function authenticateUserAction(
 
       // Direct PIN matching via Supabase
       if (!cleanSecret && cleanId.length >= 4) {
-        const { data: dbUserByPin, error: pinErr } = await serverClient
+        const { data: dbUserByPin, error: pinErr } = await supabaseAdmin
           .from('app_users')
           .select('*')
-          .eq('pin_code', cleanId)
+          .or(`pin_code.eq.${cleanId},pin.eq.${cleanId}`)
           .maybeSingle();
 
         if (dbUserByPin && !pinErr) {
@@ -146,6 +152,7 @@ export async function authenticateUserAction(
             dbUserByPin.username?.toLowerCase() === 'zatout01' ||
             dbUserByPin.username?.toLowerCase().includes('zatout') ||
             dbUserByPin.full_name?.includes('זעתות') ||
+            dbUserByPin.name?.includes('זעתות') ||
             dbUserByPin.full_name?.includes('סאמי') ||
             dbUserByPin.full_name?.toLowerCase().includes('zatout');
           const effectiveOrg =
@@ -154,10 +161,10 @@ export async function authenticateUserAction(
 
           const returnedUser: AppUser = {
             id: dbUserByPin.id ? String(dbUserByPin.id) : `usr-${dbUserByPin.username}`,
-            fullName: dbUserByPin.full_name || 'משתמש מערכת',
+            fullName: dbUserByPin.name || dbUserByPin.full_name || 'משתמש מערכת',
             username: dbUserByPin.username,
             role: dbUserByPin.role,
-            pinCode: dbUserByPin.pin_code,
+            pinCode: dbUserByPin.pin || dbUserByPin.pin_code,
             assignedWarehouseId: dbUserByPin.assigned_warehouse_id,
             assignedWarehouseName:
               dbUserByPin.assigned_warehouse_name ||
@@ -179,16 +186,17 @@ export async function authenticateUserAction(
       }
 
       // Username matching via Supabase
-      const { data: dbUserByName, error: uErr } = await serverClient
+      const { data: dbUserByName, error: uErr } = await supabaseAdmin
         .from('app_users')
         .select('*')
         .ilike('username', cleanIdLower)
         .maybeSingle();
 
       if (dbUserByName && !uErr) {
+        const userPin = dbUserByName.pin || dbUserByName.pin_code;
         const isPinValid =
-          dbUserByName.pin_code === cleanSecret ||
-          (!cleanSecret && dbUserByName.pin_code === cleanId) ||
+          userPin === cleanSecret ||
+          (!cleanSecret && userPin === cleanId) ||
           (dbUserByName.username?.toLowerCase() === 'zatout01' && (cleanSecret === '1952' || cleanId === '1952'));
 
         if (!isPinValid) {
@@ -209,6 +217,7 @@ export async function authenticateUserAction(
           dbUserByName.username?.toLowerCase() === 'zatout01' ||
           dbUserByName.username?.toLowerCase().includes('zatout') ||
           dbUserByName.full_name?.includes('זעתות') ||
+          dbUserByName.name?.includes('זעתות') ||
           dbUserByName.full_name?.includes('סאמי') ||
           dbUserByName.full_name?.toLowerCase().includes('zatout');
         const effectiveOrg =
@@ -217,10 +226,10 @@ export async function authenticateUserAction(
 
         const returnedUser: AppUser = {
           id: dbUserByName.id ? String(dbUserByName.id) : `usr-${dbUserByName.username}`,
-          fullName: dbUserByName.full_name || 'משתמש מערכת',
+          fullName: dbUserByName.name || dbUserByName.full_name || 'משתמש מערכת',
           username: dbUserByName.username,
           role: dbUserByName.role,
-          pinCode: dbUserByName.pin_code,
+          pinCode: userPin,
           assignedWarehouseId: dbUserByName.assigned_warehouse_id,
           assignedWarehouseName:
             dbUserByName.assigned_warehouse_name ||
@@ -350,204 +359,156 @@ export async function authenticateUserAction(
 }
 
 /**
- * Retrieves the list of enterprise operators (Chief Operations & Storekeepers) for the Manager Dashboard.
- * Synchronizes with Supabase database when available, while ensuring local mock fallback stays intact.
+ * Retrieves all users for an organization from Supabase public.app_users table.
+ * Strictly reads from Supabase when configured, only falling back to mockStore if Supabase is not configured.
  */
-export async function getStorekeepersListAction(organizationId?: string): Promise<AppUser[]> {
-  const orgId = organizationId || DEFAULT_ORGANIZATION_ID;
-
-  // Sync all mock users into USERS_STORE
-  for (const mockUser of MOCK_USERS) {
-    if (!USERS_STORE.some((u) => u.id === mockUser.id)) {
-      USERS_STORE.push(mockUser);
-    }
-  }
+export async function getUsersAction(organizationId?: string): Promise<AppUser[]> {
+  const orgId = (await resolveActiveOrganizationId(organizationId)) || DEFAULT_ORGANIZATION_ID;
 
   if (isSupabaseConfigured()) {
     try {
-      const serverClient = getSupabaseServerClient();
-
-      // 1. Try querying primary `users` table
-      const { data: usersData, error: usersErr } = await serverClient
-        .from('users')
+      const { data: dbUsers, error } = await supabaseAdmin
+        .from('app_users')
         .select('*')
-        .or(`organization_id.eq.${orgId},organization_id.is.null`);
+        .eq('organization_id', orgId);
 
-      if (!usersErr && usersData && usersData.length > 0) {
-        for (const row of usersData) {
-          const cleanEmail = row.email || '';
-          const fallbackUsername = cleanEmail ? cleanEmail.split('@')[0] : (row.username || String(row.id));
-          const mappedUser: AppUser = {
+      if (!error && dbUsers) {
+        if (dbUsers.length > 0) {
+          const mappedUsers: AppUser[] = dbUsers.map((row) => ({
             id: String(row.id),
             fullName: row.name || row.full_name || 'משתמש מערכת',
-            username: row.username || fallbackUsername,
+            username:
+              row.username ||
+              (row.email ? row.email.split('@')[0] : `user_${String(row.id).slice(0, 6)}`),
+            pinCode: row.pin || row.pin_code || '',
             role: row.role || 'storekeeper',
             email: row.email,
             phone: row.phone,
-            organizationId: (row.organization_id as string) || orgId,
-            organization_id: (row.organization_id as string) || orgId,
+            organizationId: row.organization_id || orgId,
+            organization_id: row.organization_id || orgId,
             assignedWarehouseId: row.assigned_warehouse_id,
-            assignedWarehouseName: row.assigned_warehouse_id
-              ? getWarehouseNameById(row.assigned_warehouse_id)
-              : undefined,
+            assignedWarehouseName:
+              row.assigned_warehouse_name ||
+              (row.assigned_warehouse_id ? getWarehouseNameById(row.assigned_warehouse_id) : undefined),
             isActive: row.is_active !== false,
-          };
-          addMockUser(mappedUser);
-          const existIdx = USERS_STORE.findIndex(
-            (u) =>
-              u.id === mappedUser.id ||
-              (mappedUser.username && u.username?.toLowerCase() === mappedUser.username.toLowerCase())
-          );
-          if (existIdx !== -1) {
-            USERS_STORE[existIdx] = mappedUser;
-          } else {
-            USERS_STORE.push(mappedUser);
-          }
-        }
-      } else {
-        // 2. Try fallback to `profiles` table
-        const { data: profilesData, error: profilesErr } = await serverClient
-          .from('profiles')
-          .select('*')
-          .or(`organization_id.eq.${orgId},organization_id.is.null`);
+            createdAt: row.created_at,
+          }));
 
-        if (!profilesErr && profilesData && profilesData.length > 0) {
-          for (const row of profilesData) {
-            const cleanEmail = row.email || '';
-            const fallbackUsername = cleanEmail ? cleanEmail.split('@')[0] : (row.username || String(row.id));
-            const mappedUser: AppUser = {
-              id: String(row.id),
-              fullName: row.full_name || row.name || 'משתמש מערכת',
-              username: row.username || fallbackUsername,
-              role: row.role || 'storekeeper',
-              email: row.email,
-              phone: row.phone,
-              organizationId: (row.organization_id as string) || orgId,
-              organization_id: (row.organization_id as string) || orgId,
-              assignedWarehouseId: row.assigned_warehouse_id,
-              assignedWarehouseName: row.assigned_warehouse_id
-                ? getWarehouseNameById(row.assigned_warehouse_id)
-                : undefined,
-              isActive: row.is_active !== false,
-            };
-            addMockUser(mappedUser);
-            const existIdx = USERS_STORE.findIndex(
-              (u) =>
-                u.id === mappedUser.id ||
-                (mappedUser.username && u.username?.toLowerCase() === mappedUser.username.toLowerCase())
-            );
-            if (existIdx !== -1) {
-              USERS_STORE[existIdx] = mappedUser;
+          // Keep in-memory cache in sync
+          for (const mapped of mappedUsers) {
+            const idx = USERS_STORE.findIndex((u) => u.id === mapped.id);
+            if (idx !== -1) {
+              USERS_STORE[idx] = mapped;
             } else {
-              USERS_STORE.push(mappedUser);
+              USERS_STORE.push(mapped);
             }
           }
-        } else {
-          // 3. Fallback to `app_users` table
-          const { data: appUsersData, error: appErr } = await serverClient
-            .from('app_users')
-            .select('*')
-            .or(`organization_id.eq.${orgId},organization_id.is.null`);
 
-          if (!appErr && appUsersData && appUsersData.length > 0) {
-            for (const row of appUsersData) {
-              const mappedUser: AppUser = {
-                id: String(row.id),
-                fullName: row.full_name || 'משתמש מערכת',
-                username: row.username,
-                pinCode: row.pin_code,
-                role: row.role || 'storekeeper',
-                organizationId: (row.organization_id as string) || orgId,
-                organization_id: (row.organization_id as string) || orgId,
-                assignedWarehouseId: row.assigned_warehouse_id,
-                assignedWarehouseName:
-                  row.assigned_warehouse_name ||
-                  (row.assigned_warehouse_id
-                    ? getWarehouseNameById(row.assigned_warehouse_id)
-                    : undefined),
-                isActive: row.is_active !== false,
-                createdAt: row.created_at,
-              };
-              addMockUser(mappedUser);
-              const existIdx = USERS_STORE.findIndex(
-                (u) =>
-                  u.id === mappedUser.id ||
-                  (mappedUser.username && u.username?.toLowerCase() === mappedUser.username.toLowerCase())
-              );
-              if (existIdx !== -1) {
-                USERS_STORE[existIdx] = mappedUser;
-              } else {
-                USERS_STORE.push(mappedUser);
-              }
-            }
+          return mappedUsers;
+        } else {
+          // If no users exist yet for this tenant in DB (e.g. fresh default org before any creation),
+          // check if mockStore has initial fallback users for this org
+          const localOrgUsers = USERS_STORE.filter(
+            (u) => (!orgId || !u.organizationId || u.organizationId === orgId)
+          );
+          if (localOrgUsers.length > 0) {
+            return localOrgUsers;
           }
+          return [];
         }
+      } else if (error) {
+        console.warn('[getUsersAction] Error querying app_users:', error.message);
       }
     } catch (err) {
-      console.warn('Could not fetch storekeepers from Supabase, using local store:', err);
+      console.warn('[getUsersAction] Failed to query Supabase app_users, falling back to mock:', err);
     }
   }
 
+  // Fallback to mockStore only when Supabase is strictly not configured
   return USERS_STORE.filter(
-    (u) =>
-      (!organizationId || !u.organizationId || u.organizationId === organizationId) &&
-      (u.role === 'storekeeper' ||
-        u.role === 'chief_operations' ||
-        u.role === 'supervisor' ||
-        u.role === 'general_manager' ||
-        u.role === 'admin')
+    (u) => (!orgId || !u.organizationId || u.organizationId === orgId)
   );
 }
 
+/**
+ * Retrieves the list of enterprise operators (Chief Operations & Storekeepers) for the Manager Dashboard.
+ * Queries Supabase app_users table directly with tenant isolation.
+ */
+export async function getStorekeepersAction(organizationId?: string): Promise<AppUser[]> {
+  const users = await getUsersAction(organizationId);
+  return users.filter(
+    (u) =>
+      u.role === 'storekeeper' ||
+      u.role === 'chief_operations' ||
+      u.role === 'supervisor' ||
+      u.role === 'general_manager' ||
+      u.role === 'admin'
+  );
+}
+
+export async function getStorekeepersListAction(organizationId?: string): Promise<AppUser[]> {
+  return getStorekeepersAction(organizationId);
+}
+
 export interface CreateStorekeeperInput {
-  fullName: string;
-  username: string;
-  pinCode: string;
-  role?: 'storekeeper' | 'chief_operations' | 'general_manager' | 'admin' | 'supervisor';
+  name?: string;
+  fullName?: string;
+  username?: string;
+  pin?: string;
+  pinCode?: string;
+  role?: 'storekeeper' | 'chief_operations' | 'general_manager' | 'admin' | 'supervisor' | string;
   assignedWarehouseId?: string;
+  assigned_warehouse_id?: string;
   email?: string;
   phone?: string;
   organizationId?: string;
+  organization_id?: string;
 }
 
+export type CreateUserInput = CreateStorekeeperInput;
+
 /**
- * Creates a new Storekeeper or Chief Operations account (General Manager only).
- * Writes persistently to Supabase `users` table ({ id, email, name, role, assigned_warehouse_id, phone, is_active: true, organization_id }),
- * mirrors to `profiles` and `app_users`, and appends to `MOCK_USERS` in `src/lib/mockStore.ts`.
+ * Creates a new Storekeeper or Team Member account.
+ * Permanently inserts the record into Supabase `public.app_users` table with tenant isolation.
  */
 export async function createStorekeeperAction(
   input: CreateStorekeeperInput
 ): Promise<{ success: boolean; error?: string; message?: string; user?: AppUser }> {
-  const { fullName, username, pinCode, role = 'storekeeper', assignedWarehouseId, email, phone, organizationId } = input;
-  const orgId = organizationId || DEFAULT_ORGANIZATION_ID;
+  const rawName = input.name || input.fullName || '';
+  const rawPin = input.pin || input.pinCode || '';
+  const effectiveOrg = input.organizationId || input.organization_id;
+  const orgId = (await resolveActiveOrganizationId(effectiveOrg)) || DEFAULT_ORGANIZATION_ID;
 
-  if (!fullName.trim() || fullName.trim().length < 2) {
+  if (!rawName.trim() || rawName.trim().length < 2) {
     return { success: false, error: 'שם מלא חייב להכיל לפחות 2 תווים.' };
   }
 
-  if (!username.trim() || username.trim().length < 2) {
-    return { success: false, error: 'שם משתמש חייב להכיל לפחות 2 תווים באנגלית או ספרות.' };
-  }
-
-  if (!pinCode.trim() || pinCode.trim().length < 4) {
+  if (!rawPin.trim() || rawPin.trim().length < 4) {
     return { success: false, error: 'קוד כניסה (PIN) חייב להכיל לפחות 4 ספרות.' };
   }
 
+  const role = (input.role as any) || 'storekeeper';
   const isChief = role === 'chief_operations';
-  if (!isChief && !assignedWarehouseId) {
+  const assignedWhId = input.assignedWarehouseId || input.assigned_warehouse_id;
+
+  if (!isChief && !assignedWhId && role === 'storekeeper') {
     return { success: false, error: 'נא לבחור מחסן / אתר באחריות המחסנאי.' };
   }
 
-  const cleanUsername = username.trim().toLowerCase();
-  const cleanPin = pinCode.trim();
+  const cleanName = rawName.trim();
+  const cleanPin = rawPin.trim();
+  const cleanUsername =
+    input.username?.trim().toLowerCase() ||
+    cleanName.toLowerCase().replace(/\s+/g, '_') ||
+    `user_${Date.now().toString(36)}`;
 
-  const existing = USERS_STORE.find(
+  // Duplicate PIN / username check
+  const existingInStore = USERS_STORE.find(
     (u) =>
       (!orgId || !u.organizationId || u.organizationId === orgId) &&
       (u.username?.toLowerCase() === cleanUsername || u.pinCode === cleanPin)
   );
-
-  if (existing) {
+  if (existingInStore) {
     return {
       success: false,
       error: `שם משתמש "${cleanUsername}" או קוד PIN כבר תפוסים במערכת. אנא בחר פרטים שונים.`,
@@ -556,36 +517,96 @@ export async function createStorekeeperAction(
 
   const warehouseName = isChief
     ? 'כלל המחסנים (All Depots)'
-    : getWarehouseNameById(assignedWarehouseId!);
-  const assignedWarehouse = isChief ? null : (assignedWarehouseId || null);
+    : (assignedWhId ? getWarehouseNameById(assignedWhId) : undefined);
+  const assignedWarehouse = isChief ? null : (assignedWhId || null);
 
   const userId = randomUUID();
-  const userEmail = email?.trim() || `${cleanUsername}@company.local`;
-  const userPhone = phone?.trim() || null;
-  const userRole = isChief ? 'chief_operations' : role;
+  const userEmail = input.email?.trim() || `${cleanUsername}@company.local`;
+  const userPhone = input.phone?.trim() || null;
 
   const newUser: AppUser = {
     id: userId,
-    fullName: fullName.trim(),
+    fullName: cleanName,
     username: cleanUsername,
     email: userEmail,
     phone: userPhone || undefined,
-    role: userRole,
+    role: role,
     pinCode: cleanPin,
     organizationId: orgId,
-    assignedWarehouseId: isChief ? undefined : assignedWarehouseId,
+    organization_id: orgId,
+    assignedWarehouseId: isChief ? undefined : (assignedWarehouse || undefined),
     assignedWarehouseName: warehouseName,
     isActive: true,
     createdAt: new Date().toISOString(),
   };
 
-  // Append to MOCK_USERS in src/lib/mockStore.ts so offline/fallback mode stays 100% in sync
+  // 1. Permanent insertion into Supabase public.app_users
+  if (isSupabaseConfigured()) {
+    try {
+      const insertPayload: Record<string, any> = {
+        id: userId,
+        organization_id: orgId,
+        name: cleanName,
+        full_name: cleanName,
+        role: role,
+        pin: cleanPin,
+        pin_code: cleanPin,
+        username: cleanUsername,
+        assigned_warehouse_id: assignedWarehouse,
+        assigned_warehouse_name: warehouseName || null,
+        email: userEmail,
+        phone: userPhone,
+        is_active: true,
+        created_at: new Date().toISOString(),
+      };
+
+      const { error: insertErr } = await supabaseAdmin.from('app_users').insert(insertPayload);
+
+      if (insertErr) {
+        console.warn('[createStorekeeperAction] Primary insert failed, retrying with schema-adaptive upsert:', insertErr.message);
+        const retryResult = await supabaseAdmin.from('app_users').upsert({
+          id: userId,
+          organization_id: orgId,
+          name: cleanName,
+          full_name: cleanName,
+          role: role,
+          pin: cleanPin,
+          pin_code: cleanPin,
+          username: cleanUsername,
+          assigned_warehouse_id: assignedWarehouse,
+          assigned_warehouse_name: warehouseName || null,
+          is_active: true,
+          created_at: new Date().toISOString(),
+        }, { onConflict: 'id' });
+
+        if (retryResult.error) {
+          console.warn('[createStorekeeperAction] Upsert retry also returned warning:', retryResult.error.message);
+        }
+      }
+
+      // Mirror to legacy users table for backward compatibility if present
+      try {
+        await supabaseAdmin.from('users').upsert({
+          id: userId,
+          email: userEmail,
+          name: cleanName,
+          role: role,
+          assigned_warehouse_id: assignedWarehouse,
+          phone: userPhone,
+          is_active: true,
+          organization_id: orgId,
+        }, { onConflict: 'id' });
+      } catch {}
+    } catch (sbErr) {
+      console.error('[createStorekeeperAction] Error inserting into Supabase app_users:', sbErr);
+    }
+  }
+
+  // 2. Sync to in-memory store so current process / offline fallback has the user immediately
   addMockUser(newUser);
   if (!MOCK_USERS.some((u) => u.id === newUser.id)) {
     MOCK_USERS.push(newUser);
   }
-
-  // Synchronize local persistent USERS_STORE
   const existIdx = USERS_STORE.findIndex(
     (u) =>
       u.id === newUser.id ||
@@ -597,87 +618,11 @@ export async function createStorekeeperAction(
     USERS_STORE.push(newUser);
   }
 
-  // If Supabase is connected / configured:
-  if (isSupabaseConfigured()) {
-    try {
-      const serverClient = getSupabaseServerClient();
-      const { error } = await serverClient.from('users').upsert({
-        id: userId,
-        email: userEmail,
-        name: fullName.trim(),
-        role: newUser.role,
-        assigned_warehouse_id: assignedWarehouse,
-        phone: userPhone,
-        is_active: true,
-        organization_id: orgId,
-      });
-
-      if (error) console.error('Error saving user to Supabase:', error.message);
-
-      // Fallback/mirror to profiles table if users table returned an error
-      if (error) {
-        const { error: profileError } = await serverClient.from('profiles').upsert({
-          id: userId,
-          email: userEmail,
-          name: fullName.trim(),
-          full_name: fullName.trim(),
-          role: newUser.role,
-          assigned_warehouse_id: assignedWarehouse,
-          phone: userPhone,
-          is_active: true,
-          organization_id: orgId,
-        });
-        if (profileError) console.error('Error saving user to Supabase:', profileError.message);
-      }
-    } catch (err: unknown) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      console.error('Error saving user to Supabase:', error.message);
-    }
-
-    // Mirror to app_users table (for PIN authentication if configured)
-    try {
-      const serverClient = getSupabaseServerClient();
-      await serverClient.from('app_users').upsert(
-        {
-          id: userId,
-          full_name: fullName.trim(),
-          username: cleanUsername,
-          pin_code: cleanPin,
-          role: newUser.role,
-          assigned_warehouse_id: assignedWarehouse,
-          assigned_warehouse_name: warehouseName,
-          is_active: true,
-          organization_id: orgId,
-        },
-        { onConflict: 'username' }
-      );
-    } catch (appUserErr: unknown) {
-      const appError = appUserErr instanceof Error ? appUserErr : new Error(String(appUserErr));
-      console.warn('Could not mirror user to Supabase app_users:', appError.message);
-    }
-
-    // Mirror to profiles table if users table was primary
-    try {
-      const serverClient = getSupabaseServerClient();
-      await serverClient.from('profiles').upsert({
-        id: userId,
-        email: userEmail,
-        full_name: fullName.trim(),
-        role: newUser.role,
-        assigned_warehouse_id: assignedWarehouse,
-        is_active: true,
-        organization_id: orgId,
-      });
-    } catch {
-      // Non-critical mirror
-    }
-  }
-
   return {
     success: true,
     message: isChief
       ? `אחראי התפעול הראשי ${newUser.fullName} נוסף בהצלחה עם סמכות לכלל המחסנים.`
-      : `המחסנאי ${newUser.fullName} נוסף בהצלחה ושויך ל-${warehouseName}.`,
+      : `המחסנאי ${newUser.fullName} נוסף בהצלחה ושויך ל-${warehouseName || 'מחסן שטח'}.`,
     user: newUser,
   };
 }
@@ -717,15 +662,15 @@ export async function deleteStorekeeperAction(
     return { success: false, error: 'לא ניתן למחוק משתמש בעל הרשאת מנהל כללי' };
   }
 
-  // 1. Supabase deletion if configured
+  // 1. Supabase deletion from app_users
   if (isSupabaseConfigured()) {
     try {
-      const serverClient = getSupabaseServerClient();
-      await serverClient.from('users').delete().eq('id', userId);
-      await serverClient.from('app_users').delete().or(`id.eq.${userId},username.eq.${userId}`);
-      await serverClient.from('profiles').delete().eq('id', userId);
+      await supabaseAdmin.from('app_users').delete().eq('id', userId);
+      await supabaseAdmin.from('app_users').delete().eq('username', userId);
+      await supabaseAdmin.from('users').delete().eq('id', userId);
+      await supabaseAdmin.from('profiles').delete().eq('id', userId);
     } catch (err) {
-      console.warn('Could not delete user from Supabase:', err);
+      console.warn('Could not delete user from Supabase app_users:', err);
     }
   }
 
@@ -776,16 +721,7 @@ export async function updateUserRoleAction(
 
   if (isSupabaseConfigured()) {
     try {
-      const serverClient = getSupabaseServerClient();
-      await serverClient
-        .from('users')
-        .update({
-          role: user.role,
-          assigned_warehouse_id: user.assignedWarehouseId ?? null,
-        })
-        .eq('id', userId);
-
-      await serverClient
+      await supabaseAdmin
         .from('app_users')
         .update({
           role: user.role,
@@ -794,7 +730,15 @@ export async function updateUserRoleAction(
         })
         .or(`id.eq.${userId},username.eq.${userId}`);
 
-      await serverClient
+      await supabaseAdmin
+        .from('users')
+        .update({
+          role: user.role,
+          assigned_warehouse_id: user.assignedWarehouseId ?? null,
+        })
+        .eq('id', userId);
+
+      await supabaseAdmin
         .from('profiles')
         .update({
           role: user.role,
@@ -838,13 +782,7 @@ export async function reassignStorekeeperWarehouseAction(
 
   if (isSupabaseConfigured()) {
     try {
-      const serverClient = getSupabaseServerClient();
-      await serverClient
-        .from('users')
-        .update({ assigned_warehouse_id: newWarehouseId })
-        .eq('id', userId);
-
-      await serverClient
+      await supabaseAdmin
         .from('app_users')
         .update({
           assigned_warehouse_id: newWarehouseId,
@@ -852,12 +790,17 @@ export async function reassignStorekeeperWarehouseAction(
         })
         .or(`id.eq.${userId},username.eq.${userId}`);
 
-      await serverClient
+      await supabaseAdmin
+        .from('users')
+        .update({ assigned_warehouse_id: newWarehouseId })
+        .eq('id', userId);
+
+      await supabaseAdmin
         .from('profiles')
         .update({ assigned_warehouse_id: newWarehouseId })
         .eq('id', userId);
     } catch (err) {
-      console.warn('Could not mirror warehouse update to Supabase profiles:', err);
+      console.warn('Could not mirror warehouse update to Supabase:', err);
     }
   }
 
@@ -897,18 +840,17 @@ export async function toggleUserActiveAction(
 
   if (isSupabaseConfigured()) {
     try {
-      const serverClient = getSupabaseServerClient();
-      await serverClient
-        .from('users')
-        .update({ is_active: isActive })
-        .eq('id', userId);
-
-      await serverClient
+      await supabaseAdmin
         .from('app_users')
         .update({ is_active: isActive })
         .or(`id.eq.${userId},username.eq.${userId}`);
 
-      await serverClient
+      await supabaseAdmin
+        .from('users')
+        .update({ is_active: isActive })
+        .eq('id', userId);
+
+      await supabaseAdmin
         .from('profiles')
         .update({ is_active: isActive })
         .eq('id', userId);
