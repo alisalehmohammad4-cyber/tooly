@@ -32,6 +32,10 @@ import {
   QrCode,
   PenTool,
   ShieldCheck,
+  Inbox,
+  Send,
+  Flame,
+  PackageCheck,
 } from 'lucide-react';
 import type { StorekeeperOperationsPayload, WarehouseOption } from '@/app/actions/dashboard';
 import { getStorekeeperOperations } from '@/app/actions/dashboard';
@@ -56,6 +60,15 @@ import {
   type AvailableTransferAssetItem,
   type PendingTransferItem,
 } from '@/app/actions/transfers';
+import {
+  createSiteToolRequestAction,
+  getSiteStorekeeperDashboardAction,
+  getChiefStorekeeperInboxAction,
+  resolveToolRequestAction,
+  confirmToolReceptionAction,
+  type SiteToolRequestItem,
+  type SuggestedToolAsset,
+} from '@/app/actions/toolRequests';
 
 interface WarehouseDashboardViewProps {
   initialData: StorekeeperOperationsPayload;
@@ -212,6 +225,194 @@ export default function WarehouseDashboardView({
       });
     } finally {
       setDecidingTransferId(null);
+    }
+  };
+
+  // =========================================================================
+  // TWO-TIER LOGISTICS STATE: Site Storekeeper vs. Chief Operations Manager
+  // =========================================================================
+
+  // 1. Chief Storekeeper Inbox State
+  const [siteRequestsInbox, setSiteRequestsInbox] = useState<SiteToolRequestItem[]>([]);
+  const [availableAssetsForInbox, setAvailableAssetsForInbox] = useState<SuggestedToolAsset[]>([]);
+  const [isLoadingInbox, setIsLoadingInbox] = useState<boolean>(false);
+  const [selectedAssetForRequest, setSelectedAssetForRequest] = useState<Record<string, string>>({});
+  const [isResolvingRequestId, setIsResolvingRequestId] = useState<string | null>(null);
+  const [rejectingSiteRequestId, setRejectingSiteRequestId] = useState<string | null>(null);
+  const [rejectReasonInput, setRejectReasonInput] = useState<string>('');
+  const [inboxFeedback, setInboxFeedback] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  // 2. Site Storekeeper Dashboard State
+  const [siteIncomingShipments, setSiteIncomingShipments] = useState<SiteToolRequestItem[]>([]);
+  const [mySiteRequests, setMySiteRequests] = useState<SiteToolRequestItem[]>([]);
+  const [isLoadingSiteData, setIsLoadingSiteData] = useState<boolean>(false);
+  const [receivingSiteRequestId, setReceivingSiteRequestId] = useState<string | null>(null);
+  const [siteActionFeedback, setSiteActionFeedback] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  // 3. Site Tool Request Modal State ("בקשת ציוד לאתר")
+  const [isSiteRequestModalOpen, setIsSiteRequestModalOpen] = useState<boolean>(false);
+  const [requestToolDesc, setRequestToolDesc] = useState<string>('');
+  const [requestQuantity, setRequestQuantity] = useState<number>(1);
+  const [requestUrgency, setRequestUrgency] = useState<'NORMAL' | 'URGENT' | 'CRITICAL'>('NORMAL');
+  const [requestReason, setRequestReason] = useState<string>('');
+  const [isSubmittingSiteRequest, setIsSubmittingSiteRequest] = useState<boolean>(false);
+  const [siteRequestFeedback, setSiteRequestFeedback] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  // Load Chief Storekeeper Inbox
+  const loadChiefInbox = React.useCallback(async () => {
+    setIsLoadingInbox(true);
+    try {
+      const res = await getChiefStorekeeperInboxAction();
+      setSiteRequestsInbox(res.pendingRequests);
+      setAvailableAssetsForInbox(res.availableAssets);
+    } catch (err) {
+      console.warn('Error loading chief inbox:', err);
+    } finally {
+      setIsLoadingInbox(false);
+    }
+  }, []);
+
+  // Load Site Storekeeper Data
+  const loadSiteStorekeeperData = React.useCallback(async (whId: string) => {
+    setIsLoadingSiteData(true);
+    try {
+      const res = await getSiteStorekeeperDashboardAction(whId);
+      setSiteIncomingShipments(res.incomingShipments);
+      setMySiteRequests(res.myRequests);
+    } catch (err) {
+      console.warn('Error loading site storekeeper data:', err);
+    } finally {
+      setIsLoadingSiteData(false);
+    }
+  }, []);
+
+  // Sync data on load and role/warehouse change
+  React.useEffect(() => {
+    if (isChiefOperations || isGeneralManager) {
+      void loadChiefInbox();
+    }
+    void loadSiteStorekeeperData(selectedWarehouseId);
+  }, [isChiefOperations, isGeneralManager, selectedWarehouseId, loadChiefInbox, loadSiteStorekeeperData]);
+
+  // Chief Storekeeper: Approve (Dispatch) or Reject site tool request
+  const handleResolveSiteRequest = async (requestId: string, decision: 'APPROVE' | 'REJECT') => {
+    setIsResolvingRequestId(requestId);
+    setInboxFeedback(null);
+    try {
+      let assignedAssetId: string | undefined = undefined;
+      let sourceWarehouseId: string | undefined = undefined;
+
+      if (decision === 'APPROVE') {
+        assignedAssetId = selectedAssetForRequest[requestId];
+        if (!assignedAssetId) {
+          setInboxFeedback({ text: 'יש לבחור כלי עבודה זמין לשינוע לאתר מהרשימה', type: 'error' });
+          setIsResolvingRequestId(null);
+          return;
+        }
+        const asset = availableAssetsForInbox.find((a) => a.id === assignedAssetId);
+        sourceWarehouseId = asset?.currentWarehouseId || 'wh-central';
+      }
+
+      const res = await resolveToolRequestAction({
+        requestId,
+        decision,
+        assignedAssetId,
+        sourceWarehouseId,
+        rejectionReason: decision === 'REJECT' ? rejectReasonInput : undefined,
+      });
+
+      if (res.success) {
+        setInboxFeedback({ text: res.message || 'הבקשה עודכנה בהצלחה', type: 'success' });
+        setRejectingSiteRequestId(null);
+        setRejectReasonInput('');
+        await loadChiefInbox();
+        if (selectedWarehouseId !== 'all') {
+          await loadSiteStorekeeperData(selectedWarehouseId);
+        }
+      } else {
+        setInboxFeedback({ text: res.error || 'שגיאה בעדכון הבקשה', type: 'error' });
+      }
+    } catch (err) {
+      setInboxFeedback({
+        text: err instanceof Error ? err.message : 'שגיאת תקשורת',
+        type: 'error',
+      });
+    } finally {
+      setIsResolvingRequestId(null);
+    }
+  };
+
+  // Site Storekeeper: Confirm tool reception at job site
+  const handleConfirmSiteReception = async (req: SiteToolRequestItem) => {
+    if (!req.assignedAssetId) return;
+    setReceivingSiteRequestId(req.id);
+    setSiteActionFeedback(null);
+    try {
+      const res = await confirmToolReceptionAction(
+        req.id,
+        req.assignedAssetId,
+        selectedWarehouseId !== 'all' ? selectedWarehouseId : (assignedWarehouseId || '10000000-0000-0000-0000-000000000002')
+      );
+      if (res.success) {
+        setSiteActionFeedback({ text: res.message || 'הכלי נקלט בהצלחה במחסן האתר!', type: 'success' });
+        await loadSiteStorekeeperData(selectedWarehouseId);
+        await handleWarehouseChange(selectedWarehouseId);
+      } else {
+        setSiteActionFeedback({ text: res.error || 'שגיאה בקליטת הכלי', type: 'error' });
+      }
+    } catch (err) {
+      setSiteActionFeedback({
+        text: err instanceof Error ? err.message : 'שגיאת תקשורת',
+        type: 'error',
+      });
+    } finally {
+      setReceivingSiteRequestId(null);
+    }
+  };
+
+  // Site Storekeeper: Submit new tool request for their site
+  const handleSubmitSiteToolRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!requestToolDesc.trim()) {
+      setSiteRequestFeedback({ text: 'יש לציין תיאור של כלי העבודה הנדרש', type: 'error' });
+      return;
+    }
+    setIsSubmittingSiteRequest(true);
+    setSiteRequestFeedback(null);
+    try {
+      const targetWh = selectedWarehouseId !== 'all' ? selectedWarehouseId : assignedWarehouseId;
+      const res = await createSiteToolRequestAction({
+        toolDescription: requestToolDesc,
+        quantity: requestQuantity,
+        urgency: requestUrgency,
+        reason: requestReason,
+        requestingWarehouseId: targetWh,
+      });
+
+      if (res.success) {
+        setSiteRequestFeedback({ text: res.message || 'הבקשה נשלחה בהצלחה!', type: 'success' });
+        setRequestToolDesc('');
+        setRequestQuantity(1);
+        setRequestUrgency('NORMAL');
+        setRequestReason('');
+        await loadSiteStorekeeperData(selectedWarehouseId);
+        if (isChiefOperations || isGeneralManager) {
+          await loadChiefInbox();
+        }
+        setTimeout(() => {
+          setIsSiteRequestModalOpen(false);
+          setSiteRequestFeedback(null);
+        }, 1500);
+      } else {
+        setSiteRequestFeedback({ text: res.error || 'שגיאה בהגשת הבקשה', type: 'error' });
+      }
+    } catch (err) {
+      setSiteRequestFeedback({
+        text: err instanceof Error ? err.message : 'שגיאת תקשורת',
+        type: 'error',
+      });
+    } finally {
+      setIsSubmittingSiteRequest(false);
     }
   };
 
@@ -698,6 +899,215 @@ export default function WarehouseDashboardView({
           </div>
         </div>
 
+        {/* CHIEF STOREKEEPER: FIELD REQUISITIONS INBOX (תיבת בקשות ציוד מהאתרים) */}
+        {(isChiefOperations || isGeneralManager) && (
+          <div className="bg-white border-2 border-indigo-300/80 rounded-3xl p-5 shadow-sm space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-100/70 border border-indigo-200 text-indigo-700 flex items-center justify-center shrink-0">
+                  <Inbox className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
+                    <span>תיבת בקשות ציוד מהאתרים</span>
+                    <span className="text-xs font-bold text-slate-500 font-mono" dir="ltr">(Field Requisitions)</span>
+                    {siteRequestsInbox.length > 0 && (
+                      <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-indigo-600 text-white animate-pulse">
+                        {siteRequestsInbox.length} ממתינות
+                      </span>
+                    )}
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    דרישות כלי עבודה שהוגשו ע&quot;י מחסנאי אתרים ומכולות שטח &bull; שיוך כלי זמין ואישור ניוד
+                  </p>
+                </div>
+              </div>
+
+              {isLoadingInbox && (
+                <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
+              )}
+            </div>
+
+            {inboxFeedback && (
+              <div
+                className={`p-3 rounded-xl border text-xs font-bold flex items-center justify-between ${
+                  inboxFeedback.type === 'success'
+                    ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
+                    : 'bg-rose-50 border-rose-300 text-rose-950'
+                }`}
+              >
+                <span>{inboxFeedback.text}</span>
+                <button
+                  type="button"
+                  onClick={() => setInboxFeedback(null)}
+                  className="text-slate-400 hover:text-slate-600 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
+            {siteRequestsInbox.length === 0 ? (
+              <div className="p-6 text-center bg-slate-50/70 rounded-2xl border border-slate-200 text-xs font-bold text-slate-500 flex items-center justify-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                <span>אין כרגע בקשות ציוד ממתינות מהאתרים &bull; כל הדרישות טופלו במלואן</span>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {siteRequestsInbox.map((req) => (
+                  <div
+                    key={req.id}
+                    className="p-4 rounded-2xl bg-gradient-to-br from-white to-indigo-50/20 border-2 border-indigo-200 shadow-sm flex flex-col justify-between gap-3.5 hover:border-indigo-400 transition-all"
+                  >
+                    <div className="space-y-2.5">
+                      {/* Top Bar: Warehouse Name + Urgency Pill */}
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 text-xs font-black text-indigo-950 bg-indigo-50 px-2.5 py-1 rounded-xl border border-indigo-200">
+                          <Building2 className="w-3.5 h-3.5 text-indigo-600" />
+                          <span>אתר מכולה: <strong>{req.requestingWarehouseName}</strong></span>
+                        </div>
+
+                        {req.urgency === 'CRITICAL' ? (
+                          <span className="text-[11px] font-black text-white bg-rose-600 px-2.5 py-0.5 rounded-full flex items-center gap-1 shadow-xs animate-pulse">
+                            <Flame className="w-3 h-3" />
+                            <span>קריטי - עצירת עבודה</span>
+                          </span>
+                        ) : req.urgency === 'URGENT' ? (
+                          <span className="text-[11px] font-black text-amber-900 bg-amber-100 border border-amber-300 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                            <Zap className="w-3 h-3 text-amber-600" />
+                            <span>דחוף למחר</span>
+                          </span>
+                        ) : (
+                          <span className="text-[11px] font-bold text-slate-700 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full">
+                            רגיל (שוטף)
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Tool description & quantity */}
+                      <div>
+                        <h4 className="text-base font-black text-slate-900 leading-snug">
+                          {req.toolDescription}
+                        </h4>
+                        <div className="flex items-center gap-3 text-xs text-slate-500 mt-1">
+                          <span>כמות מבוקשת: <strong className="text-slate-900 font-mono text-sm">{req.quantity}</strong></span>
+                          <span>&bull;</span>
+                          <span>הוגש ע&quot;י: <strong className="text-slate-700">{req.requestedBy}</strong></span>
+                          <span>&bull;</span>
+                          <span dir="ltr">{new Date(req.createdAt).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+                        </div>
+                      </div>
+
+                      {/* Reason */}
+                      {req.reason && (
+                        <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 italic">
+                          &quot;{req.reason}&quot;
+                        </div>
+                      )}
+                    </div>
+
+                    {/* FULFILLMENT CONTROLS */}
+                    <div className="pt-3 border-t border-slate-200/80 space-y-2.5">
+                      {rejectingSiteRequestId === req.id ? (
+                        <div className="space-y-2 animate-in fade-in duration-150">
+                          <input
+                            type="text"
+                            autoFocus
+                            value={rejectReasonInput}
+                            onChange={(e) => setRejectReasonInput(e.target.value)}
+                            placeholder="סיבת הדחייה (למשל: לא קיים במלאי / יש להזמין רכש)..."
+                            className="w-full bg-white border border-rose-300 rounded-xl px-3 py-1.5 text-xs text-slate-900 font-medium focus:outline-none focus:border-rose-500"
+                          />
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setRejectingSiteRequestId(null);
+                                setRejectReasonInput('');
+                              }}
+                              className="px-3 py-1 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                            >
+                              ביטול
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isResolvingRequestId === req.id}
+                              onClick={() => handleResolveSiteRequest(req.id, 'REJECT')}
+                              className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-black cursor-pointer"
+                            >
+                              {isResolvingRequestId === req.id ? 'מעדכן...' : 'אשר דחייה'}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="space-y-1">
+                            <label className="text-[11px] font-bold text-slate-600 flex items-center justify-between">
+                              <span>בחר כלי עבודה זמין לניוד לאתר:</span>
+                              <span className="text-[10px] text-slate-400 font-normal">מציג כלים במחסנים מרכזיים</span>
+                            </label>
+                            <select
+                              value={selectedAssetForRequest[req.id] || ''}
+                              onChange={(e) =>
+                                setSelectedAssetForRequest((prev) => ({
+                                  ...prev,
+                                  [req.id]: e.target.value,
+                                }))
+                              }
+                              className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-900 focus:outline-none focus:border-indigo-500 cursor-pointer"
+                            >
+                              <option value="">-- בחר כלי עבודה זמין ממתקן אחר --</option>
+                              {availableAssetsForInbox.map((a) => (
+                                <option key={a.id} value={a.id}>
+                                  {a.name} ({a.brand} {a.modelNumber || ''}) • {a.qrCode} {a.tagNumber ? `[${a.tagNumber}]` : ''} — במחסן {a.currentWarehouseName}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="flex items-center justify-end gap-2 pt-1">
+                            <button
+                              type="button"
+                              disabled={isResolvingRequestId === req.id}
+                              onClick={() => {
+                                setRejectingSiteRequestId(req.id);
+                                setRejectReasonInput('');
+                              }}
+                              className="py-1.5 px-3 rounded-xl border border-rose-200 text-rose-700 hover:bg-rose-50 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                              <span>דחה בקשה</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              disabled={isResolvingRequestId === req.id || !selectedAssetForRequest[req.id]}
+                              onClick={() => handleResolveSiteRequest(req.id, 'APPROVE')}
+                              className="py-1.5 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-xs font-black flex items-center gap-1.5 shadow-sm active:scale-95 transition-all cursor-pointer"
+                            >
+                              {isResolvingRequestId === req.id ? (
+                                <>
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  <span>מאשר...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Send className="w-3.5 h-3.5" />
+                                  <span>אשר ניוד לאתר</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* PENDING INTER-SITE TRANSFER REQUESTS (Chief Operations / Operations Manager Approval) */}
         {(isChiefOperations || isGeneralManager) && (
           <div className="bg-white border-2 border-indigo-200 rounded-3xl p-5 shadow-sm space-y-4">
@@ -882,6 +1292,221 @@ export default function WarehouseDashboardView({
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {/* SITE STOREKEEPER: REQUEST TOOL FOR SITE BANNER */}
+        {(!isChiefOperations && !isGeneralManager) && (
+          <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-blue-700/40">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-600/50 text-blue-200 flex items-center justify-center border border-blue-400/30 shrink-0">
+                <Send className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-white flex items-center gap-2">
+                  <span>בקשת ציוד לאתר (מכולת שטח)</span>
+                  <span className="text-[10px] font-bold bg-blue-500/30 text-blue-200 px-2 py-0.5 rounded-full border border-blue-400/30">
+                    דרישה מבצעית ישירה
+                  </span>
+                </h3>
+                <p className="text-xs text-blue-200 mt-0.5">
+                  חסר כלי עבודה באתר? הגש דרישה מנומקת ישירות לאחראי תפעול ראשי לצורך אספקה וניוד מיידי
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setSiteRequestFeedback(null);
+                setRequestToolDesc('');
+                setRequestQuantity(1);
+                setRequestUrgency('NORMAL');
+                setRequestReason('');
+                setIsSiteRequestModalOpen(true);
+              }}
+              className="py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-black flex items-center justify-center gap-2 shadow-md shadow-blue-500/20 active:scale-95 transition-all cursor-pointer shrink-0"
+            >
+              <Plus className="w-4 h-4" />
+              <span>בקשת ציוד לאתר</span>
+            </button>
+          </div>
+        )}
+
+        {/* SITE STOREKEEPER: INCOMING IN-TRANSIT TOOLS TO THIS SITE */}
+        {(!isChiefOperations && !isGeneralManager) && siteIncomingShipments.length > 0 && (
+          <div className="p-4 rounded-2xl bg-amber-50/90 border-2 border-amber-300 shadow-sm space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-amber-950 font-black">
+                <Truck className="w-5 h-5 text-amber-600" />
+                <h3 className="text-sm font-black">
+                  ציוד בדרך לאתר (במשלוח / In-Transit) ({siteIncomingShipments.length})
+                </h3>
+              </div>
+              <span className="text-[11px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-200">
+                ממתין לקליטה ואישור הגעה
+              </span>
+            </div>
+
+            {siteActionFeedback && (
+              <div
+                className={`p-3 rounded-xl border text-xs font-bold flex items-center justify-between ${
+                  siteActionFeedback.type === 'success'
+                    ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
+                    : 'bg-rose-50 border-rose-300 text-rose-950'
+                }`}
+              >
+                <span>{siteActionFeedback.text}</span>
+                <button
+                  type="button"
+                  onClick={() => setSiteActionFeedback(null)}
+                  className="text-slate-400 hover:text-slate-600 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+              {siteIncomingShipments.map((req) => (
+                <div
+                  key={req.id}
+                  className="p-4 rounded-xl bg-white border border-amber-300/80 shadow-xs flex flex-col justify-between gap-3"
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          {req.assignedAssetQr && (
+                            <span className="font-mono text-[11px] font-black text-slate-700 bg-slate-50 px-2 py-0.5 rounded border border-slate-200" dir="ltr">
+                              {req.assignedAssetQr}
+                            </span>
+                          )}
+                          {req.assignedAssetTag && (
+                            <span className="font-mono text-[10px] font-bold text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200" dir="ltr">
+                              {req.assignedAssetTag}
+                            </span>
+                          )}
+                        </div>
+                        <h4 className="text-sm font-black text-slate-900 mt-1">
+                          {req.assignedAssetName || req.toolDescription}
+                        </h4>
+                        <p className="text-xs text-slate-500">
+                          {req.assignedAssetBrand} {req.assignedAssetModel ? `• ${req.assignedAssetModel}` : ''} {req.assignedAssetSerial ? `(מס"ד: ${req.assignedAssetSerial})` : ''}
+                        </p>
+                      </div>
+                      <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 shrink-0">
+                        במשלוח לאתר
+                      </span>
+                    </div>
+
+                    <div className="mt-2.5 p-2 rounded-lg bg-amber-50/50 border border-amber-200/60 text-xs space-y-1">
+                      <div className="text-slate-700">
+                        נשלח מ: <strong className="text-slate-900">{req.sourceWarehouseName || 'מחסן מרכזי'}</strong>
+                      </div>
+                      <div className="text-slate-500 text-[11px]">
+                        אושר ע&quot;י: <strong>{req.decidedBy || 'אחראי תפעול'}</strong> &bull; {req.decidedAt ? new Date(req.decidedAt).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-100 flex items-center justify-end">
+                    <button
+                      type="button"
+                      disabled={receivingSiteRequestId === req.id}
+                      onClick={() => handleConfirmSiteReception(req)}
+                      className="py-1.5 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center gap-1.5 shadow-sm active:scale-95 transition-all cursor-pointer"
+                    >
+                      {receivingSiteRequestId === req.id ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>קולט כלי...</span>
+                        </>
+                      ) : (
+                        <>
+                          <PackageCheck className="w-4 h-4" />
+                          <span>קליטה ואישור הגעה באתר</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* SITE STOREKEEPER: MY REQUESTS STATUS TRACKER */}
+        {(!isChiefOperations && !isGeneralManager) && mySiteRequests.length > 0 && (
+          <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                  <ClipboardCheck className="w-4 h-4 text-indigo-600" />
+                  <span>סטטוס בקשות שנשלחו מהאתר ({mySiteRequests.length})</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  מעקב אחר דרישות ציוד שהוגשו לאחראי תפעול ראשי
+                </p>
+              </div>
+
+              {isLoadingSiteData && (
+                <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {mySiteRequests.slice(0, 6).map((req) => (
+                <div
+                  key={req.id}
+                  className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex flex-col justify-between gap-2"
+                >
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between gap-1.5">
+                      <span className="text-[10px] font-bold text-slate-500" dir="ltr">
+                        {new Date(req.createdAt).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit' })}
+                      </span>
+                      {req.status === 'PENDING' ? (
+                        <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                          🟡 בטיפול
+                        </span>
+                      ) : req.status === 'IN_TRANSIT' ? (
+                        <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 animate-pulse">
+                          🟢 אושר ובדרך
+                        </span>
+                      ) : req.status === 'REJECTED' ? (
+                        <span className="text-[10px] font-bold text-rose-800 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200">
+                          🔴 נדחה
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-bold text-slate-700 bg-slate-200 px-2 py-0.5 rounded-full">
+                          ⚪ נקלט באתר
+                        </span>
+                      )}
+                    </div>
+
+                    <h4 className="text-xs font-black text-slate-900 leading-snug">
+                      {req.toolDescription}
+                    </h4>
+                    <div className="text-[11px] text-slate-500">
+                      כמות: <strong className="text-slate-800">{req.quantity}</strong>
+                      {req.urgency === 'CRITICAL' && (
+                        <span className="text-rose-600 font-bold mr-2">&bull; קריטי</span>
+                      )}
+                      {req.urgency === 'URGENT' && (
+                        <span className="text-amber-600 font-bold mr-2">&bull; דחוף</span>
+                      )}
+                    </div>
+
+                    {req.rejectionReason && (
+                      <div className="p-1.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-[10px]">
+                        סיבת דחייה: {req.rejectionReason}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -1996,6 +2621,207 @@ export default function WarehouseDashboardView({
                     <>
                       <ShieldCheck className="w-4 h-4" />
                       <span>אשר מסירה וחתום</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* SITE TOOL REQUEST MODAL (Site Storekeeper -> Operations Manager) */}
+      {isSiteRequestModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white border-2 border-blue-200 rounded-3xl max-w-lg w-full shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 max-h-[92vh] flex flex-col">
+            {/* Header */}
+            <div className="p-5 bg-gradient-to-r from-blue-900 to-indigo-950 text-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-600/50 flex items-center justify-center border border-blue-400/30">
+                  <Send className="w-5 h-5 text-blue-200" />
+                </div>
+                <div>
+                  <h3 className="font-black text-sm text-white">בקשת ציוד לאתר / מכולה</h3>
+                  <p className="text-[11px] text-blue-200">הגשת דרישה מבצעית ישירה לאחראי תפעול ראשי</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSiteRequestModalOpen(false)}
+                className="p-1 rounded-lg hover:bg-white/10 text-white cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitSiteToolRequest} className="p-5 overflow-y-auto space-y-4 flex-1">
+              {siteRequestFeedback && (
+                <div
+                  className={`p-3 rounded-xl text-xs font-bold flex items-center gap-2 border ${
+                    siteRequestFeedback.type === 'success'
+                      ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
+                      : 'bg-rose-50 text-rose-900 border-rose-300'
+                  }`}
+                >
+                  {siteRequestFeedback.type === 'success' ? (
+                    <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                  ) : (
+                    <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                  )}
+                  <span>{siteRequestFeedback.text}</span>
+                </div>
+              )}
+
+              {/* Tool Description & Quick Chips */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700">
+                  תיאור כלי העבודה או הציוד הנדרש <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={requestToolDesc}
+                  onChange={(e) => setRequestToolDesc(e.target.value)}
+                  placeholder="למשל: פטיש חציבה כבד SDS-Max, משחזת 9 אינץ'..."
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 focus:outline-none focus:border-blue-600"
+                />
+
+                {/* Quick Suggestion Chips */}
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {[
+                    'פטיש חציבה SDS-Max',
+                    'משחזת זוית 9 אינץ\'',
+                    'רתכת CO2 ניידת',
+                    'גנרטור מושתק 5.5KVA',
+                    'מהדק אדמה (ג\'מפינג)',
+                    'שואב אבק תעשייתי',
+                  ].map((chip) => (
+                    <button
+                      key={chip}
+                      type="button"
+                      onClick={() => setRequestToolDesc(chip)}
+                      className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-100 hover:bg-blue-50 hover:text-blue-700 text-slate-600 border border-slate-200 transition-all cursor-pointer"
+                    >
+                      + {chip}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Quantity */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700">
+                  כמות נדרשת
+                </label>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setRequestQuantity((q) => Math.max(1, q - 1))}
+                    className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-black flex items-center justify-center cursor-pointer"
+                  >
+                    -
+                  </button>
+                  <input
+                    type="number"
+                    min="1"
+                    value={requestQuantity}
+                    onChange={(e) => setRequestQuantity(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                    className="w-20 text-center bg-slate-50 border border-slate-300 rounded-xl py-1.5 text-sm font-black text-slate-900 focus:outline-none focus:border-blue-600"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setRequestQuantity((q) => q + 1)}
+                    className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-black flex items-center justify-center cursor-pointer"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+
+              {/* Urgency Selector */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700">
+                  רמת דחיפות
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setRequestUrgency('NORMAL')}
+                    className={`p-2.5 rounded-xl border text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
+                      requestUrgency === 'NORMAL'
+                        ? 'bg-blue-50 border-blue-400 text-blue-950 font-black ring-2 ring-blue-300'
+                        : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span>🟢 רגיל</span>
+                    <span className="text-[10px] text-slate-500 font-normal">אספקה שוטפת</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setRequestUrgency('URGENT')}
+                    className={`p-2.5 rounded-xl border text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
+                      requestUrgency === 'URGENT'
+                        ? 'bg-amber-50 border-amber-400 text-amber-950 font-black ring-2 ring-amber-300'
+                        : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span>🟡 דחוף</span>
+                    <span className="text-[10px] text-slate-500 font-normal">למחר בבוקר</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setRequestUrgency('CRITICAL')}
+                    className={`p-2.5 rounded-xl border text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
+                      requestUrgency === 'CRITICAL'
+                        ? 'bg-rose-50 border-rose-400 text-rose-950 font-black ring-2 ring-rose-300'
+                        : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span>🔴 קריטי</span>
+                    <span className="text-[10px] text-slate-500 font-normal">עצירת עבודה</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Operational Reason */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700">
+                  נימוק / סיבה מבצעית (אופציונלי)
+                </label>
+                <textarea
+                  rows={2}
+                  value={requestReason}
+                  onChange={(e) => setRequestReason(e.target.value)}
+                  placeholder="למשל: נדרש ליציקת בטון דחופה מחר, הכלי הקיים הושבת..."
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-medium text-slate-900 focus:outline-none focus:border-blue-600"
+                />
+              </div>
+
+              {/* Submit Buttons */}
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsSiteRequestModalOpen(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                >
+                  ביטול
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingSiteRequest || !requestToolDesc.trim()}
+                  className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-black flex items-center gap-1.5 shadow-md cursor-pointer transition-all active:scale-95"
+                >
+                  {isSubmittingSiteRequest ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>שולח בקשה...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-3.5 h-3.5" />
+                      <span>שלח בקשת ציוד לאישור</span>
                     </>
                   )}
                 </button>
