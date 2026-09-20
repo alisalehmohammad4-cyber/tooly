@@ -608,54 +608,6 @@ export default function WarehouseDashboardView({
           </div>
         </div>
 
-        {/* CHIEF OPERATIONS CONTROL BAR (Multi-Facility Transfer & Reconciliation) */}
-        {(isChiefOperations || isGeneralManager) && (
-          <div className="p-4 rounded-2xl bg-gradient-to-r from-indigo-950 via-indigo-900 to-slate-900 text-white shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-indigo-700/40">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-indigo-600/50 text-indigo-300 flex items-center justify-center border border-indigo-400/30 shrink-0">
-                <ArrowLeftRight className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="text-sm font-black text-white flex items-center gap-2">
-                  <span>מרכז שליטה מבצעי - אחראי תפעול ראשי</span>
-                  <span className="text-[10px] font-bold bg-indigo-500/30 text-indigo-200 px-2 py-0.5 rounded-full border border-indigo-400/30">
-                    בקרה חוצת-מחסנים
-                  </span>
-                </h3>
-                <p className="text-xs text-indigo-200 mt-0.5">
-                  ניוד ציוד מיידי בין אתרי שטח, מכולות ורכבים &bull; ספירות מלאי וביקורות סוף שבוע
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={() => {
-                  setTransferFeedback(null);
-                  setIsTransferModalOpen(true);
-                }}
-                className="py-2 px-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black flex items-center gap-1.5 shadow-sm transition-all cursor-pointer active:scale-95"
-              >
-                <ArrowLeftRight className="w-4 h-4" />
-                <span>ניוד ציוד בין מחסנים</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setReconcileFeedback(null);
-                  setIsReconcileModalOpen(true);
-                }}
-                className="py-2 px-3.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-black flex items-center gap-1.5 border border-white/20 transition-all cursor-pointer active:scale-95"
-              >
-                <ClipboardCheck className="w-4 h-4 text-emerald-400" />
-                <span>ספירת מלאי מבוקרת</span>
-              </button>
-            </div>
-          </div>
-        )}
-
         {/* INTER-SITE EQUIPMENT TRANSFER REQUEST (Storekeeper -> Operations Manager) */}
         <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-blue-700/40">
           <div className="flex items-center gap-3">
