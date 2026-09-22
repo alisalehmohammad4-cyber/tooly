@@ -11,11 +11,12 @@ import type {
   CatalogCategory,
   CatalogAssetItem,
 } from '@/app/actions/assets';
-import type {
-  AuditHistoryPayload,
-  AuditHistoryRecord,
-  AuditHistoryFilters,
-} from '@/app/actions/history';
+import {
+  type AuditHistoryPayload,
+  type AuditHistoryRecord,
+  type AuditHistoryFilters,
+  filterAuditHistoryRecords,
+} from '@/lib/history/auditFilters';
 import type { ScannedAssetDetails } from '@/app/actions/custody';
 import {
   matchesCodeSuffix,
@@ -42986,6 +42987,7 @@ export function getMockStorekeeperOperations(
           warehouseName: asset.warehouseName || currentWh.name,
           expectedReturnDate: asset.expectedReturnDate,
           daysOverdue: days,
+          checkoutNote: (asset as any).lastCheckoutNote || (asset as any).checkoutNote || 'ציוד נמסר בשטח עם כבל מאריך 20 מטר',
         });
       } else if (rTime >= startOfToday.getTime() && rTime <= endOfToday.getTime()) {
         returnsDueToday.push({
@@ -42997,6 +42999,7 @@ export function getMockStorekeeperOperations(
           workerName: asset.currentAssignedWorker || 'עובד שטח',
           workerPhone: asset.workerPhone,
           expectedReturnDate: asset.expectedReturnDate,
+          checkoutNote: (asset as any).lastCheckoutNote || (asset as any).checkoutNote || 'כולל 2 סוללות ומטען מהיר',
           accessoriesSummary: asset.accessories
             ? `${asset.accessories.batteriesCount} סוללות${asset.accessories.hasCharger ? ' + מטען' : ''}${asset.accessories.hasCase ? ' + ארגז' : ''}`
             : undefined,
@@ -43141,34 +43144,15 @@ export function getMockCatalogData(warehouseId?: string, organizationId?: string
  * Retrieves audit history filtered from the unified history store.
  */
 export function getMockAuditHistory(filters?: AuditHistoryFilters, organizationId?: string): AuditHistoryPayload {
-  let items = organizationId
+  const items = organizationId
     ? historyStore.filter((item) => item.organizationId === organizationId)
     : [];
 
-  if (filters?.action && filters.action !== 'all') {
-    items = items.filter((item) => item.action === filters.action);
-  }
-
-  if (filters?.warehouseId && filters.warehouseId !== 'all') {
-    items = items.filter((item) => item.warehouseId === filters.warehouseId);
-  }
-
-  if (filters?.searchQuery?.trim()) {
-    const q = filters.searchQuery.toLowerCase().trim();
-    items = items.filter(
-      (item) =>
-        item.toolName.toLowerCase().includes(q) ||
-        item.brand.toLowerCase().includes(q) ||
-        item.qrCode.toLowerCase().includes(q) ||
-        (item.targetWorker && item.targetWorker.toLowerCase().includes(q)) ||
-        (item.performedBy && item.performedBy.toLowerCase().includes(q)) ||
-        (item.notes && item.notes.toLowerCase().includes(q))
-    );
-  }
+  const filtered = filterAuditHistoryRecords(items, filters);
 
   return {
-    records: items,
-    totalCount: items.length,
+    records: filtered,
+    totalCount: filtered.length,
     warehouses: getMockWarehouses(false, organizationId),
   };
 }

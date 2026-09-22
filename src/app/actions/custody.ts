@@ -59,6 +59,8 @@ export interface ScannedAssetDetails {
   category_name?: string;
   organizationId?: string;
   organization_id?: string;
+  lastCheckoutNote?: string | null;
+  last_checkout_note?: string | null;
 }
 
 export type CustodyActionResult =
@@ -206,6 +208,47 @@ function mapJoinedRowToScannedAsset(row: JoinedAssetData): ScannedAssetDetails {
   };
 }
 
+async function enrichLastCheckoutNote(
+  asset: ScannedAssetDetails | null,
+  orgId: string
+): Promise<ScannedAssetDetails | null> {
+  if (!asset || asset.status !== 'checked_out') return asset;
+  if (isSupabaseConfigured()) {
+    try {
+      const { data: latestCheckout } = await supabase
+        .from('custody_ledger')
+        .select('notes')
+        .eq('asset_id', asset.id)
+        .eq('action', 'CHECKOUT')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (latestCheckout?.notes) {
+        asset.lastCheckoutNote = latestCheckout.notes;
+        asset.last_checkout_note = latestCheckout.notes;
+      }
+    } catch {
+      // Ignore errors in background note resolution
+    }
+  } else {
+    try {
+      const { getMockAuditHistory } = await import('@/lib/mockStore');
+      const mockHistory = getMockAuditHistory(undefined, orgId).records;
+      const checkoutRec = mockHistory.find(
+        (r) => (r.assetId === asset.id || r.qrCode === asset.qrCode) && r.action === 'CHECKOUT'
+      );
+      if (checkoutRec?.notes) {
+        asset.lastCheckoutNote = checkoutRec.notes;
+        asset.last_checkout_note = checkoutRec.notes;
+      }
+    } catch {
+      // Ignore
+    }
+  }
+  return asset;
+}
+
 /**
  * Retrieves full asset details by QR Code, joining tool model and warehouse.
  * 1. First, attempt exact match on qr_code and nfc_uid.
@@ -266,7 +309,10 @@ export async function getAssetDetailsByQr(
       const { data: exactData, error: exactError } = await exactQuery.maybeSingle();
 
       if (!exactError && exactData) {
-        return mapJoinedRowToScannedAsset(exactData as unknown as JoinedAssetData);
+        return enrichLastCheckoutNote(
+          mapJoinedRowToScannedAsset(exactData as unknown as JoinedAssetData),
+          orgId
+        );
       }
 
       // 2. Suffix matching in Supabase: qr_code ILIKE '%' || input
@@ -314,7 +360,7 @@ export async function getAssetDetailsByQr(
         const typedRows = suffixData as unknown as JoinedAssetData[];
         const best = pickBestAssetMatch(typedRows, cleanQr, facilityId);
         if (best) {
-          return mapJoinedRowToScannedAsset(best);
+          return enrichLastCheckoutNote(mapJoinedRowToScannedAsset(best), orgId);
         }
       }
     } catch (err) {
@@ -325,7 +371,7 @@ export async function getAssetDetailsByQr(
   // Fallback lookup from unified mockStore (with suffix, facility, and organization disambiguation)
   const mockItem = getMockAssetByQr(cleanQr, facilityId, orgId);
   if (mockItem) {
-    return mockItem;
+    return enrichLastCheckoutNote(mockItem, orgId);
   }
 
   // Fallback lookup from local in-memory registry:
@@ -338,7 +384,7 @@ export async function getAssetDetailsByQr(
         ? !a.organizationId || a.organizationId === orgId
         : a.organizationId === orgId;
     if (matchesOrg && key.toUpperCase() === normalized) {
-      return { ...a };
+      return enrichLastCheckoutNote({ ...a }, orgId);
     }
   }
 
@@ -353,7 +399,7 @@ export async function getAssetDetailsByQr(
   if (fallbackMatches.length > 0) {
     const bestFallback = pickBestAssetMatch(fallbackMatches, cleanQr, facilityId);
     if (bestFallback) {
-      return { ...bestFallback };
+      return enrichLastCheckoutNote({ ...bestFallback }, orgId);
     }
   }
 
@@ -934,6 +980,239 @@ export async function checkinAssetAction(
     message: 'הכלי הוחזר למחסן בהצלחה.',
     asset: fallbackReturned,
   };
+}
+
+export interface ActiveCheckedOutAssetItem {
+  id: string;
+  qrCode: string;
+  toolName: string;
+  brand: string;
+  modelNumber: string | null;
+  serialNumber?: string | null;
+  categoryName?: string;
+  workerName: string;
+  workerPhone?: string | null;
+  warehouseId: string;
+  warehouseName: string;
+  expectedReturnDate?: string | null;
+  checkedOutAt?: string | null;
+  isOverdue: boolean;
+  daysOverdue?: number;
+  timeSinceCheckoutText?: string;
+  condition?: string;
+  lastCheckoutNote?: string | null;
+  last_checkout_note?: string | null;
+}
+
+function formatTimeSinceCheckout(dateStr?: string | null): string {
+  if (!dateStr) return 'היום';
+  const time = new Date(dateStr).getTime();
+  if (isNaN(time)) return 'היום';
+  const diffMs = Date.now() - time;
+  if (diffMs < 0) return 'כרגע';
+  const diffMins = Math.floor(diffMs / (1000 * 60));
+  if (diffMins < 60) return `לפני ${Math.max(1, diffMins)} דקות`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `לפני ${diffHours} שעות`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays === 1) return 'אתמול';
+  if (diffDays === 2) return 'שלשום';
+  if (diffDays < 30) return `לפני ${diffDays} ימים`;
+  const diffMonths = Math.floor(diffDays / 30);
+  return `לפני ${diffMonths} חודשים`;
+}
+
+function calculateOverdueDetails(expectedReturnDate?: string | null): {
+  isOverdue: boolean;
+  daysOverdue: number;
+} {
+  if (!expectedReturnDate) return { isOverdue: false, daysOverdue: 0 };
+  const expTime = new Date(expectedReturnDate).getTime();
+  if (isNaN(expTime)) return { isOverdue: false, daysOverdue: 0 };
+  const diffMs = Date.now() - expTime;
+  if (diffMs > 0) {
+    const days = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+    return { isOverdue: true, daysOverdue: Math.max(1, days) };
+  }
+  return { isOverdue: false, daysOverdue: 0 };
+}
+
+/**
+ * Check-in of an asset from an assigned worker back to the warehouse.
+ * Used by storekeepers in manual and barcode check-in workflows.
+ */
+export async function checkinFromWorkerAction(
+  input: CheckinInput
+): Promise<CustodyActionResult> {
+  return checkinAssetAction(input);
+}
+
+/**
+ * Retrieves all tools currently checked out in the organization for manual return/check-in.
+ * Enforces strict multi-tenant isolation by organization_id.
+ */
+export async function getCheckedOutAssetsForReturnAction(
+  warehouseId?: string,
+  organizationId?: string
+): Promise<ActiveCheckedOutAssetItem[]> {
+  const orgId = await resolveActiveOrganizationId(organizationId);
+
+  if (isSupabaseConfigured()) {
+    try {
+      let query = supabase
+        .from('assets')
+        .select(`
+          id,
+          qr_code,
+          name,
+          brand,
+          model_number,
+          serial_number,
+          category_name,
+          status,
+          condition,
+          current_assigned_worker,
+          expected_return_date,
+          current_warehouse_id,
+          organization_id,
+          updated_at,
+          created_at,
+          tool_models:tool_model_id (
+            id,
+            name,
+            brand,
+            model_number
+          ),
+          warehouses:current_warehouse_id (
+            id,
+            name,
+            code
+          )
+        `)
+        .eq('status', 'checked_out');
+
+      if (orgId && orgId !== DEFAULT_ORGANIZATION.id) {
+        query = query.eq('organization_id', orgId);
+      } else {
+        query = query.or(`organization_id.eq.${orgId},organization_id.is.null`);
+      }
+
+      if (warehouseId && warehouseId !== 'all') {
+        query = query.eq('current_warehouse_id', warehouseId);
+      }
+
+      const { data, error } = await query.order('updated_at', { ascending: false });
+
+      if (!error && data && data.length > 0) {
+        const assetIds = data.map((d: any) => d.id);
+
+        // Fetch latest CHECKOUT ledger entries to get worker phone, checkout time, and checkout note
+        const { data: ledgerEntries } = await supabase
+          .from('custody_ledger')
+          .select('asset_id, worker_phone, target_worker, created_at, notes')
+          .in('asset_id', assetIds)
+          .eq('action', 'CHECKOUT')
+          .order('created_at', { ascending: false });
+
+        const phoneMap = new Map<string, string>();
+        const checkoutTimeMap = new Map<string, string>();
+        const noteMap = new Map<string, string>();
+        if (ledgerEntries) {
+          for (const entry of ledgerEntries) {
+            if (entry.asset_id && !phoneMap.has(entry.asset_id) && entry.worker_phone) {
+              phoneMap.set(entry.asset_id, entry.worker_phone);
+            }
+            if (entry.asset_id && !checkoutTimeMap.has(entry.asset_id) && entry.created_at) {
+              checkoutTimeMap.set(entry.asset_id, entry.created_at);
+            }
+            if (entry.asset_id && !noteMap.has(entry.asset_id) && entry.notes) {
+              noteMap.set(entry.asset_id, entry.notes);
+            }
+          }
+        }
+
+        return data.map((row: any) => {
+          const toolName = row.tool_models?.name || row.name || 'כלי עבודה';
+          const brand = row.tool_models?.brand || row.brand || '';
+          const modelNumber = row.tool_models?.model_number || row.model_number || null;
+          const warehouseName = row.warehouses?.name || 'מחסן שטח';
+          const workerName = row.current_assigned_worker || 'עובד שטח';
+          const workerPhone = phoneMap.get(row.id) || null;
+          const checkedOutAt = checkoutTimeMap.get(row.id) || row.updated_at || row.created_at;
+          const { isOverdue, daysOverdue } = calculateOverdueDetails(row.expected_return_date);
+          const lastCheckoutNote = noteMap.get(row.id) || null;
+
+          return {
+            id: row.id,
+            qrCode: row.qr_code,
+            toolName,
+            brand,
+            modelNumber,
+            serialNumber: row.serial_number || null,
+            categoryName: row.category_name || undefined,
+            workerName,
+            workerPhone,
+            warehouseId: row.current_warehouse_id || '',
+            warehouseName,
+            expectedReturnDate: row.expected_return_date || null,
+            checkedOutAt,
+            isOverdue,
+            daysOverdue,
+            timeSinceCheckoutText: formatTimeSinceCheckout(checkedOutAt),
+            condition: row.condition,
+            lastCheckoutNote,
+            last_checkout_note: lastCheckoutNote,
+          };
+        });
+      }
+    } catch (err) {
+      console.warn('Error in getCheckedOutAssetsForReturnAction Supabase query:', err);
+    }
+  }
+
+  // Fallback to unified mock store
+  const mockAssets = getMockAssets(orgId);
+  const { getMockAuditHistory } = await import('@/lib/mockStore');
+  const mockHistory = getMockAuditHistory(undefined, orgId).records;
+  return mockAssets
+    .filter((a) => {
+      const statusMatch = a.status === 'checked_out';
+      const whMatch =
+        !warehouseId ||
+        warehouseId === 'all' ||
+        a.warehouseId === warehouseId ||
+        a.currentWarehouseId === warehouseId;
+      return statusMatch && whMatch;
+    })
+    .map((a) => {
+      const { isOverdue, daysOverdue } = calculateOverdueDetails(a.expectedReturnDate);
+      const checkedOutAt = (a as any).updatedAt || (a as any).updated_at || null;
+      const latestCheckout = mockHistory.find(
+        (r) => (r.assetId === a.id || r.qrCode === a.qrCode) && r.action === 'CHECKOUT'
+      );
+      const lastCheckoutNote = latestCheckout?.notes || (a as any).lastCheckoutNote || null;
+      return {
+        id: a.id,
+        qrCode: a.qrCode,
+        toolName: a.toolName,
+        brand: a.brand,
+        modelNumber: a.modelNumber,
+        serialNumber: (a as any).serialNumber || (a as any).serial_number || null,
+        categoryName: a.categoryName,
+        workerName: a.currentAssignedWorker || 'עובד שטח',
+        workerPhone: (a as any).workerPhone || null,
+        warehouseId: a.warehouseId || a.currentWarehouseId || '',
+        warehouseName: a.warehouseName || 'מחסן שטח',
+        expectedReturnDate: a.expectedReturnDate || null,
+        checkedOutAt,
+        isOverdue,
+        daysOverdue,
+        timeSinceCheckoutText: formatTimeSinceCheckout(checkedOutAt),
+        condition: a.condition,
+        lastCheckoutNote,
+        last_checkout_note: lastCheckoutNote,
+      };
+    });
 }
 
 /**
@@ -1681,4 +1960,111 @@ export async function dispatchAssetWithSignatureAction(data: {
     message: `הכלי ${assetName} נופק בהצלחה לאתר ${targetWarehouseName} עם אישור תיוג וחתימה!`,
   };
 }
+
+/**
+ * Snaps an OCR parsed candidate tag to an asset in public.assets or mockStore.
+ * Checks tag_number = parsedTag, qr_code = parsedTag, or serial_number = parsedTag.
+ * Scoped strictly to organization_id = orgId.
+ */
+export async function snapOcrTagToAssetAction(
+  candidateTag: string,
+  organizationId?: string,
+  facilityId?: string
+): Promise<{
+  success: boolean;
+  asset: ScannedAssetDetails | null;
+  message?: string;
+}> {
+  const cleanTag = candidateTag.trim();
+  if (!cleanTag) {
+    return { success: false, asset: null, message: 'תגית ריקה' };
+  }
+
+  const orgId = await resolveActiveOrganizationId(organizationId);
+
+  // Check 1: Query getAssetDetailsByQr directly (checks qr_code, id, nfc_uid, suffix)
+  const assetByCode = await getAssetDetailsByQr(cleanTag, facilityId, orgId);
+  if (assetByCode) {
+    return { success: true, asset: assetByCode };
+  }
+
+  // Check 2: Try variant without dashes or with dashes (e.g., ZR-1099 vs ZR1099)
+  const dashedVariant = cleanTag.includes('-')
+    ? cleanTag.replace(/-/g, '')
+    : cleanTag.replace(/^([A-Z]{2,6})([0-9]{2,6})$/i, '$1-$2');
+
+  if (dashedVariant && dashedVariant !== cleanTag) {
+    const assetByVariant = await getAssetDetailsByQr(dashedVariant, facilityId, orgId);
+    if (assetByVariant) {
+      return { success: true, asset: assetByVariant };
+    }
+  }
+
+  // Check 3: If Supabase configured, perform direct query on tag_number
+  if (isSupabaseConfigured()) {
+    try {
+      let query = supabase
+        .from('assets')
+        .select(`
+          id,
+          qr_code,
+          nfc_uid,
+          status,
+          condition,
+          current_assigned_worker,
+          current_warehouse_id,
+          version,
+          purchase_date,
+          purchase_cost,
+          warranty_until,
+          safety_inspection_due,
+          is_locked,
+          lock_reason,
+          reservation,
+          tool_models:tool_model_id (
+            id,
+            name,
+            brand,
+            model_number
+          ),
+          warehouses:current_warehouse_id (
+            id,
+            name,
+            code
+          )
+        `)
+        .or(`tag_number.eq.${cleanTag},tag_number.eq.${dashedVariant},serial_number.eq.${cleanTag}`);
+
+      if (orgId === DEFAULT_ORGANIZATION.id) {
+        query = query.or(`organization_id.eq.${orgId},organization_id.is.null`);
+      } else {
+        query = query.eq('organization_id', orgId);
+      }
+
+      const { data, error } = await query.maybeSingle();
+      if (!error && data) {
+        const mapped = mapJoinedRowToScannedAsset(data as unknown as JoinedAssetData);
+        return { success: true, asset: mapped };
+      }
+    } catch (err) {
+      console.warn('Supabase query error in snapOcrTagToAssetAction:', err);
+    }
+  }
+
+  // Check 4: Check mock store via getMockAssetByQr
+  const mockItem =
+    getMockAssetByQr(cleanTag, facilityId, orgId) ||
+    (dashedVariant ? getMockAssetByQr(dashedVariant, facilityId, orgId) : null);
+
+  if (mockItem) {
+    return { success: true, asset: mockItem };
+  }
+
+  return {
+    success: false,
+    asset: null,
+    message: `לא נמצא כלי התואם לתגית "${cleanTag}".`,
+  };
+}
+
 

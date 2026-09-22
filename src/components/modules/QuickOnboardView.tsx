@@ -30,6 +30,7 @@ import {
   Smartphone,
   Type,
   Camera,
+  Sparkles,
 } from 'lucide-react';
 import type { Category, Warehouse, AssetCondition } from '@/types/domain';
 import {
@@ -40,6 +41,7 @@ import {
 import AssetActionModal from '@/components/modules/AssetActionModal';
 import BulkCheckoutModal from '@/components/modules/BulkCheckoutModal';
 import ToolPassportModal from '@/components/modules/ToolPassportModal';
+import OcrScannerModal from '@/components/modules/OcrScannerModal';
 import {
   getAssetDetailsByQr,
   type ScannedAssetDetails,
@@ -126,6 +128,7 @@ export default function QuickOnboardView({
 
   // OCR Text Scanner (Lazy initialization on demand)
   const [isOcrMode, setIsOcrMode] = useState<boolean>(false);
+  const [isIndustrialOcrOpen, setIsIndustrialOcrOpen] = useState<boolean>(false);
   const [ocrScanFeedback, setOcrScanFeedback] = useState<{
     type: 'success' | 'error';
     message: string;
@@ -1134,8 +1137,19 @@ export default function QuickOnboardView({
                       >
                         <Type className={`w-3.5 h-3.5 ${isOcrMode ? 'text-slate-950 stroke-[2.5]' : 'text-amber-400'}`} />
                         <span className="text-[11px] font-bold">
-                          {isOcrMode ? '🔤 זיהוי טקסט פעיל' : '🔤 זיהוי טקסט OCR (כאשר ה-QR מחוק)'}
+                          {isOcrMode ? '🔤 זיהוי טקסט פעיל' : '🔤 זיהוי טקסט OCR'}
                         </span>
+                      </button>
+
+                      {/* Dedicated Industrial Field OCR Trigger */}
+                      <button
+                        type="button"
+                        onClick={() => setIsIndustrialOcrOpen(true)}
+                        className="px-2.5 py-1.5 rounded-lg bg-emerald-600/90 hover:bg-emerald-500 text-white text-[11px] font-bold border border-emerald-400/40 flex items-center gap-1.5 shadow-lg active:scale-95 transition-all cursor-pointer backdrop-blur-md"
+                        title="סורק שטח מוקשח (פנס + סינון השתקפויות לתגיות שחוקות)"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                        <span>🔦 סורק שטח מוקשח</span>
                       </button>
                     </div>
 
@@ -1802,6 +1816,19 @@ export default function QuickOnboardView({
           setScannedRegisteredAsset(updated);
           setLastActionMessage('דרכון הכלי עודכן בהצלחה');
         }}
+      />
+
+      {/* 9. INDUSTRIAL FIELD OCR SCANNER MODAL */}
+      <OcrScannerModal
+        isOpen={isIndustrialOcrOpen}
+        onClose={() => setIsIndustrialOcrOpen(false)}
+        onAssetDetected={(asset) => {
+          setIsIndustrialOcrOpen(false);
+          handleBarcodeDetected(asset.qrCode);
+        }}
+        warehouseId={selectedWarehouseId}
+        title="סורק שטח מוקשח (Industrial OCR)"
+        description="סריקה מוקשחת לפנס שטח, סינון השתקפויות מתכת ותגיות שחוקות"
       />
 
       {/* 5. ROLE-ISOLATED BOTTOM NAVIGATION BAR */}

@@ -50,6 +50,7 @@ export default function PrintTagsView() {
   const [quantity, setQuantity] = useState<number>(24);
   const [customQtyInput, setCustomQtyInput] = useState<string>('24');
   const [facilityText, setFacilityText] = useState<string>('מחסן מרכזי - ציוד קבוע');
+  const [batchModelText, setBatchModelText] = useState<string>('');
   const [customCompanyName, setCustomCompanyName] = useState<string | null>(() => {
     if (typeof window !== 'undefined') {
       try {
@@ -172,6 +173,7 @@ export default function PrintTagsView() {
               return {
                 serial,
                 qrDataUrl,
+                toolName: batchModelText.trim() || undefined,
                 facilityName: facilityText,
                 isReprint: false,
               };
@@ -207,7 +209,9 @@ export default function PrintTagsView() {
           const singleTag: TagItem = {
             serial: reprintAsset.qrCode,
             qrDataUrl,
-            toolName: reprintAsset.toolName,
+            toolName: reprintAsset.modelNumber
+              ? `${reprintAsset.toolName} (${reprintAsset.modelNumber})`
+              : reprintAsset.toolName,
             facilityName: reprintAsset.warehouseName,
             isReprint: true,
           };
@@ -230,7 +234,7 @@ export default function PrintTagsView() {
     return () => {
       isCurrent = false;
     };
-  }, [activeTab, batchSerials, facilityText, reprintAsset, reprintQuantity, orgSlug]);
+  }, [activeTab, batchSerials, facilityText, batchModelText, reprintAsset, reprintQuantity, orgSlug]);
 
   // Handle Reprint Tool Search
   const handleSearchReprint = useCallback(async () => {
@@ -300,12 +304,14 @@ export default function PrintTagsView() {
         <style jsx global>{`
           @page {
             size: 60mm 30mm;
-            margin: 0mm;
+            margin: 0;
           }
           @media print {
-            html, body {
-              width: 60mm !important;
-              height: 30mm !important;
+            @page {
+              size: 60mm 30mm; /* Strictly 60mm Width by 30mm Height */
+              margin: 0;
+            }
+            body {
               margin: 0 !important;
               padding: 0 !important;
               background: #ffffff !important;
@@ -318,6 +324,7 @@ export default function PrintTagsView() {
               margin: 0 !important;
               padding: 0 !important;
             }
+            .print-label-page,
             .tsc-label {
               width: 60mm !important;
               height: 30mm !important;
@@ -326,12 +333,14 @@ export default function PrintTagsView() {
               box-sizing: border-box !important;
               page-break-after: always !important;
               break-after: page !important;
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
+              overflow: hidden !important;
               display: flex !important;
               flex-direction: row !important;
               align-items: center !important;
               justify-content: space-between !important;
-              padding: 2mm 3mm !important;
-              overflow: hidden !important;
+              padding: 1.5mm 2.5mm !important;
               border: none !important;
               border-radius: 0 !important;
               box-shadow: none !important;
@@ -535,11 +544,11 @@ export default function PrintTagsView() {
             )}
 
             {/* Tag Identity & Branding Configuration */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {/* Company / Contractor Name */}
               <div>
                 <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
-                  שם החברה / הקבלן (יופיע בראש המדבקה)
+                  שם החברה / הקבלן (ראש המדבקה)
                 </label>
                 <div className="relative">
                   <Building2 className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
@@ -548,6 +557,23 @@ export default function PrintTagsView() {
                     value={customCompanyName ?? currentOrganization?.name ?? 'TOOLY'}
                     onChange={(e) => handleCompanyNameChange(e.target.value)}
                     placeholder={currentOrganization?.name || 'לדוגמה: סאלח הנדסה ובנייה'}
+                    className="w-full min-h-[48px] bg-white text-blue-950 font-bold text-sm pr-10 pl-3.5 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none shadow-sm"
+                  />
+                </div>
+              </div>
+
+              {/* Equipment / Tool Model Name (Optional) */}
+              <div>
+                <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
+                  דגם כלי / סוג ציוד (אופציונלי)
+                </label>
+                <div className="relative">
+                  <Wrench className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={batchModelText}
+                    onChange={(e) => setBatchModelText(e.target.value)}
+                    placeholder="לדוגמה: מקדחה רוטטת Bosch"
                     className="w-full min-h-[48px] bg-white text-blue-950 font-bold text-sm pr-10 pl-3.5 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none shadow-sm"
                   />
                 </div>
@@ -821,11 +847,11 @@ export default function PrintTagsView() {
             {tags.map((tag, idx) => (
               <div
                 key={`${tag.serial}-${idx}`}
-                dir="rtl"
-                className="tsc-label bg-white border-2 border-slate-900 rounded-xl p-2.5 sm:p-3 aspect-[2/1] w-full max-w-[340px] mx-auto flex flex-row items-center justify-between gap-2.5 shadow-sm transition-all overflow-hidden print:shadow-none print:border-none print:rounded-none print:m-0 print:w-[60mm] print:h-[30mm] print:max-w-[60mm] print:max-h-[30mm] print:p-[2mm_3mm]"
+                dir="ltr"
+                className="print-label-page tsc-label bg-white border-2 border-slate-900 rounded-xl p-2.5 sm:p-3 aspect-[2/1] w-full max-w-[340px] mx-auto flex flex-row items-center justify-between gap-2.5 shadow-sm transition-all overflow-hidden print:shadow-none print:border-none print:rounded-none print:m-0 print:w-[60mm] print:h-[30mm] print:max-w-[60mm] print:max-h-[30mm] print:p-[1.5mm_2.5mm]"
               >
-                {/* Column 1 (Right in RTL): 22mm x 22mm crisp QR code */}
-                <div className="shrink-0 flex items-center justify-center p-0.5 print:p-0 bg-white">
+                {/* Side 1: High-res QR code (approx 22mm x 22mm) */}
+                <div className="shrink-0 flex items-center justify-center p-0 bg-white">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={tag.qrDataUrl}
@@ -834,10 +860,13 @@ export default function PrintTagsView() {
                   />
                 </div>
 
-                {/* Column 2 (Left in RTL): Text details */}
-                <div className="flex-1 flex flex-col justify-between h-full min-w-0 text-right pr-2 print:pr-[2mm] py-0.5 print:py-0">
-                  {/* Top: Company Name (dynamic {currentOrganization.name}) with mini wrench icon */}
-                  <div className="flex items-center justify-between gap-1 min-w-0 pb-0.5 border-b border-slate-200 print:border-black/30 overflow-hidden">
+                {/* Side 2: Company Name / Logo, Equipment / Tool Model, Large bold Tag Number */}
+                <div
+                  className="flex-1 flex flex-col justify-between h-full min-w-0 text-right pr-2 print:pr-[2mm] py-0.5 print:py-0 overflow-hidden"
+                  dir="rtl"
+                >
+                  {/* Micro header: Company Name / Logo */}
+                  <div className="flex items-center justify-between gap-1 min-w-0 pb-0.5 border-b border-slate-200 print:border-black/30 overflow-hidden shrink-0">
                     <div className="flex items-center gap-1 min-w-0 overflow-hidden">
                       <Wrench className="w-3.5 h-3.5 text-blue-600 print:text-black shrink-0" />
                       <span
@@ -848,27 +877,39 @@ export default function PrintTagsView() {
                       </span>
                     </div>
                     {tag.isReprint && (
-                      <span className="shrink-0 text-[8.5px] print:text-[6.5pt] font-black uppercase px-1 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300 print:border-black print:text-black leading-none">
+                      <span className="shrink-0 text-[8px] print:text-[6.5pt] font-black uppercase px-1 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300 print:border-black print:text-black leading-none">
                         חלופית
                       </span>
                     )}
                   </div>
 
-                  {/* Center: Large bold monospace serial number (e.g. ZR-1099) in 13pt font */}
-                  <div className="my-auto py-0.5 print:py-0 overflow-hidden">
+                  {/* Equipment / Tool Model name */}
+                  <div className="overflow-hidden py-0.5 print:py-0 shrink-0">
                     <div
-                      className="tsc-serial font-mono font-black text-slate-950 text-right tracking-wider select-all leading-tight text-sm sm:text-base print:text-[13pt]"
+                      className="font-bold text-slate-700 print:text-black truncate text-[11px] print:text-[7.5pt] leading-tight"
+                      title={tag.toolName || tag.facilityName || 'ציוד מבוקר'}
+                    >
+                      {tag.toolName || tag.facilityName || 'ציוד מבוקר'}
+                    </div>
+                  </div>
+
+                  {/* Large bold Tag Number (e.g. ZR-1099) in clear monospace font */}
+                  <div className="overflow-hidden py-0.5 print:py-0 shrink-0">
+                    <div
+                      className="tsc-serial font-mono font-black text-slate-950 print:text-black text-right tracking-wider select-all leading-tight text-sm sm:text-base print:text-[13pt]"
                       dir="ltr"
                     >
                       {tag.serial}
                     </div>
                   </div>
 
-                  {/* Bottom: Subtext (e.g. ציוד מבוקר • סרוק לבדיקה) */}
-                  <div className="text-[9px] sm:text-[10px] print:text-[7pt] font-bold text-slate-500 print:text-black truncate leading-tight pt-0.5 border-t border-slate-100 print:border-black/20">
-                    {tag.toolName
-                      ? `${tag.toolName} • ${tag.isReprint ? 'מדבקה חלופית' : 'ציוד מבוקר'} • סרוק לבדיקה`
-                      : `${tag.isReprint ? 'מדבקה חלופית' : 'ציוד מבוקר'} • סרוק לבדיקה`}
+                  {/* Micro footer subtext */}
+                  <div className="text-[9px] print:text-[6.5pt] font-medium text-slate-500 print:text-black/80 truncate leading-tight pt-0.5 border-t border-slate-100 print:border-black/20 shrink-0">
+                    {tag.isReprint
+                      ? 'מדבקה חלופית • סרוק לבדיקה'
+                      : tag.toolName && tag.facilityName
+                      ? `${tag.facilityName} • סרוק לשיוך`
+                      : 'ציוד מבוקר • סרוק לבדיקה'}
                   </div>
                 </div>
               </div>

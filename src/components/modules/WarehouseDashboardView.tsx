@@ -36,11 +36,20 @@ import {
   Send,
   Flame,
   PackageCheck,
+  RotateCcw,
+  Wrench,
+  Trash2,
+  Sparkles,
+  RefreshCw,
+  Camera,
 } from 'lucide-react';
 import type { StorekeeperOperationsPayload, WarehouseOption } from '@/app/actions/dashboard';
 import { getStorekeeperOperations } from '@/app/actions/dashboard';
 import AppLayout from '@/components/layout/AppLayout';
 import ToolPassportModal from '@/components/modules/ToolPassportModal';
+import ManualCheckinModal from '@/components/modules/ManualCheckinModal';
+import OcrScannerModal from '@/components/modules/OcrScannerModal';
+import ChiefNotesFeedView from '@/components/modules/ChiefNotesFeedView';
 import SignaturePad from '@/components/ui/SignaturePad';
 import { useAuth } from '@/context/AuthContext';
 import {
@@ -57,6 +66,8 @@ import {
   completeTransferReceptionAction,
   getPendingTransfersAction,
   decideTransferRequestAction,
+  getLocalAvailableAssetsForTransferAction,
+  directStorekeeperTransferAction,
   type AvailableTransferAssetItem,
   type PendingTransferItem,
 } from '@/app/actions/transfers';
@@ -69,6 +80,14 @@ import {
   type SiteToolRequestItem,
   type SuggestedToolAsset,
 } from '@/app/actions/toolRequests';
+import {
+  getInTransitFleetAction,
+  getMaintenanceAssetsAction,
+  returnFromMaintenanceAction,
+  scrapAndRetireAssetAction,
+  type InTransitFleetItem,
+  type MaintenanceAssetItem,
+} from '@/app/actions/maintenance';
 
 interface WarehouseDashboardViewProps {
   initialData: StorekeeperOperationsPayload;
@@ -98,6 +117,13 @@ export default function WarehouseDashboardView({
   const [isLoadingWarehouse, setIsLoadingWarehouse] = useState<boolean>(false);
   const [passportAsset, setPassportAsset] = useState<ScannedAssetDetails | null>(null);
   const [isPassportOpen, setIsPassportOpen] = useState<boolean>(false);
+  const [passportLookupInput, setPassportLookupInput] = useState<string>('');
+  const [isSearchingPassport, setIsSearchingPassport] = useState<boolean>(false);
+  const [passportLookupFeedback, setPassportLookupFeedback] = useState<string | null>(null);
+
+  // Equipment Return / Check-in Modal State (Manual Omnisearch + Barcode Scanner)
+  const [isCheckinModalOpen, setIsCheckinModalOpen] = useState<boolean>(false);
+  const [checkinPreselectedAssetId, setCheckinPreselectedAssetId] = useState<string | null>(null);
 
   const warehouses = propWarehouses || data.warehouses || data.allWarehouses || [];
 
@@ -140,6 +166,23 @@ export default function WarehouseDashboardView({
     type: 'success' | 'error';
   } | null>(null);
   const [assetSearchQuery, setAssetSearchQuery] = useState<string>('');
+
+  // Storekeeper: Direct Outbound Equipment Transfer Modal State
+  const [isDirectTransferModalOpen, setIsDirectTransferModalOpen] = useState<boolean>(false);
+  const [isDirectTransferOcrOpen, setIsDirectTransferOcrOpen] = useState<boolean>(false);
+  const [isDispatchOcrOpen, setIsDispatchOcrOpen] = useState<boolean>(false);
+  const [isQuickOcrOpen, setIsQuickOcrOpen] = useState<boolean>(false);
+  const [localAvailableAssets, setLocalAvailableAssets] = useState<AvailableTransferAssetItem[]>([]);
+  const [isLoadingLocalAssets, setIsLoadingLocalAssets] = useState<boolean>(false);
+  const [selectedDirectAsset, setSelectedDirectAsset] = useState<AvailableTransferAssetItem | null>(null);
+  const [directTargetWarehouseId, setDirectTargetWarehouseId] = useState<string>('');
+  const [transporterNotes, setTransporterNotes] = useState<string>('');
+  const [directSearchQuery, setDirectSearchQuery] = useState<string>('');
+  const [isSubmittingDirectTransfer, setIsSubmittingDirectTransfer] = useState<boolean>(false);
+  const [directTransferFeedback, setDirectTransferFeedback] = useState<{
+    text: string;
+    type: 'success' | 'error';
+  } | null>(null);
 
   // Pending Inter-site Transfer Requests (Chief Operations / Operations Manager Approval)
   const [pendingTransfers, setPendingTransfers] = useState<PendingTransferItem[]>([]);
@@ -286,13 +329,160 @@ export default function WarehouseDashboardView({
     }
   }, []);
 
+  // =========================================================================
+  // CHIEF OPERATIONS: IN-TRANSIT FLEET & CENTRAL MAINTENANCE
+  // =========================================================================
+  const [inTransitFleet, setInTransitFleet] = useState<InTransitFleetItem[]>([]);
+  const [isLoadingInTransit, setIsLoadingInTransit] = useState<boolean>(false);
+
+  const [maintenanceAssets, setMaintenanceAssets] = useState<MaintenanceAssetItem[]>([]);
+  const [isLoadingMaintenance, setIsLoadingMaintenance] = useState<boolean>(false);
+
+  // Maintenance Return-to-Stock Modal State
+  const [repairModalAsset, setRepairModalAsset] = useState<MaintenanceAssetItem | null>(null);
+  const [repairCondition, setRepairCondition] = useState<'excellent' | 'good'>('good');
+  const [repairReceivingWhId, setRepairReceivingWhId] = useState<string>('');
+  const [repairNotes, setRepairNotes] = useState<string>('');
+  const [isSubmittingRepair, setIsSubmittingRepair] = useState<boolean>(false);
+  const [repairFeedback, setRepairFeedback] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  // Maintenance Scrap & Retire Modal State
+  const [retireModalAsset, setRetireModalAsset] = useState<MaintenanceAssetItem | null>(null);
+  const [retireReason, setRetireReason] = useState<string>('');
+  const [isSubmittingRetire, setIsSubmittingRetire] = useState<boolean>(false);
+  const [retireFeedback, setRetireFeedback] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  const loadInTransitFleet = React.useCallback(async () => {
+    setIsLoadingInTransit(true);
+    try {
+      const activeOrgId = currentOrganization?.id || user?.organizationId;
+      const list = await getInTransitFleetAction(activeOrgId);
+      setInTransitFleet(list);
+    } catch (err) {
+      console.warn('Error loading in-transit fleet:', err);
+    } finally {
+      setIsLoadingInTransit(false);
+    }
+  }, [currentOrganization?.id, user?.organizationId]);
+
+  const loadMaintenanceAssets = React.useCallback(async () => {
+    setIsLoadingMaintenance(true);
+    try {
+      const activeOrgId = currentOrganization?.id || user?.organizationId;
+      const list = await getMaintenanceAssetsAction(activeOrgId);
+      setMaintenanceAssets(list);
+    } catch (err) {
+      console.warn('Error loading maintenance assets:', err);
+    } finally {
+      setIsLoadingMaintenance(false);
+    }
+  }, [currentOrganization?.id, user?.organizationId]);
+
   // Sync data on load and role/warehouse change
   React.useEffect(() => {
     if (isChiefOperations || isGeneralManager) {
       void loadChiefInbox();
+      void loadInTransitFleet();
+      void loadMaintenanceAssets();
     }
     void loadSiteStorekeeperData(selectedWarehouseId);
-  }, [isChiefOperations, isGeneralManager, selectedWarehouseId, loadChiefInbox, loadSiteStorekeeperData]);
+  }, [
+    isChiefOperations,
+    isGeneralManager,
+    selectedWarehouseId,
+    loadChiefInbox,
+    loadSiteStorekeeperData,
+    loadInTransitFleet,
+    loadMaintenanceAssets,
+  ]);
+
+  const handleOpenRepairModal = (asset: MaintenanceAssetItem) => {
+    setRepairModalAsset(asset);
+    setRepairCondition('good');
+    const defaultWh =
+      asset.currentWarehouseId && asset.currentWarehouseId !== 'all'
+        ? asset.currentWarehouseId
+        : selectedWarehouseId !== 'all'
+        ? selectedWarehouseId
+        : assignedWarehouseId || (warehouses.find((w) => w.id !== 'all')?.id || '');
+    setRepairReceivingWhId(defaultWh);
+    setRepairNotes('');
+    setRepairFeedback(null);
+  };
+
+  const handleOpenRetireModal = (asset: MaintenanceAssetItem) => {
+    setRetireModalAsset(asset);
+    setRetireReason('');
+    setRetireFeedback(null);
+  };
+
+  const handleReturnFromMaintenanceSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!repairModalAsset) return;
+    if (!repairReceivingWhId) {
+      setRepairFeedback({ text: 'אנא בחר מחסן לקליטת הכלי מהתיקון', type: 'error' });
+      return;
+    }
+    setIsSubmittingRepair(true);
+    setRepairFeedback(null);
+    try {
+      const res = await returnFromMaintenanceAction({
+        assetId: repairModalAsset.assetId,
+        receivingWarehouseId: repairReceivingWhId,
+        condition: repairCondition,
+        notes: repairNotes.trim() || undefined,
+      });
+      if (res.success) {
+        setRepairFeedback({ text: res.message || 'הכלי נקלט בהצלחה מתיקון והוחזר למלאי!', type: 'success' });
+        await loadMaintenanceAssets();
+        await handleWarehouseChange(selectedWarehouseId);
+        setTimeout(() => {
+          setRepairModalAsset(null);
+          setRepairFeedback(null);
+          setRepairNotes('');
+        }, 1500);
+      } else {
+        setRepairFeedback({ text: res.error || 'שגיאה בקליטת כלי מתיקון', type: 'error' });
+      }
+    } catch (err) {
+      setRepairFeedback({ text: err instanceof Error ? err.message : 'שגיאת תקשורת', type: 'error' });
+    } finally {
+      setIsSubmittingRepair(false);
+    }
+  };
+
+  const handleScrapAndRetireSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!retireModalAsset) return;
+    if (!retireReason.trim()) {
+      setRetireFeedback({ text: 'חובה לציין סיבת גריטה והשבתה', type: 'error' });
+      return;
+    }
+    setIsSubmittingRetire(true);
+    setRetireFeedback(null);
+    try {
+      const res = await scrapAndRetireAssetAction({
+        assetId: retireModalAsset.assetId,
+        reason: retireReason.trim(),
+      });
+      if (res.success) {
+        setRetireFeedback({ text: res.message || 'הכלי נגרט והושבת לצמיתות מהמערכת', type: 'success' });
+        await loadMaintenanceAssets();
+        await handleWarehouseChange(selectedWarehouseId);
+        setTimeout(() => {
+          setRetireModalAsset(null);
+          setRetireFeedback(null);
+          setRetireReason('');
+        }, 1500);
+      } else {
+        setRetireFeedback({ text: res.error || 'שגיאה בהשבתת הכלי', type: 'error' });
+      }
+    } catch (err) {
+      setRetireFeedback({ text: err instanceof Error ? err.message : 'שגיאת תקשורת', type: 'error' });
+    } finally {
+      setIsSubmittingRetire(false);
+    }
+  };
 
   // Chief Storekeeper: Approve (Dispatch) or Reject site tool request
   const handleResolveSiteRequest = async (requestId: string, decision: 'APPROVE' | 'REJECT') => {
@@ -534,6 +724,82 @@ export default function WarehouseDashboardView({
     }
   };
 
+  // Load local available assets for direct outbound transfer
+  const loadLocalAvailableAssets = React.useCallback(async (whId: string) => {
+    setIsLoadingLocalAssets(true);
+    try {
+      const list = await getLocalAvailableAssetsForTransferAction(whId !== 'all' ? whId : undefined);
+      setLocalAvailableAssets(list);
+    } catch (err) {
+      console.warn('Error loading local available assets for transfer:', err);
+    } finally {
+      setIsLoadingLocalAssets(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (isDirectTransferModalOpen) {
+      void loadLocalAvailableAssets(selectedWarehouseId);
+    }
+  }, [isDirectTransferModalOpen, selectedWarehouseId, loadLocalAvailableAssets]);
+
+  // Submit direct outbound equipment transfer
+  const handleDirectTransferSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedDirectAsset) {
+      setDirectTransferFeedback({ text: 'אנא בחר כלי עבודה זמין לשילוח מהרשימה', type: 'error' });
+      return;
+    }
+    if (!directTargetWarehouseId) {
+      setDirectTransferFeedback({ text: 'אנא בחר מחסן או אתר יעד לקליטת הציוד', type: 'error' });
+      return;
+    }
+    if (selectedDirectAsset.currentWarehouseId === directTargetWarehouseId) {
+      setDirectTransferFeedback({ text: 'מחסן המקור ומחסן היעד חייבים להיות שונים', type: 'error' });
+      return;
+    }
+    setIsSubmittingDirectTransfer(true);
+    setDirectTransferFeedback(null);
+    try {
+      const res = await directStorekeeperTransferAction({
+        assetId: selectedDirectAsset.id,
+        targetWarehouseId: directTargetWarehouseId,
+        transporterNotes: transporterNotes.trim() || undefined,
+        sourceWarehouseId:
+          selectedDirectAsset.currentWarehouseId ||
+          (selectedWarehouseId !== 'all' ? selectedWarehouseId : undefined),
+      });
+
+      if (res.success) {
+        setDirectTransferFeedback({
+          text: res.message || 'הכלי שולח בהצלחה ועודכן בסטטוס בשינוע!',
+          type: 'success',
+        });
+        await handleWarehouseChange(selectedWarehouseId);
+        if (isChiefOperations || isGeneralManager) {
+          await loadInTransitFleet();
+        }
+        await loadIncomingTransfers(selectedWarehouseId);
+        setTimeout(() => {
+          setIsDirectTransferModalOpen(false);
+          setSelectedDirectAsset(null);
+          setTransporterNotes('');
+          setDirectTransferFeedback(null);
+          setDirectSearchQuery('');
+        }, 1500);
+      } else {
+        setDirectTransferFeedback({ text: res.error || 'שגיאה בשילוח ישיר', type: 'error' });
+      }
+    } catch (err) {
+      setDirectTransferFeedback({
+        text: err instanceof Error ? err.message : 'שגיאת תקשורת',
+        type: 'error',
+      });
+    } finally {
+      setIsSubmittingDirectTransfer(false);
+    }
+  };
+
   // Complete Reception of in-transit equipment
   const handleCompleteReception = async (req: PendingTransferItem) => {
     setReceivingTransferId(req.id);
@@ -693,16 +959,28 @@ export default function WarehouseDashboardView({
     }
   }, [isStorekeeper, assignedWarehouseId, selectedWarehouseId, handleWarehouseChange]);
 
-  // Open tool passport modal by QR
+  // Open tool passport modal by QR / Tag
   const handleOpenPassport = async (qrCode: string) => {
+    const clean = qrCode?.trim();
+    if (!clean) return;
+
+    setIsSearchingPassport(true);
+    setPassportLookupFeedback(null);
     try {
-      const asset = await getAssetDetailsByQr(qrCode, selectedWarehouseId);
+      const activeOrgId = currentOrganization?.id || user?.organizationId;
+      const asset = await getAssetDetailsByQr(clean, undefined, activeOrgId);
       if (asset) {
         setPassportAsset(asset);
         setIsPassportOpen(true);
+        setPassportLookupInput('');
+      } else {
+        setPassportLookupFeedback(`לא נמצא כלי עבודה עבור תג / ברקוד "${clean}".`);
       }
     } catch (err) {
       console.warn('Error fetching tool passport:', err);
+      setPassportLookupFeedback('שגיאה באיתור דרכון הכלי.');
+    } finally {
+      setIsSearchingPassport(false);
     }
   };
 
@@ -899,6 +1177,92 @@ export default function WarehouseDashboardView({
           </div>
         </div>
 
+        {/* CHIEF STOREKEEPER: INSTANT TOOL PASSPORT LOOKUP */}
+        {(isChiefOperations || isGeneralManager || canSwitchDepots) && (
+          <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-blue-950 border-2 border-indigo-300 rounded-3xl p-4 sm:p-5 text-white shadow-md space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-600/50 border border-indigo-400/30 flex items-center justify-center text-indigo-200 shrink-0">
+                  <QrCode className="w-5 h-5 text-amber-400" />
+                </div>
+                <div>
+                  <h2 className="text-base font-black text-white flex items-center gap-2">
+                    <span>איתור תיק כלי מלא והיסטוריית חיים</span>
+                    <span className="text-xs font-normal text-indigo-200 font-mono" dir="ltr">
+                      (Instant Tool Passport Lookup)
+                    </span>
+                  </h2>
+                  <p className="text-xs text-indigo-200">
+                    מעקב כרונולוגי אחר מחזורי הנפקה, מיקומי שינוע, תקלות ואישורי חתימות
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (passportLookupInput.trim()) {
+                  void handleOpenPassport(passportLookupInput.trim());
+                }
+              }}
+              className="flex items-center gap-2"
+            >
+              <div className="relative flex-1">
+                <Search className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400 pointer-events-none" />
+                <input
+                  type="text"
+                  value={passportLookupInput}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setPassportLookupInput(val);
+                    setPassportLookupFeedback(null);
+                    // Instant open if exact pattern matched or barcode scanned
+                    if (/^ZR-\d{3,6}$/i.test(val.trim())) {
+                      void handleOpenPassport(val.trim());
+                    }
+                  }}
+                  placeholder="איתור תיק כלי מלא (הזן מספר תג ZR-XXXX או סרוק ברקוד)"
+                  className="w-full min-h-[48px] bg-white/10 hover:bg-white/15 focus:bg-white text-white focus:text-slate-950 font-bold text-sm pr-10 pl-24 rounded-2xl border-2 border-indigo-400/40 focus:border-indigo-400 focus:outline-none placeholder:text-indigo-200 shadow-inner transition-colors"
+                />
+                <div className="absolute left-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+                  {isSearchingPassport && (
+                    <Loader2 className="w-4 h-4 text-indigo-300 animate-spin" />
+                  )}
+                  {passportLookupInput && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPassportLookupInput('');
+                        setPassportLookupFeedback(null);
+                      }}
+                      className="text-xs text-indigo-300 hover:text-white p-1 cursor-pointer"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={!passportLookupInput.trim() || isSearchingPassport}
+                className="min-h-[48px] px-5 rounded-2xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-black text-xs shadow-md transition-all active:scale-95 cursor-pointer flex items-center gap-2 shrink-0"
+              >
+                <QrCode className="w-4 h-4" />
+                <span>פתח תיק כלי</span>
+              </button>
+            </form>
+
+            {passportLookupFeedback && (
+              <div className="p-2.5 rounded-xl bg-rose-500/20 border border-rose-400/30 text-rose-200 text-xs font-bold flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                <span>{passportLookupFeedback}</span>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* CHIEF STOREKEEPER: FIELD REQUISITIONS INBOX (תיבת בקשות ציוד מהאתרים) */}
         {(isChiefOperations || isGeneralManager) && (
           <div className="bg-white border-2 border-indigo-300/80 rounded-3xl p-5 shadow-sm space-y-4">
@@ -1000,8 +1364,14 @@ export default function WarehouseDashboardView({
 
                       {/* Reason */}
                       {req.reason && (
-                        <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 italic">
-                          &quot;{req.reason}&quot;
+                        <div className="p-2.5 rounded-xl bg-indigo-50/80 border border-indigo-200 text-xs text-indigo-950 font-medium space-y-1">
+                          <div className="flex items-center gap-1.5 font-black text-indigo-900 text-[11px]">
+                            <FileText className="w-3.5 h-3.5 text-indigo-600" />
+                            <span>סיבת דרישה / הערת שטח:</span>
+                          </div>
+                          <p className="italic text-xs font-bold leading-relaxed whitespace-pre-wrap">
+                            &ldquo;{req.reason}&rdquo;
+                          </p>
                         </div>
                       )}
                     </div>
@@ -1172,9 +1542,16 @@ export default function WarehouseDashboardView({
                       <div className="flex items-start justify-between gap-2">
                         <div>
                           <div className="flex items-center gap-1.5">
-                            <span className="font-mono text-[11px] font-black text-slate-700 bg-white px-2 py-0.5 rounded border border-slate-200" dir="ltr">
-                              {req.qrCode}
-                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenPassport(req.qrCode)}
+                              className="font-mono text-[11px] font-black text-indigo-900 bg-white hover:bg-indigo-50 px-2 py-0.5 rounded border border-slate-200 hover:border-indigo-400 transition-colors cursor-pointer group flex items-center gap-1 shadow-2xs"
+                              title={`לחץ לפתיחת תיק כלי מלא עבור ${req.qrCode}`}
+                              dir="ltr"
+                            >
+                              <QrCode className="w-3 h-3 text-indigo-600 group-hover:scale-110 transition-transform" />
+                              <span className="underline decoration-indigo-300">{req.qrCode}</span>
+                            </button>
                             {req.tagNumber && (
                               <span className="font-mono text-[10px] font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200" dir="ltr">
                                 {req.tagNumber}
@@ -1293,6 +1670,323 @@ export default function WarehouseDashboardView({
               </div>
             )}
           </div>
+        )}
+
+        {/* CHIEF STOREKEEPER: IN-TRANSIT FLEET TRACKER (מעקב שינוע וציוד בדרך) */}
+        {(isChiefOperations || isGeneralManager) && (
+          <div className="bg-white border-2 border-sky-200/90 rounded-3xl p-5 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-sky-100/70 border border-sky-200 text-sky-700 flex items-center justify-center shrink-0">
+                  <Truck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
+                    <span>מעקב שינוע וציוד בדרך</span>
+                    <span className="text-xs font-bold text-slate-500 font-mono" dir="ltr">(In-Transit Fleet Logistics)</span>
+                    {inTransitFleet.length > 0 && (
+                      <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-sky-600 text-white animate-pulse">
+                        {inTransitFleet.length} בשינוע פעיל
+                      </span>
+                    )}
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    ניטור ציוד בתנועה בין מתקנים ומחסני שטח &bull; מעקב זמני שינוע, אתרי יעד ואחראי ניוד
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 self-end sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => void loadInTransitFleet()}
+                  disabled={isLoadingInTransit}
+                  className="px-3 py-1.5 rounded-xl border border-sky-200 hover:bg-sky-50 text-sky-800 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingInTransit ? 'animate-spin' : ''}`} />
+                  <span>רענן נתוני שינוע</span>
+                </button>
+              </div>
+            </div>
+
+            {isLoadingInTransit && inTransitFleet.length === 0 ? (
+              <div className="p-8 text-center bg-slate-50/70 rounded-2xl border border-slate-200 text-xs font-bold text-slate-500 flex items-center justify-center gap-2">
+                <Loader2 className="w-5 h-5 animate-spin text-sky-600" />
+                <span>טוען נתוני שינוע ציוד...</span>
+              </div>
+            ) : inTransitFleet.length === 0 ? (
+              <div className="p-6 text-center bg-slate-50/70 rounded-2xl border border-slate-200 text-xs font-bold text-slate-500 flex items-center justify-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                <span>כל הכלים נמצאים כרגע במחסנים ובאתרי העבודה &bull; אין ציוד בתנועה בין מתקנים</span>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {inTransitFleet.map((item) => (
+                  <div
+                    key={item.id}
+                    className="p-4 rounded-2xl bg-gradient-to-br from-white to-sky-50/30 border-2 border-sky-200 shadow-sm flex flex-col justify-between gap-3.5 hover:border-sky-400 transition-all"
+                  >
+                    <div className="space-y-3">
+                      {/* Top Bar: Tool Tag, Model, and Delivery Status badge */}
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenPassport(item.qrCode)}
+                              className="font-mono text-xs font-black text-indigo-900 bg-white hover:bg-indigo-50 px-2.5 py-0.5 rounded-lg border border-slate-300 hover:border-indigo-400 transition-colors cursor-pointer group flex items-center gap-1 shadow-2xs"
+                              title={`לחץ לפתיחת תיק כלי מלא עבור ${item.qrCode}`}
+                              dir="ltr"
+                            >
+                              <QrCode className="w-3.5 h-3.5 text-indigo-600 group-hover:scale-110 transition-transform" />
+                              <span className="underline decoration-indigo-300">{item.qrCode}</span>
+                            </button>
+                            {item.serialNumber && (
+                              <span className="font-mono text-[10px] text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+                                מס&quot;ד: {item.serialNumber}
+                              </span>
+                            )}
+                          </div>
+                          <h4 className="text-base font-black text-slate-900 mt-1">
+                            {item.toolName}
+                          </h4>
+                          <p className="text-xs text-slate-500">
+                            {item.brand} {item.modelNumber ? `• דגם: ${item.modelNumber}` : ''}
+                          </p>
+                        </div>
+
+                        {/* Delivery Status Badge: 🚚 "בשינוע לשטח" (En Route) */}
+                        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-sky-500 text-white text-xs font-black shadow-xs shrink-0 animate-pulse">
+                          <Truck className="w-3.5 h-3.5" />
+                          <span>🚚 בשינוע לשטח</span>
+                        </div>
+                      </div>
+
+                      {/* Origin Warehouse (מקור) ➔ Destination Site (יעד) */}
+                      <div className="p-3 rounded-xl bg-white border border-sky-100 flex items-center justify-between text-xs shadow-xs">
+                        <div className="flex items-center gap-2 text-slate-700">
+                          <Building2 className="w-4 h-4 text-slate-400 shrink-0" />
+                          <div>
+                            <div className="text-[10px] text-slate-400 font-bold">מקור (מחסן שולח)</div>
+                            <div className="font-black text-slate-900">{item.originWarehouseName}</div>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col items-center px-2">
+                          <ArrowLeftRight className="w-4 h-4 text-sky-600" />
+                        </div>
+
+                        <div className="flex items-center gap-2 text-sky-950 text-right">
+                          <div>
+                            <div className="text-[10px] text-sky-600 font-bold">יעד (אתר מקבל)</div>
+                            <div className="font-black text-sky-900">{item.destinationWarehouseName}</div>
+                          </div>
+                          <Building2 className="w-4 h-4 text-sky-500 shrink-0" />
+                        </div>
+                      </div>
+
+                      {/* Transporter Notes if present */}
+                      {item.transporterNotes && (
+                        <div className="p-2.5 rounded-xl bg-sky-50 border border-sky-200/80 text-xs text-sky-950 font-medium space-y-0.5">
+                          <div className="flex items-center gap-1 font-bold text-sky-900 text-[10px]">
+                            <Truck className="w-3 h-3 text-sky-600" />
+                            <span>🚚 הערת שינוע / מוביל:</span>
+                          </div>
+                          <p className="text-xs font-bold italic leading-relaxed whitespace-pre-wrap">
+                            &ldquo;{item.transporterNotes}&rdquo;
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Transit Details: Dispatch timestamp + elapsed transit time + authorized storekeeper */}
+                      <div className="grid grid-cols-2 gap-2 text-xs pt-1">
+                        <div className="p-2 rounded-lg bg-slate-50 border border-slate-200">
+                          <span className="text-[10px] text-slate-400 block font-bold">משך שינוע / יציאה</span>
+                          <span className="font-bold text-slate-800 flex items-center gap-1 mt-0.5">
+                            <Clock className="w-3 h-3 text-sky-600" />
+                            <span>{item.elapsedTransitTimeText}</span>
+                          </span>
+                        </div>
+
+                        <div className="p-2 rounded-lg bg-slate-50 border border-slate-200">
+                          <span className="text-[10px] text-slate-400 block font-bold">אחראי ניוד / מנפק</span>
+                          <span className="font-bold text-slate-800 flex items-center gap-1 mt-0.5 truncate">
+                            <ShieldCheck className="w-3 h-3 text-emerald-600 shrink-0" />
+                            <span className="truncate">{item.dispatchedBy}</span>
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* CHIEF STOREKEEPER: CENTRAL MAINTENANCE & REPAIR HUB (מרכז אחזקה ובקרת תיקונים) */}
+        {(isChiefOperations || isGeneralManager) && (
+          <div className="bg-white border-2 border-amber-300/80 rounded-3xl p-5 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-100/70 border border-amber-200 text-amber-700 flex items-center justify-center shrink-0">
+                  <Wrench className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
+                    <span>מרכז אחזקה ובקרת תיקונים</span>
+                    <span className="text-xs font-bold text-slate-500 font-mono" dir="ltr">(Central Maintenance & Repair Hub)</span>
+                    {maintenanceAssets.length > 0 && (
+                      <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-amber-600 text-white animate-pulse">
+                        {maintenanceAssets.length} כלים בטיפול
+                      </span>
+                    )}
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    ספר מעקב אחזקה מרכזי &bull; שליטה במעבדות שירות, קליטה מתיקון והחזרה למלאי, וגריטת ציוד תקול
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 self-end sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => void loadMaintenanceAssets()}
+                  disabled={isLoadingMaintenance}
+                  className="px-3 py-1.5 rounded-xl border border-amber-200 hover:bg-amber-50 text-amber-900 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingMaintenance ? 'animate-spin' : ''}`} />
+                  <span>רענן נתוני אחזקה</span>
+                </button>
+              </div>
+            </div>
+
+            {isLoadingMaintenance && maintenanceAssets.length === 0 ? (
+              <div className="p-8 text-center bg-slate-50/70 rounded-2xl border border-slate-200 text-xs font-bold text-slate-500 flex items-center justify-center gap-2">
+                <Loader2 className="w-5 h-5 animate-spin text-amber-600" />
+                <span>טוען נתוני תיקונים ומעבדות...</span>
+              </div>
+            ) : maintenanceAssets.length === 0 ? (
+              <div className="p-6 text-center bg-slate-50/70 rounded-2xl border border-slate-200 text-xs font-bold text-slate-500 flex items-center justify-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                <span>כל הציוד הארגוני תקין ועומד לרשות המחסנים והאתרים &bull; אין כרגע כלים בתיקון או במעבדה</span>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {maintenanceAssets.map((asset) => (
+                  <div
+                    key={asset.id}
+                    className="p-4 rounded-2xl bg-gradient-to-br from-white to-amber-50/30 border-2 border-amber-200 shadow-sm flex flex-col justify-between gap-4 hover:border-amber-400 transition-all"
+                  >
+                    <div className="space-y-3">
+                      {/* Top Bar: Tool Tag & Model + Status Badge */}
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenPassport(asset.qrCode)}
+                              className="font-mono text-xs font-black text-amber-950 bg-amber-50 hover:bg-amber-100 px-2.5 py-0.5 rounded-lg border border-amber-300 hover:border-amber-500 transition-colors cursor-pointer group flex items-center gap-1 shadow-2xs"
+                              title={`לחץ לפתיחת תיק כלי מלא עבור ${asset.qrCode}`}
+                              dir="ltr"
+                            >
+                              <QrCode className="w-3.5 h-3.5 text-amber-700 group-hover:scale-110 transition-transform" />
+                              <span className="underline decoration-amber-400">{asset.qrCode}</span>
+                            </button>
+                            {asset.serialNumber && (
+                              <span className="font-mono text-[10px] text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+                                מס&quot;ד: {asset.serialNumber}
+                              </span>
+                            )}
+                          </div>
+                          <h4 className="text-base font-black text-slate-900 mt-1">
+                            {asset.toolName}
+                          </h4>
+                          <p className="text-xs text-slate-500">
+                            {asset.brand} {asset.modelNumber ? `• דגם: ${asset.modelNumber}` : ''}
+                          </p>
+                        </div>
+
+                        <span className="text-[11px] font-black text-amber-900 bg-amber-100 border border-amber-300 px-2.5 py-1 rounded-full flex items-center gap-1.5 shrink-0">
+                          <Wrench className="w-3.5 h-3.5 text-amber-700" />
+                          <span>בתיקון / מעבדה</span>
+                        </span>
+                      </div>
+
+                      {/* Fault Description Callout from custody_ledger */}
+                      <div className="p-3 rounded-xl bg-amber-50/70 border border-amber-200/90 text-xs space-y-1">
+                        <div className="font-black text-amber-950 flex items-center gap-1.5">
+                          <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                          <span>תיאור תקלה ודוח פגם:</span>
+                        </div>
+                        <p className="text-amber-900 font-medium leading-relaxed">
+                          {asset.faultDescription}
+                        </p>
+                      </div>
+
+                      {/* Lab / Tech + Reporting Site + Dispatch Date */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                        <div className="p-2.5 rounded-xl bg-white border border-slate-200 space-y-1">
+                          <span className="text-[10px] text-slate-400 font-bold block">מעבדה / טכנאי מטפל</span>
+                          <span className="font-black text-slate-900 flex items-center gap-1.5">
+                            <Building2 className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                            <span className="truncate">{asset.assignedTechnicianOrLab}</span>
+                          </span>
+                        </div>
+
+                        <div className="p-2.5 rounded-xl bg-white border border-slate-200 space-y-1">
+                          <span className="text-[10px] text-slate-400 font-bold block">מחסן / אתר מדווח</span>
+                          <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                            <Building2 className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                            <span className="truncate">{asset.reportingWarehouseName}</span>
+                          </span>
+                        </div>
+
+                        <div className="p-2.5 rounded-xl bg-white border border-slate-200 sm:col-span-2 flex items-center justify-between text-slate-600">
+                          <span className="flex items-center gap-1.5">
+                            <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                            <span>נשלח לתיקון: <strong>{new Date(asset.dispatchedDate).toLocaleDateString('he-IL')}</strong></span>
+                          </span>
+                          <span className="font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded text-[11px]">
+                            {asset.elapsedTimeText}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Direct Action Buttons on each card */}
+                    <div className="pt-3 border-t border-amber-200/80 flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenRetireModal(asset)}
+                        className="py-2 px-3 rounded-xl border border-rose-200 text-rose-700 hover:bg-rose-50 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>גריטת כלי / השבתה</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleOpenRepairModal(asset)}
+                        className="py-2 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center gap-1.5 shadow-sm active:scale-95 transition-all cursor-pointer"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>קליטה מתיקון / Return to Stock</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* CHIEF STOREKEEPER: CENTRAL NOTES & FIELD REMARKS FEED (מרכז הערות ותיעוד שטח) */}
+        {(isChiefOperations || isGeneralManager) && (
+          <ChiefNotesFeedView
+            warehouses={data.allWarehouses || data.warehouses}
+            onOpenPassport={handleOpenPassport}
+          />
         )}
 
         {/* SITE STOREKEEPER: REQUEST TOOL FOR SITE BANNER */}
@@ -1545,6 +2239,43 @@ export default function WarehouseDashboardView({
           </button>
         </div>
 
+        {/* DIRECT OUTBOUND EQUIPMENT TRANSFER (העברה ישירה ע"י מחסנאי ללא צורך באישור מנהל) */}
+        <div className="p-4 rounded-2xl bg-gradient-to-r from-sky-950 via-blue-900 to-indigo-950 text-white shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-sky-500/40">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-sky-500/30 text-sky-200 flex items-center justify-center border border-sky-400/30 shrink-0">
+              <Truck className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-black text-white flex items-center gap-2">
+                <span>העברה ישירה לאתר אחר</span>
+                <span className="text-[10px] font-bold bg-sky-500/30 text-sky-200 px-2 py-0.5 rounded-full border border-sky-400/30">
+                  שילוח מיידי &bull; ללא אישור מנהל
+                </span>
+              </h3>
+              <p className="text-xs text-sky-200 mt-0.5">
+                שילוח ישיר של כלי עבודה זמין ממחסן זה ישירות לאתר בנייה או מחסן אחר בארגון
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              setDirectTransferFeedback(null);
+              setSelectedDirectAsset(null);
+              setTransporterNotes('');
+              setDirectSearchQuery('');
+              const otherWh = warehouses.find((w) => w.id !== 'all' && w.id !== selectedWarehouseId);
+              setDirectTargetWarehouseId(otherWh ? otherWh.id : '');
+              setIsDirectTransferModalOpen(true);
+            }}
+            className="py-2.5 px-4 rounded-xl bg-sky-500 hover:bg-sky-600 text-white text-xs sm:text-sm font-black flex items-center justify-center gap-2 shadow-md shadow-sky-500/20 active:scale-95 transition-all cursor-pointer shrink-0"
+          >
+            <Truck className="w-4 h-4" />
+            <span>העברה ישירה לאתר אחר</span>
+          </button>
+        </div>
+
         {/* IN-TRANSIT EQUIPMENT ARRIVING TO THIS WAREHOUSE */}
         {incomingTransfers.length > 0 && (
           <div className="p-4 rounded-2xl bg-amber-50/90 border-2 border-amber-300 shadow-sm space-y-3">
@@ -1583,9 +2314,15 @@ export default function WarehouseDashboardView({
                   </div>
 
                   {req.reason && (
-                    <p className="text-xs text-slate-600 bg-slate-50 p-2 rounded-lg border border-slate-100 italic">
-                      &quot;{req.reason}&quot;
-                    </p>
+                    <div className="p-2.5 rounded-xl bg-amber-50/80 border border-amber-200 text-xs text-amber-950 font-medium space-y-0.5">
+                      <div className="flex items-center gap-1 font-bold text-amber-900 text-[10px]">
+                        <Truck className="w-3 h-3 text-amber-600" />
+                        <span>🚚 הערת שינוע / סיבת העברה:</span>
+                      </div>
+                      <p className="text-xs font-bold italic leading-relaxed whitespace-pre-wrap">
+                        &ldquo;{req.reason}&rdquo;
+                      </p>
+                    </div>
                   )}
 
                   <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
@@ -1656,7 +2393,7 @@ export default function WarehouseDashboardView({
         </div>
 
         {/* 3. PROMINENT ACTION SHORTCUTS */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+        <div className="grid grid-cols-2 sm:grid-cols-6 gap-2.5">
           <Link
             href="/"
             className="p-3.5 rounded-2xl bg-gradient-to-br from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-black text-xs sm:text-sm flex flex-col items-center justify-center text-center gap-2 shadow-md shadow-blue-600/20 active:scale-95 transition-all"
@@ -1665,13 +2402,43 @@ export default function WarehouseDashboardView({
             <span>⚡ ניפוק מרוכז מהיר</span>
           </Link>
 
-          <Link
-            href="/"
-            className="p-3.5 rounded-2xl bg-white hover:bg-blue-50 text-blue-900 border-2 border-blue-200 font-black text-xs sm:text-sm flex flex-col items-center justify-center text-center gap-2 shadow-sm active:scale-95 transition-all"
+          <button
+            type="button"
+            onClick={() => {
+              setCheckinPreselectedAssetId(null);
+              setIsCheckinModalOpen(true);
+            }}
+            className="p-3.5 rounded-2xl bg-white hover:bg-blue-50 text-blue-900 border-2 border-blue-200 font-black text-xs sm:text-sm flex flex-col items-center justify-center text-center gap-2 shadow-sm active:scale-95 transition-all cursor-pointer"
           >
             <Scan className="w-6 h-6 text-blue-600" />
             <span>קליטת ציוד והחזרה</span>
-          </Link>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setDirectTransferFeedback(null);
+              setSelectedDirectAsset(null);
+              setTransporterNotes('');
+              setDirectSearchQuery('');
+              const otherWh = warehouses.find((w) => w.id !== 'all' && w.id !== selectedWarehouseId);
+              setDirectTargetWarehouseId(otherWh ? otherWh.id : '');
+              setIsDirectTransferModalOpen(true);
+            }}
+            className="p-3.5 rounded-2xl bg-white hover:bg-sky-50 text-sky-900 border-2 border-sky-200 font-black text-xs sm:text-sm flex flex-col items-center justify-center text-center gap-2 shadow-sm active:scale-95 transition-all cursor-pointer"
+          >
+            <Truck className="w-6 h-6 text-sky-600" />
+            <span>🚚 העברה ישירה לאתר</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsQuickOcrOpen(true)}
+            className="p-3.5 rounded-2xl bg-gradient-to-br from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white font-black text-xs sm:text-sm flex flex-col items-center justify-center text-center gap-2 shadow-md shadow-emerald-600/20 active:scale-95 transition-all cursor-pointer"
+          >
+            <Sparkles className="w-6 h-6 text-amber-300 stroke-[2.5]" />
+            <span>🔦 סורק OCR שטח</span>
+          </button>
 
           <Link
             href="/print-tags"
@@ -1763,9 +2530,16 @@ export default function WarehouseDashboardView({
                           <span className="text-[10px] font-black uppercase px-1.5 py-0.5 rounded bg-rose-100 text-rose-800">
                             +{tool.daysOverdue} ימים באיחור
                           </span>
-                          <span className="font-mono text-[11px] font-bold text-slate-500" dir="ltr">
-                            {tool.qrCode}
-                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenPassport(tool.qrCode)}
+                            className="font-mono text-[11px] font-black text-rose-950 hover:underline cursor-pointer flex items-center gap-1"
+                            title={`לחץ לפתיחת תיק כלי מלא עבור ${tool.qrCode}`}
+                            dir="ltr"
+                          >
+                            <QrCode className="w-3 h-3 text-rose-600" />
+                            <span>{tool.qrCode}</span>
+                          </button>
                         </div>
                         <h3 className="text-sm font-black text-blue-950 mt-1">
                           {tool.toolName}
@@ -1782,6 +2556,15 @@ export default function WarehouseDashboardView({
                         </div>
                       </div>
                     </div>
+
+                    {/* Checkout Note if present */}
+                    {tool.checkoutNote && (
+                      <div className="p-2 rounded-lg bg-amber-50/80 border border-amber-200/80 text-[11px] text-amber-950 font-medium flex items-center gap-1.5">
+                        <FileText className="w-3 h-3 text-amber-600 shrink-0" />
+                        <span className="font-bold">הערת ניפוק:</span>
+                        <span className="italic truncate">&ldquo;{tool.checkoutNote}&rdquo;</span>
+                      </div>
+                    )}
 
                     {/* Direct Contact & Passport Buttons */}
                     <div className="pt-2 border-t border-rose-200/80 flex items-center gap-2">
@@ -1821,6 +2604,19 @@ export default function WarehouseDashboardView({
                       >
                         <FileText className="w-3.5 h-3.5 text-blue-600" />
                         <span>דרכון</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCheckinPreselectedAssetId(tool.assetId);
+                          setIsCheckinModalOpen(true);
+                        }}
+                        className="py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black flex items-center justify-center gap-1 shadow-sm active:scale-95 transition-all cursor-pointer"
+                        title="קלוט כלי זה חזרה למחסן"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>קלוט</span>
                       </button>
                     </div>
                   </div>
@@ -1883,6 +2679,16 @@ export default function WarehouseDashboardView({
                           {item.accessoriesSummary}
                         </span>
                       )}
+                    </div>
+
+                    {/* Checkout Note if present */}
+                    {item.checkoutNote && (
+                      <div className="p-1.5 rounded-lg bg-amber-50 border border-amber-200/70 text-[11px] text-amber-950 font-medium flex items-center gap-1.5">
+                        <FileText className="w-3 h-3 text-amber-600 shrink-0" />
+                        <span className="font-bold">הערת ניפוק:</span>
+                        <span className="italic truncate">&ldquo;{item.checkoutNote}&rdquo;</span>
+                      </div>
+                    )}
                       <button
                         type="button"
                         onClick={() => handleOpenPassport(item.qrCode)}
@@ -1893,7 +2699,6 @@ export default function WarehouseDashboardView({
                       </button>
                     </div>
                   </div>
-                </div>
               ))}
             </div>
           )}
@@ -2390,6 +3195,279 @@ export default function WarehouseDashboardView({
         </div>
       )}
 
+      {/* STOREKEEPER: DIRECT OUTBOUND EQUIPMENT TRANSFER MODAL */}
+      {isDirectTransferModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white border-2 border-sky-300 rounded-3xl max-w-xl w-full shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 max-h-[92vh] flex flex-col">
+            {/* Header */}
+            <div className="p-5 bg-gradient-to-r from-sky-950 via-blue-900 to-indigo-950 text-white flex items-center justify-between shrink-0 border-b border-sky-700/50">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-sky-500/30 flex items-center justify-center border border-sky-400/30">
+                  <Truck className="w-5 h-5 text-sky-200" />
+                </div>
+                <div>
+                  <h3 className="font-black text-base text-white flex items-center gap-2">
+                    <span>העברה ישירה לאתר אחר</span>
+                    <span className="text-[10px] font-bold bg-sky-400/20 text-sky-200 px-2 py-0.5 rounded-full border border-sky-300/30">
+                      שילוח מיידי
+                    </span>
+                  </h3>
+                  <p className="text-xs text-sky-200">
+                    שילוח כלי עבודה זמין ממחסן זה ישירות לאתר בנייה או מחסן אחר בארגון
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsDirectTransferModalOpen(false)}
+                className="p-1.5 rounded-xl hover:bg-white/10 text-slate-300 hover:text-white cursor-pointer transition-all"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleDirectTransferSubmit} className="p-5 space-y-4 overflow-y-auto flex-1">
+              {directTransferFeedback && (
+                <div
+                  className={`p-3 rounded-xl text-xs font-bold flex items-center gap-2 border ${
+                    directTransferFeedback.type === 'success'
+                      ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
+                      : 'bg-rose-50 text-rose-900 border-rose-300'
+                  }`}
+                >
+                  {directTransferFeedback.type === 'success' ? (
+                    <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                  ) : (
+                    <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                  )}
+                  <span>{directTransferFeedback.text}</span>
+                </div>
+              )}
+
+              {/* Source Warehouse Info */}
+              <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2 text-slate-700">
+                  <Building2 className="w-4 h-4 text-slate-400 shrink-0" />
+                  <span>
+                    מחסן מקור (נוכחי): <strong className="text-slate-900">{data.warehouse?.name || 'מחסן שטח'}</strong>
+                  </span>
+                </div>
+                <span className="text-[10px] font-bold text-sky-800 bg-sky-50 px-2 py-0.5 rounded border border-sky-200">
+                  מלאי זמין לשילוח
+                </span>
+              </div>
+
+              {/* 1. Tool Selection */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                  <span>1. בחירת כלי עבודה מהמלאי הזמין <span className="text-rose-500">*</span></span>
+                  {selectedDirectAsset && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDirectAsset(null)}
+                      className="text-[11px] text-blue-600 hover:text-blue-800 font-bold cursor-pointer"
+                    >
+                      החלף כלי
+                    </button>
+                  )}
+                </label>
+
+                {selectedDirectAsset ? (
+                  <div className="p-3.5 rounded-2xl bg-sky-50/80 border-2 border-sky-400 flex items-center justify-between gap-3 shadow-xs">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-xs font-black text-sky-950 bg-white px-2 py-0.5 rounded border border-sky-200" dir="ltr">
+                          {selectedDirectAsset.qrCode}
+                        </span>
+                        {selectedDirectAsset.tagNumber && (
+                          <span className="font-mono text-[10px] font-bold text-sky-700 bg-sky-100 px-1.5 py-0.5 rounded">
+                            {selectedDirectAsset.tagNumber}
+                          </span>
+                        )}
+                        <span className="text-xs font-black text-sky-950">
+                          {selectedDirectAsset.name}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-600">
+                        {selectedDirectAsset.brand} {selectedDirectAsset.modelNumber ? `• דגם: ${selectedDirectAsset.modelNumber}` : ''} {selectedDirectAsset.serialNumber ? `• מס"ד: ${selectedDirectAsset.serialNumber}` : ''}
+                      </p>
+                    </div>
+                    <Check className="w-5 h-5 text-sky-600 shrink-0" />
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <div className="relative flex-1">
+                        <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          value={directSearchQuery}
+                          onChange={(e) => setDirectSearchQuery(e.target.value)}
+                          placeholder="סנן לפי תג (למשל: ZR-1099), שם כלי, מותג או מס' סידורי..."
+                          className="w-full bg-slate-50 border border-slate-300 rounded-xl pr-9 pl-3 py-2 text-xs font-medium text-slate-900 focus:outline-none focus:border-sky-500"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsDirectTransferOcrOpen(true)}
+                        className="py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer shrink-0 shadow-sm transition-all"
+                        title="סריקת OCR תעשייתי"
+                      >
+                        <Camera className="w-3.5 h-3.5" />
+                        <span>סרוק OCR</span>
+                      </button>
+                    </div>
+
+                    {isLoadingLocalAssets ? (
+                      <div className="p-6 text-center text-xs text-slate-500 flex items-center justify-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin text-sky-600" />
+                        <span>טוען כלי עבודה זמינים במחסן...</span>
+                      </div>
+                    ) : (
+                      <div className="max-h-48 overflow-y-auto space-y-1.5 border border-slate-200 rounded-2xl p-1.5 bg-slate-50/50">
+                        {localAvailableAssets
+                          .filter((a) => {
+                            if (!directSearchQuery.trim()) return true;
+                            const q = directSearchQuery.toLowerCase();
+                            return (
+                              a.name.toLowerCase().includes(q) ||
+                              a.brand.toLowerCase().includes(q) ||
+                              a.qrCode.toLowerCase().includes(q) ||
+                              (a.tagNumber && a.tagNumber.toLowerCase().includes(q)) ||
+                              (a.modelNumber && a.modelNumber.toLowerCase().includes(q)) ||
+                              (a.serialNumber && a.serialNumber.toLowerCase().includes(q))
+                            );
+                          })
+                          .slice(0, 50)
+                          .map((asset) => (
+                            <button
+                              key={asset.id}
+                              type="button"
+                              onClick={() => setSelectedDirectAsset(asset)}
+                              className="w-full text-right p-2.5 rounded-xl bg-white hover:bg-sky-50/70 border border-slate-200 hover:border-sky-300 transition-all flex items-center justify-between gap-2 cursor-pointer shadow-2xs"
+                            >
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-mono text-[11px] font-black text-slate-800 bg-slate-100 px-2 py-0.5 rounded" dir="ltr">
+                                    {asset.qrCode}
+                                  </span>
+                                  {asset.tagNumber && (
+                                    <span className="font-mono text-[10px] text-sky-700 bg-sky-50 px-1.5 py-0.5 rounded border border-sky-200">
+                                      {asset.tagNumber}
+                                    </span>
+                                  )}
+                                  <span className="text-xs font-bold text-slate-900">{asset.name}</span>
+                                </div>
+                                <p className="text-[11px] text-slate-500 mt-0.5">
+                                  {asset.brand} {asset.modelNumber ? `• ${asset.modelNumber}` : ''}
+                                </p>
+                              </div>
+                              <span className="text-[11px] font-bold text-sky-700 bg-sky-50 border border-sky-200 px-2.5 py-1 rounded-lg shrink-0">
+                                בחר כלי
+                              </span>
+                            </button>
+                          ))}
+
+                        {localAvailableAssets.length === 0 && (
+                          <div className="p-4 text-center text-xs text-slate-500">
+                            אין כרגע כלים זמינים במחסן זה לשילוח
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* 2. Destination Warehouse */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700">
+                  2. אתר יעד לקליטת הציוד (מחסן מקבל) <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  required
+                  value={directTargetWarehouseId}
+                  onChange={(e) => setDirectTargetWarehouseId(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 focus:outline-none focus:border-sky-500"
+                >
+                  <option value="" disabled>
+                    בחר אתר יעד...
+                  </option>
+                  {warehouses
+                    .filter((w) => w.id !== 'all' && w.id !== selectedWarehouseId)
+                    .map((w) => (
+                      <option key={w.id} value={w.id}>
+                        {w.name} {w.code ? `(${w.code})` : ''}
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              {/* 3. Transporter / Driver Notes */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700">
+                  3. פרטי המוביל / נהג שינוע או תעודת משלוח (הערות שינוע)
+                </label>
+                <input
+                  type="text"
+                  value={transporterNotes}
+                  onChange={(e) => setTransporterNotes(e.target.value)}
+                  placeholder="למשל: נהג אחמד (טנדר 44-555-66), נשלח בדחיפות לעבודות לילה..."
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-medium text-slate-900 focus:outline-none focus:border-sky-500"
+                />
+              </div>
+
+              {/* Route Summary */}
+              {selectedDirectAsset && directTargetWarehouseId && (
+                <div className="p-3 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-between text-xs">
+                  <div>
+                    <span className="text-[10px] text-slate-500 block">ממחסן מקור</span>
+                    <strong className="text-slate-900">
+                      {data.warehouse?.name || 'מחסן מקור'}
+                    </strong>
+                  </div>
+                  <Truck className="w-4 h-4 text-sky-600" />
+                  <div className="text-left">
+                    <span className="text-[10px] text-slate-500 block">ליעד</span>
+                    <strong className="text-sky-900">
+                      {warehouses.find((w) => w.id === directTargetWarehouseId)?.name || 'אתר יעד'}
+                    </strong>
+                  </div>
+                </div>
+              )}
+
+              {/* Submit Buttons */}
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsDirectTransferModalOpen(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                >
+                  ביטול
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingDirectTransfer || !selectedDirectAsset || !directTargetWarehouseId}
+                  className="px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white text-xs font-black flex items-center gap-2 shadow-md shadow-sky-600/20 cursor-pointer transition-all active:scale-95"
+                >
+                  {isSubmittingDirectTransfer ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>משלח כלי...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Truck className="w-4 h-4" />
+                      <span>אשר שילוח והעברה</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* SITE EQUIPMENT DISPATCH (TAG VERIFICATION & DIGITAL SIGNATURE) MODAL */}
       {isDispatchModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
@@ -2476,6 +3554,15 @@ export default function WarehouseDashboardView({
                       <Search className="w-3.5 h-3.5" />
                     )}
                     <span>בדוק כלי</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsDispatchOcrOpen(true)}
+                    className="py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer shrink-0 shadow-sm transition-all"
+                    title="סריקת OCR תעשייתי"
+                  >
+                    <Camera className="w-3.5 h-3.5" />
+                    <span>סרוק OCR</span>
                   </button>
                 </div>
 
@@ -2830,6 +3917,367 @@ export default function WarehouseDashboardView({
           </div>
         </div>
       )}
+
+      {/* MODAL 1: RETURN FROM MAINTENANCE (קליטה מתיקון והחזרה למלאי) */}
+      {repairModalAsset && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-lg w-full border-2 border-emerald-400 shadow-2xl p-6 space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-200">
+                  <RotateCcw className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900">
+                    קליטת כלי מתיקון והחזרה למלאי
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    עדכון מצב טכני והחזרת הכלי למעגל ההשאלות הפעיל
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRepairModalAsset(null)}
+                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-xl hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {repairFeedback && (
+              <div
+                className={`p-3 rounded-xl border text-xs font-bold flex items-center gap-2 ${
+                  repairFeedback.type === 'success'
+                    ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
+                    : 'bg-rose-50 border-rose-300 text-rose-950'
+                }`}
+              >
+                {repairFeedback.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                )}
+                <span>{repairFeedback.text}</span>
+              </div>
+            )}
+
+            {/* Asset details card */}
+            <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-xs font-black text-slate-800 bg-white px-2 py-0.5 rounded border border-slate-300" dir="ltr">
+                  {repairModalAsset.qrCode}
+                </span>
+                <span className="text-xs font-black text-slate-900">
+                  {repairModalAsset.toolName}
+                </span>
+              </div>
+              <div className="text-xs text-slate-500">
+                {repairModalAsset.brand} {repairModalAsset.modelNumber ? `• דגם: ${repairModalAsset.modelNumber}` : ''}
+              </div>
+              <div className="text-[11px] text-amber-800 bg-amber-50/80 p-2 rounded-lg border border-amber-200 mt-2">
+                <strong>תקלה שדווחה:</strong> {repairModalAsset.faultDescription}
+              </div>
+            </div>
+
+            <form onSubmit={handleReturnFromMaintenanceSubmit} className="space-y-4">
+              {/* Condition rating: excellent / good */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700">
+                  דירוג מצב הכלי לאחר התיקון <span className="text-rose-500">*</span>
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setRepairCondition('good')}
+                    className={`p-3 rounded-2xl border text-right transition-all cursor-pointer ${
+                      repairCondition === 'good'
+                        ? 'bg-emerald-50/80 border-emerald-500 ring-2 ring-emerald-300 text-emerald-950 font-black'
+                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100 font-bold'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span>תקין ומוכן לעבודה</span>
+                      <Check className={`w-4 h-4 ${repairCondition === 'good' ? 'text-emerald-600' : 'text-transparent'}`} />
+                    </div>
+                    <span className="text-[10px] text-slate-500 block mt-1 font-normal">
+                      הכלי תוקן ונבדק, מתאים לשימוש מלא בשטח
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setRepairCondition('excellent')}
+                    className={`p-3 rounded-2xl border text-right transition-all cursor-pointer ${
+                      repairCondition === 'excellent'
+                        ? 'bg-emerald-50/80 border-emerald-500 ring-2 ring-emerald-300 text-emerald-950 font-black'
+                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100 font-bold'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="flex items-center gap-1">
+                        <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                        <span>מצב מעולה / כחדש</span>
+                      </span>
+                      <Check className={`w-4 h-4 ${repairCondition === 'excellent' ? 'text-emerald-600' : 'text-transparent'}`} />
+                    </div>
+                    <span className="text-[10px] text-slate-500 block mt-1 font-normal">
+                      הוחלפו מכלולים ראשיים או כלי מחודש במצב מושלם
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Receiving warehouse selector */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700">
+                  מחסן מקבל לקליטת המלאי <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={repairReceivingWhId}
+                  onChange={(e) => setRepairReceivingWhId(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
+                >
+                  <option value="" disabled>בחר מחסן לקליטה...</option>
+                  {warehouses.filter((w) => w.id !== 'all').map((wh) => (
+                    <option key={wh.id} value={wh.id}>
+                      {wh.name} {wh.code ? `(${wh.code})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Repair notes */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700">
+                  הערות תיקון ובדיקה טכנית (אופציונלי)
+                </label>
+                <textarea
+                  rows={2}
+                  value={repairNotes}
+                  onChange={(e) => setRepairNotes(e.target.value)}
+                  placeholder="למשל: נבדק תחת עומס עבודה, הוחלף כבל חשמל ומגן להב..."
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-medium text-slate-900 focus:outline-none focus:border-emerald-600"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setRepairModalAsset(null)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                >
+                  ביטול
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingRepair || !repairReceivingWhId}
+                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-black flex items-center gap-1.5 shadow-md cursor-pointer transition-all active:scale-95"
+                >
+                  {isSubmittingRepair ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>קולט כלי למלאי...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      <span>אשר קליטה והחזרה למלאי</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 2: SCRAP & RETIRE (גריטת כלי והשבתה לצמיתות) */}
+      {retireModalAsset && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-lg w-full border-2 border-rose-400 shadow-2xl p-6 space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center border border-rose-200">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900">
+                    גריטת כלי והשבתה לצמיתות
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    הוצאה סופית של הכלי מצי הכלים הפעיל של הארגון
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRetireModalAsset(null)}
+                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-xl hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {retireFeedback && (
+              <div
+                className={`p-3 rounded-xl border text-xs font-bold flex items-center gap-2 ${
+                  retireFeedback.type === 'success'
+                    ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
+                    : 'bg-rose-50 border-rose-300 text-rose-950'
+                }`}
+              >
+                {retireFeedback.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                )}
+                <span>{retireFeedback.text}</span>
+              </div>
+            )}
+
+            {/* Warning callout */}
+            <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-xs space-y-1.5">
+              <div className="font-black text-rose-950 flex items-center gap-1.5">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>שים לב: השבתה בלתי הפיכה</span>
+              </div>
+              <p className="text-rose-900 text-[11px] leading-relaxed">
+                גריטת הכלי תסיר אותו ממצבת הכלים הזמינים להשאלה, תעדכן את יומן המשמורת (Custody Ledger) בפעולת <code>DECOMMISSION</code> ותשמור את היסטוריית הכלי למטרות ביקורת.
+              </p>
+            </div>
+
+            {/* Asset details card */}
+            <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-xs font-black text-slate-800 bg-white px-2 py-0.5 rounded border border-slate-300" dir="ltr">
+                  {retireModalAsset.qrCode}
+                </span>
+                <span className="text-xs font-black text-slate-900">
+                  {retireModalAsset.toolName}
+                </span>
+              </div>
+              <div className="text-xs text-slate-500">
+                {retireModalAsset.brand} {retireModalAsset.modelNumber ? `• דגם: ${retireModalAsset.modelNumber}` : ''}
+              </div>
+            </div>
+
+            <form onSubmit={handleScrapAndRetireSubmit} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700">
+                  סיבת גריטה והשבתה מנומקת <span className="text-rose-500">*</span>
+                </label>
+                <textarea
+                  required
+                  rows={3}
+                  value={retireReason}
+                  onChange={(e) => setRetireReason(e.target.value)}
+                  placeholder="פרט את סיבת הגריטה (למשל: מנוע שרוף ושלדה סדוקה, עלות תיקון עולה על 85% מעלות כלי חדש)..."
+                  className="w-full bg-slate-50 border border-rose-200 rounded-xl px-3 py-2 text-xs font-medium text-slate-900 focus:outline-none focus:border-rose-600"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setRetireModalAsset(null)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                >
+                  ביטול
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingRetire || !retireReason.trim()}
+                  className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white text-xs font-black flex items-center gap-1.5 shadow-md cursor-pointer transition-all active:scale-95"
+                >
+                  {isSubmittingRetire ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>משבית כלי...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>אשר גריטה והשבתה לצמיתות</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* EQUIPMENT RETURN & CHECK-IN MODAL (Camera Scanner + Manual Omnisearch) */}
+      <ManualCheckinModal
+        isOpen={isCheckinModalOpen}
+        onClose={() => {
+          setIsCheckinModalOpen(false);
+          setCheckinPreselectedAssetId(null);
+        }}
+        warehouseId={selectedWarehouseId}
+        preSelectedAssetId={checkinPreselectedAssetId}
+        onSuccess={() => {
+          void handleWarehouseChange(selectedWarehouseId);
+        }}
+      />
+
+      {/* OCR SCANNER 1: DIRECT OUTBOUND EQUIPMENT TRANSFER */}
+      <OcrScannerModal
+        isOpen={isDirectTransferOcrOpen}
+        onClose={() => setIsDirectTransferOcrOpen(false)}
+        onAssetDetected={(asset) => {
+          const found = localAvailableAssets.find((a) => a.id === asset.id || a.qrCode === asset.qrCode);
+          if (found) {
+            setSelectedDirectAsset(found);
+          } else {
+            setSelectedDirectAsset({
+              id: asset.id,
+              name: asset.toolName,
+              brand: asset.brand,
+              modelNumber: asset.modelNumber,
+              qrCode: asset.qrCode,
+              tagNumber: asset.qrCode,
+              serialNumber: null,
+              currentWarehouseId: asset.currentWarehouseId || '',
+              currentWarehouseName: asset.warehouseName || '',
+            });
+          }
+          setIsDirectTransferOcrOpen(false);
+        }}
+        warehouseId={selectedWarehouseId !== 'all' ? selectedWarehouseId : undefined}
+        title="שילוח ציוד ישיר - סריקת OCR שטח"
+        description="זיהוי תגית כלי לצורך שילוח ישיר לאתר אחר ללא אישור"
+      />
+
+      {/* OCR SCANNER 2: SITE DISPATCH VERIFICATION */}
+      <OcrScannerModal
+        isOpen={isDispatchOcrOpen}
+        onClose={() => setIsDispatchOcrOpen(false)}
+        onAssetDetected={(asset) => {
+          setDispatchAsset(asset);
+          setDispatchTagInput(asset.qrCode);
+          setIsTagVerified(true);
+          setIsDispatchOcrOpen(false);
+        }}
+        warehouseId={selectedWarehouseId !== 'all' ? selectedWarehouseId : undefined}
+        title="הוצאת ציוד לאתר - אימות תגית OCR"
+        description="סריקה מוקשחת לאישור תיוג פיזי של הכלי המנופק"
+      />
+
+      {/* OCR SCANNER 3: PROMINENT FIELD SCANNER & PASSPORT LOCK */}
+      <OcrScannerModal
+        isOpen={isQuickOcrOpen}
+        onClose={() => setIsQuickOcrOpen(false)}
+        onAssetDetected={(asset) => {
+          setIsQuickOcrOpen(false);
+          setPassportAsset(asset);
+          setIsPassportOpen(true);
+        }}
+        warehouseId={selectedWarehouseId !== 'all' ? selectedWarehouseId : undefined}
+        title="סורק שטח תעשייתי OCR"
+        description="סריקה מוקשחת עם פנס וסינון רעשים - נעילה מיידית על כלי במלאי"
+      />
     </AppLayout>
   );
 }

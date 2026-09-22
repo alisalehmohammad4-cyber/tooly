@@ -93,6 +93,7 @@ export interface StorekeeperReturnDue {
   workerPhone: string | null;
   expectedReturnDate: string;
   accessoriesSummary?: string;
+  checkoutNote?: string | null;
 }
 
 export interface StorekeeperOverdueAsset {
@@ -106,6 +107,7 @@ export interface StorekeeperOverdueAsset {
   warehouseName: string;
   expectedReturnDate: string;
   daysOverdue: number;
+  checkoutNote?: string | null;
 }
 
 export interface LowStockAlert {
@@ -583,19 +585,48 @@ export async function getStorekeeperOperations(
     let checkedOutCount = 0;
     let quarantinedCount = 0;
 
+    // Fetch latest checkout notes for active checked-out assets in this warehouse
+    const checkedOutAssetIds = whAssets
+      .filter((r: any) => r.status === 'checked_out')
+      .map((r: any) => r.id as string)
+      .filter(Boolean);
+
+    const checkoutNotesMap = new Map<string, string>();
+    if (checkedOutAssetIds.length > 0 && isSupabaseConfigured()) {
+      try {
+        const { data: cLedger } = await supabase
+          .from('custody_ledger')
+          .select('asset_id, notes')
+          .in('asset_id', checkedOutAssetIds)
+          .eq('action', 'CHECKOUT')
+          .order('created_at', { ascending: false });
+        if (cLedger) {
+          for (const cl of cLedger) {
+            if (cl.asset_id && !checkoutNotesMap.has(cl.asset_id) && cl.notes) {
+              checkoutNotesMap.set(cl.asset_id, cl.notes);
+            }
+          }
+        }
+      } catch {
+        // Silently continue
+      }
+    }
+
     whAssets.forEach((row: Record<string, unknown>) => {
       if (row.status === 'available') availableCount++;
       if (row.status === 'checked_out') checkedOutCount++;
       if (row.status === 'maintenance' || row.is_locked) quarantinedCount++;
 
       const model = (row.tool_models as Record<string, unknown>) || {};
+      const assetIdStr = row.id as string;
+      const checkoutNote = checkoutNotesMap.get(assetIdStr) || (row.checkout_note as string) || (row.notes as string) || null;
 
       if (row.status === 'checked_out' && row.expected_return_date) {
         const rTime = new Date(row.expected_return_date as string).getTime();
         if (rTime < now) {
           const days = Math.max(1, Math.floor((now - rTime) / (1000 * 60 * 60 * 24)));
           overdueAssets.push({
-            assetId: row.id as string,
+            assetId: assetIdStr,
             toolName: (row.name as string) || (model.name as string) || 'כלי עבודה',
             brand: (row.brand as string) || (model.brand as string) || 'Standard',
             modelNumber: (row.model_number as string) || (model.model_number as string) || null,
@@ -605,10 +636,11 @@ export async function getStorekeeperOperations(
             warehouseName: currentWh.name,
             expectedReturnDate: row.expected_return_date as string,
             daysOverdue: days,
+            checkoutNote,
           });
         } else if (rTime >= startOfToday.getTime() && rTime <= endOfToday.getTime()) {
           returnsDueToday.push({
-            assetId: row.id as string,
+            assetId: assetIdStr,
             toolName: (row.name as string) || (model.name as string) || 'כלי עבודה',
             brand: (row.brand as string) || (model.brand as string) || 'Standard',
             modelNumber: (row.model_number as string) || (model.model_number as string) || null,
@@ -616,6 +648,7 @@ export async function getStorekeeperOperations(
             workerName: (row.current_assigned_worker as string) || 'עובד שטח',
             workerPhone: (row.worker_phone as string) || null,
             expectedReturnDate: row.expected_return_date as string,
+            checkoutNote,
           });
         }
       }

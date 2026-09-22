@@ -1,5 +1,6 @@
 'use server';
 
+import { revalidatePath } from 'next/cache';
 import { supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase';
 import { getServerSessionOrgId, getServerSessionUser, DEFAULT_ORGANIZATION_ID } from '@/lib/auth/session';
 import {
@@ -806,3 +807,246 @@ export async function getIncomingInTransitTransfersAction(
     };
   });
 }
+
+/**
+ * 6. getLocalAvailableAssetsForTransferAction
+ * Fetches assets currently located in a specific warehouse with status === 'available'
+ * for direct outbound transfer by the site storekeeper.
+ */
+export async function getLocalAvailableAssetsForTransferAction(
+  sourceWarehouseId?: string
+): Promise<AvailableTransferAssetItem[]> {
+  const orgId = await resolveActiveOrg();
+  const results: AvailableTransferAssetItem[] = [];
+
+  if (isSupabaseConfigured()) {
+    try {
+      let query = supabaseAdmin
+        .from('assets')
+        .select('id, name, brand, model_number, qr_code, tag_number, serial_number, current_warehouse_id, status, tool_models(name, brand, model_number), warehouses(id, name, code)')
+        .eq('organization_id', orgId)
+        .eq('status', 'available')
+        .order('name', { ascending: true })
+        .limit(300);
+
+      if (sourceWarehouseId && sourceWarehouseId !== 'all') {
+        query = query.eq('current_warehouse_id', sourceWarehouseId);
+      }
+
+      const { data, error } = await query;
+      if (!error && data && data.length > 0) {
+        data.forEach((row: Record<string, unknown>) => {
+          const tm = (row.tool_models as Record<string, unknown>) || {};
+          const wh = (row.warehouses as Record<string, unknown>) || {};
+          results.push({
+            id: row.id as string,
+            name: (row.name as string) || (tm.name as string) || 'כלי עבודה',
+            brand: (row.brand as string) || (tm.brand as string) || 'Standard',
+            modelNumber: (row.model_number as string) || (tm.model_number as string) || null,
+            qrCode: (row.qr_code as string) || '',
+            tagNumber: (row.tag_number as string) || null,
+            serialNumber: (row.serial_number as string) || null,
+            currentWarehouseId: (row.current_warehouse_id as string) || '',
+            currentWarehouseName: (wh.name as string) || 'מחסן מקומי',
+            currentWarehouseCode: (wh.code as string) || '',
+          });
+        });
+        return results;
+      }
+    } catch (err) {
+      console.warn('[getLocalAvailableAssetsForTransferAction] Supabase error:', err);
+    }
+  }
+
+  // Fallback to mock store
+  const mockWhs = getMockWarehouses(true, orgId);
+  const whMap = new Map<string, { name: string; code: string }>();
+  mockWhs.forEach((w) => whMap.set(w.id, { name: w.name, code: w.code }));
+
+  const activeAssets = getMockAssets(orgId).filter((a) => {
+    const matchesWh =
+      !sourceWarehouseId ||
+      sourceWarehouseId === 'all' ||
+      a.warehouseId === sourceWarehouseId ||
+      a.currentWarehouseId === sourceWarehouseId;
+    return matchesWh && a.status === 'available';
+  });
+
+  return activeAssets.map((a) => {
+    const whId = a.warehouseId || a.currentWarehouseId || '';
+    const whMeta = whMap.get(whId);
+    return {
+      id: a.id,
+      name: a.toolName || 'כלי עבודה',
+      brand: a.brand || 'Standard',
+      modelNumber: a.modelNumber || null,
+      qrCode: a.qrCode || '',
+      tagNumber: a.tagNumber || null,
+      serialNumber: a.serialNumber || null,
+      currentWarehouseId: whId,
+      currentWarehouseName: whMeta?.name || a.warehouseName || 'מחסן מקומי',
+      currentWarehouseCode: whMeta?.code || a.warehouseCode || '',
+    };
+  });
+}
+
+/**
+ * 7. directStorekeeperTransferAction
+ * Allows site storekeepers to directly dispatch equipment from their current warehouse
+ * to another site without requiring prior manager approval:
+ * - Validates that the asset is currently in the storekeeper's warehouse and available.
+ * - Updates public.assets status to 'in_transit'.
+ * - Logs TRANSFER_INIT in public.custody_ledger.
+ * - Pre-creates an approved transfer_requests record so destination site and chief tracker see the route.
+ * - Calls revalidatePath('/dashboard/warehouse').
+ */
+export async function directStorekeeperTransferAction(data: {
+  assetId: string;
+  targetWarehouseId: string;
+  transporterNotes?: string;
+  sourceWarehouseId?: string;
+}): Promise<{ success: boolean; error?: string; message?: string; transferId?: string }> {
+  const orgId = await resolveActiveOrg();
+  const sessionUser = await getServerSessionUser();
+  const performedBy = sessionUser?.fullName || (sessionUser as unknown as { name?: string })?.name || 'מחסנאי שטח';
+  const now = new Date().toISOString();
+
+  const { assetId, targetWarehouseId, transporterNotes } = data;
+  if (!assetId || !targetWarehouseId) {
+    return { success: false, error: 'יש לבחור כלי עבודה ומחסן יעד' };
+  }
+
+  // 1. Fetch current asset details to check availability and find source warehouse
+  let sourceWhId = data.sourceWarehouseId || '';
+
+  if (isSupabaseConfigured()) {
+    try {
+      const { data: asset, error: fetchErr } = await supabaseAdmin
+        .from('assets')
+        .select('id, current_warehouse_id, status, name, qr_code, organization_id')
+        .eq('id', assetId)
+        .eq('organization_id', orgId)
+        .maybeSingle();
+
+      if (fetchErr || !asset) {
+        const m = getMockAssets(orgId).find((a) => a.id === assetId);
+        if (!m) {
+          return { success: false, error: 'כלי העבודה לא נמצא במערכת הארגון' };
+        }
+        if (m.status !== 'available') {
+          return { success: false, error: 'לא ניתן לשנע כלי שאינו במצב זמין במחסן (Available)' };
+        }
+        sourceWhId = m.warehouseId || m.currentWarehouseId || sourceWhId;
+      } else {
+        if (asset.status !== 'available') {
+          return { success: false, error: 'לא ניתן לשנע כלי שאינו במצב זמין במחסן (Available)' };
+        }
+        sourceWhId = asset.current_warehouse_id || sourceWhId;
+      }
+    } catch (err) {
+      console.warn('[directStorekeeperTransferAction] Asset fetch error:', err);
+    }
+  } else {
+    const m = getMockAssets(orgId).find((a) => a.id === assetId);
+    if (!m) {
+      return { success: false, error: 'כלי העבודה לא נמצא במערכת' };
+    }
+    if (m.status !== 'available') {
+      return { success: false, error: 'לא ניתן לשנע כלי שאינו במצב זמין במחסן (Available)' };
+    }
+    sourceWhId = m.warehouseId || m.currentWarehouseId || sourceWhId;
+  }
+
+  if (sourceWhId && sourceWhId === targetWarehouseId) {
+    return { success: false, error: 'מחסן המקור ומחסן היעד חייבים להיות שונים' };
+  }
+
+  const requestId = `trans-dir-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+  // 2. Update asset to in_transit and log TRANSFER_INIT in Supabase
+  if (isSupabaseConfigured()) {
+    try {
+      const { error: updateErr } = await supabaseAdmin
+        .from('assets')
+        .update({
+          status: 'in_transit',
+          updated_at: now,
+        })
+        .eq('id', assetId)
+        .eq('organization_id', orgId);
+
+      if (updateErr) {
+        return { success: false, error: `שגיאה בעדכון סטטוס כלי: ${updateErr.message}` };
+      }
+
+      await supabaseAdmin.from('custody_ledger').insert({
+        asset_id: assetId,
+        organization_id: orgId,
+        warehouse_id: targetWarehouseId,
+        action: 'TRANSFER_INIT',
+        performed_by: performedBy,
+        notes: `העברה ישירה ע"י מחסנאי לאתר יעד. הערות: ${transporterNotes || 'ללא'}`,
+        created_at: now,
+      });
+
+      // Insert pre-approved transfer_requests record so receiving site & chief tracker see the route
+      await supabaseAdmin.from('transfer_requests').insert({
+        id: requestId,
+        organization_id: orgId,
+        asset_id: assetId,
+        source_warehouse_id: sourceWhId || targetWarehouseId,
+        target_warehouse_id: targetWarehouseId,
+        requested_by: performedBy,
+        requested_by_user_id: sessionUser?.id || null,
+        decided_by: performedBy,
+        decided_at: now,
+        reason: transporterNotes ? `העברה ישירה ע"י מחסנאי: ${transporterNotes}` : 'העברה ישירה ע"י מחסנאי',
+        status: 'APPROVED',
+        created_at: now,
+        updated_at: now,
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Database error';
+      return { success: false, error: msg };
+    }
+  }
+
+  // 3. Fallback / Synchronize in-memory stores
+  inMemoryTransferRequests.unshift({
+    id: requestId,
+    organization_id: orgId,
+    asset_id: assetId,
+    source_warehouse_id: sourceWhId || 'wh-salehali-main',
+    target_warehouse_id: targetWarehouseId,
+    requested_by: performedBy,
+    requested_by_user_id: sessionUser?.id || null,
+    reason: transporterNotes ? `העברה ישירה ע"י מחסנאי: ${transporterNotes}` : 'העברה ישירה ע"י מחסנאי',
+    status: 'APPROVED',
+    decided_by: performedBy,
+    decided_at: now,
+    created_at: now,
+    updated_at: now,
+  });
+
+  mutateMockAsset(
+    assetId,
+    { status: 'in_transit' },
+    {
+      action: 'TRANSFER_INIT',
+      performedBy,
+      notes: `העברה ישירה ע"י מחסנאי לאתר יעד: ${transporterNotes || 'ללא'}`,
+    }
+  );
+
+  try {
+    revalidatePath('/dashboard/warehouse');
+    revalidatePath('/dashboard/chief');
+  } catch {}
+
+  return {
+    success: true,
+    message: 'הכלי שולח בהצלחה ועודכן בסטטוס בשינוע לאתר היעד (In-Transit)!',
+    transferId: requestId,
+  };
+}
+
