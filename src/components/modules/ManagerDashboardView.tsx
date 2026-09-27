@@ -585,11 +585,11 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
 
       <main className="max-w-6xl mx-auto px-4 py-5 space-y-6">
         {/* Navigation Tab Switcher */}
-        <div className="flex items-center gap-2 p-1.5 bg-slate-200/80 rounded-2xl border border-slate-300 print:hidden">
+        <div className="flex overflow-x-auto no-scrollbar py-1 gap-2 border-b border-slate-200 sm:border sm:border-slate-300 sm:bg-slate-200/80 sm:p-1.5 sm:rounded-2xl print:hidden">
           <button
             type="button"
             onClick={() => setActiveTab('warehouses')}
-            className={`flex-1 py-2.5 px-4 rounded-xl text-xs sm:text-sm font-black flex items-center justify-center gap-2 transition-all cursor-pointer ${
+            className={`shrink-0 whitespace-nowrap flex-1 py-2.5 px-4 rounded-xl text-xs sm:text-sm font-black flex items-center justify-center gap-2 transition-all cursor-pointer ${
               activeTab === 'warehouses'
                 ? 'bg-white text-purple-950 shadow-sm border border-purple-200'
                 : 'text-slate-600 hover:text-slate-900'
@@ -602,7 +602,7 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
           <button
             type="button"
             onClick={() => setActiveTab('users')}
-            className={`flex-1 py-2.5 px-4 rounded-xl text-xs sm:text-sm font-black flex items-center justify-center gap-2 transition-all cursor-pointer ${
+            className={`shrink-0 whitespace-nowrap flex-1 py-2.5 px-4 rounded-xl text-xs sm:text-sm font-black flex items-center justify-center gap-2 transition-all cursor-pointer ${
               activeTab === 'users'
                 ? 'bg-white text-purple-950 shadow-sm border border-purple-200'
                 : 'text-slate-600 hover:text-slate-900'
@@ -615,7 +615,7 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
           <button
             type="button"
             onClick={() => setActiveTab('analytics')}
-            className={`flex-1 py-2.5 px-4 rounded-xl text-xs sm:text-sm font-black flex items-center justify-center gap-2 transition-all cursor-pointer ${
+            className={`shrink-0 whitespace-nowrap flex-1 py-2.5 px-4 rounded-xl text-xs sm:text-sm font-black flex items-center justify-center gap-2 transition-all cursor-pointer ${
               activeTab === 'analytics'
                 ? 'bg-white text-purple-950 shadow-sm border border-purple-200'
                 : 'text-slate-600 hover:text-slate-900'
@@ -1318,68 +1318,132 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                   אין כלים באיחור התואמים את החיפוש
                 </div>
               ) : (
-                <div className="overflow-x-auto rounded-xl border border-slate-200">
-                  <table className="w-full text-right text-xs">
-                    <thead className="bg-slate-100 text-slate-700 font-black border-b border-slate-200">
-                      <tr>
-                        <th className="p-3">כלי עבודה</th>
-                        <th className="p-3">ברקוד/QR</th>
-                        <th className="p-3">עובד אחראי</th>
-                        <th className="p-3">טלפון</th>
-                        <th className="p-3">אתר שיוך</th>
-                        <th className="p-3">מועד צפוי</th>
-                        <th className="p-3">ימי איחור</th>
-                        <th className="p-3">שווי (₪)</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 font-medium">
-                      {filteredOverdue.map((item) => (
-                        <tr key={item.assetId} className="hover:bg-blue-50/40 transition-colors">
-                          <td className="p-3 font-bold text-blue-950">
-                            <div>{item.toolName}</div>
-                            <div className="text-[10px] text-slate-500 font-mono" dir="ltr">
+                <>
+                  {/* Desktop Table (>= 768px) */}
+                  <div className="hidden md:block overflow-x-auto rounded-xl border border-slate-200">
+                    <table className="w-full text-right text-xs">
+                      <thead className="bg-slate-100 text-slate-700 font-black border-b border-slate-200">
+                        <tr>
+                          <th className="p-3">כלי עבודה</th>
+                          <th className="p-3">ברקוד/QR</th>
+                          <th className="p-3">עובד אחראי</th>
+                          <th className="p-3">טלפון</th>
+                          <th className="p-3">אתר שיוך</th>
+                          <th className="p-3">מועד צפוי</th>
+                          <th className="p-3">ימי איחור</th>
+                          <th className="p-3">שווי (₪)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 font-medium">
+                        {filteredOverdue.map((item) => (
+                          <tr key={item.assetId} className="hover:bg-blue-50/40 transition-colors">
+                            <td className="p-3 font-bold text-blue-950">
+                              <div>{item.toolName}</div>
+                              <div className="text-[10px] text-slate-500 font-mono" dir="ltr">
+                                {item.brand} {item.modelNumber ? `• ${item.modelNumber}` : ''}
+                              </div>
+                            </td>
+                            <td className="p-3 font-mono font-bold text-blue-800" dir="ltr">
+                              {item.qrCode}
+                            </td>
+                            <td className="p-3 font-bold text-slate-900">{item.workerName}</td>
+                            <td className="p-3 font-mono text-slate-600" dir="ltr">
+                              {item.workerPhone ? (
+                                <a
+                                  href={`tel:${item.workerPhone}`}
+                                  className="text-blue-600 hover:underline flex items-center gap-1"
+                                >
+                                  <Phone className="w-3 h-3 text-blue-500" />
+                                  <span>{item.workerPhone}</span>
+                                </a>
+                              ) : (
+                                '—'
+                              )}
+                            </td>
+                            <td className="p-3 text-slate-700">{item.warehouseName}</td>
+                            <td className="p-3 text-slate-600">
+                              <div className="flex items-center gap-1 text-[11px]">
+                                <Calendar className="w-3 h-3 text-slate-400" />
+                                <span>
+                                  {new Date(item.expectedReturnDate).toLocaleDateString('he-IL')}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="p-3">
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-black bg-rose-50 text-rose-700 border border-rose-200">
+                                +{item.daysOverdue} ימים
+                              </span>
+                            </td>
+                            <td className="p-3 font-black text-slate-900">
+                              ₪{item.purchaseCost.toLocaleString()}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Mobile Touch Cards (< 768px) */}
+                  <div className="block md:hidden space-y-3">
+                    {filteredOverdue.map((item) => (
+                      <div
+                        key={item.assetId}
+                        className="p-3.5 bg-white rounded-2xl border-2 border-rose-100 shadow-2xs space-y-3"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <h4 className="text-sm font-black text-blue-950 truncate">
+                              {item.toolName}
+                            </h4>
+                            <div className="text-[11px] text-slate-500 font-mono mt-0.5" dir="ltr">
                               {item.brand} {item.modelNumber ? `• ${item.modelNumber}` : ''}
                             </div>
-                          </td>
-                          <td className="p-3 font-mono font-bold text-blue-800" dir="ltr">
-                            {item.qrCode}
-                          </td>
-                          <td className="p-3 font-bold text-slate-900">{item.workerName}</td>
-                          <td className="p-3 font-mono text-slate-600" dir="ltr">
-                            {item.workerPhone ? (
-                              <a
-                                href={`tel:${item.workerPhone}`}
-                                className="text-blue-600 hover:underline flex items-center gap-1"
-                              >
-                                <Phone className="w-3 h-3 text-blue-500" />
-                                <span>{item.workerPhone}</span>
-                              </a>
-                            ) : (
-                              '—'
-                            )}
-                          </td>
-                          <td className="p-3 text-slate-700">{item.warehouseName}</td>
-                          <td className="p-3 text-slate-600">
-                            <div className="flex items-center gap-1 text-[11px]">
-                              <Calendar className="w-3 h-3 text-slate-400" />
-                              <span>
-                                {new Date(item.expectedReturnDate).toLocaleDateString('he-IL')}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="p-3">
-                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-black bg-rose-50 text-rose-700 border border-rose-200">
-                              +{item.daysOverdue} ימים
+                          </div>
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-black bg-rose-50 text-rose-700 border border-rose-200 shrink-0">
+                            +{item.daysOverdue} ימים
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 text-xs bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
+                          <div>
+                            <span className="text-[10px] text-slate-400 font-bold block">עובד אחראי</span>
+                            <span className="font-bold text-slate-900 truncate block">{item.workerName}</span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] text-slate-400 font-bold block">אתר שיוך</span>
+                            <span className="font-bold text-slate-700 truncate block">{item.warehouseName}</span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] text-slate-400 font-bold block">מועד צפוי</span>
+                            <span className="font-medium text-slate-600 flex items-center gap-1 text-[11px]">
+                              <Calendar className="w-3 h-3 text-slate-400 shrink-0" />
+                              <span>{new Date(item.expectedReturnDate).toLocaleDateString('he-IL')}</span>
                             </span>
-                          </td>
-                          <td className="p-3 font-black text-slate-900">
-                            ₪{item.purchaseCost.toLocaleString()}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                          </div>
+                          <div>
+                            <span className="text-[10px] text-slate-400 font-bold block">שווי כלי</span>
+                            <span className="font-black text-slate-900 block">₪{item.purchaseCost.toLocaleString()}</span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between pt-1 border-t border-slate-100">
+                          <span className="font-mono text-xs font-bold text-blue-800 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100" dir="ltr">
+                            {item.qrCode}
+                          </span>
+                          {item.workerPhone && (
+                            <a
+                              href={`tel:${item.workerPhone}`}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-2xs cursor-pointer active:scale-95 transition-all"
+                            >
+                              <Phone className="w-3.5 h-3.5" />
+                              <span>חייג לעובד</span>
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
               )}
             </div>
           </div>
@@ -1401,7 +1465,7 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                     בקרת גישה ושיוך מחסנים למחסנאים
                   </h2>
                 </div>
-                <p className="text-xs text-slate-500">
+                <p className="hidden sm:block text-xs text-slate-500">
                   כל מחסנאי מורשה משויך בלעדית למחסן פעיל. פעולות ניפוק והעברה מוגבלות לכלי המחסן שלו בלבד.
                 </p>
               </div>
@@ -1410,7 +1474,7 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                 <button
                   type="button"
                   onClick={() => setIsAddModalOpen(true)}
-                  className="py-2.5 px-4 rounded-xl bg-purple-700 hover:bg-purple-800 text-white text-xs font-black flex items-center gap-2 shadow-md shadow-purple-600/20 transition-all cursor-pointer active:scale-95"
+                  className="w-full sm:w-auto py-2.5 px-4 rounded-xl bg-purple-700 hover:bg-purple-800 text-white text-xs font-black flex items-center justify-center gap-2 shadow-md shadow-purple-600/20 transition-all cursor-pointer active:scale-95"
                 >
                   <UserPlus className="w-4 h-4" />
                   <span>➕ הוספת מחסנאי חדש</span>
@@ -1642,7 +1706,7 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                     <Users className="w-4 h-4 text-purple-700" />
                     <span>רשימת בעלי תפקידים ומחסנאים ({storekeepers.length})</span>
                   </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
+                  <p className="hidden sm:block text-xs text-slate-500 mt-0.5">
                     בקרת הרשאות היררכית: מנהל כללי, אחראי תפעול ראשי, ומחסנאי שטח מוגבלי מחסן
                   </p>
                 </div>
@@ -1652,7 +1716,8 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                 )}
               </div>
 
-              <div className="overflow-x-auto rounded-xl border border-slate-200">
+              {/* Desktop Table View (>= 768px) */}
+              <div className="hidden md:block overflow-x-auto rounded-xl border border-slate-200">
                 <table className="w-full text-right text-xs">
                   <thead className="bg-purple-50 text-purple-950 font-black border-b border-purple-100">
                     <tr>
@@ -1810,6 +1875,148 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                   </tbody>
                 </table>
               </div>
+
+              {/* Mobile Touch-Friendly Cards View (< 768px) */}
+              <div className="block md:hidden space-y-3">
+                {storekeepers.length === 0 ? (
+                  <div className="p-6 text-center bg-slate-50 rounded-2xl border border-slate-200 text-slate-400 text-xs font-bold">
+                    לא נמצאו משתמשים במערכת
+                  </div>
+                ) : (
+                  storekeepers.map((sk) => {
+                    const isActive = sk.isActive ?? true;
+                    const isGM = sk.role === 'general_manager' || sk.role === 'admin';
+                    const isChief = sk.role === 'chief_operations';
+
+                    return (
+                      <div
+                        key={sk.id}
+                        className={`p-4 rounded-2xl bg-white border-2 transition-all space-y-3 shadow-2xs ${
+                          !isActive ? 'opacity-60 bg-slate-50 border-slate-200' : 'border-purple-100 hover:border-purple-300'
+                        }`}
+                      >
+                        {/* Top: User Full Name + Role Badge */}
+                        <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div className="w-8 h-8 rounded-xl bg-purple-50 text-purple-700 flex items-center justify-center font-bold shrink-0">
+                              <UserCheck className="w-4 h-4 text-purple-600" />
+                            </div>
+                            <div className="min-w-0">
+                              <h4 className="font-black text-sm text-slate-900 leading-tight truncate">
+                                {sk.fullName}
+                              </h4>
+                              <span
+                                className={`inline-flex items-center gap-1 text-[10px] font-bold ${
+                                  isActive ? 'text-emerald-700' : 'text-slate-500'
+                                }`}
+                              >
+                                <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+                                {isActive ? 'פעיל ומורשה' : 'מושבת'}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="shrink-0">
+                            {isGM ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-black bg-purple-100 text-purple-900 border border-purple-200 shadow-2xs">
+                                👑 מנהל כללי
+                              </span>
+                            ) : isChief ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-black bg-indigo-100 text-indigo-900 border border-indigo-200 shadow-2xs">
+                                🌐 תפעול ראשי
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-black bg-blue-100 text-blue-900 border border-blue-200 shadow-2xs">
+                                🔑 מחסנאי
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Middle: Assigned Warehouse + Username */}
+                        <div className="grid grid-cols-2 gap-2 text-xs bg-slate-50 p-2.5 rounded-xl border border-slate-200/80">
+                          <div className="min-w-0">
+                            <span className="text-[10px] font-bold text-slate-500 block mb-0.5">שם משתמש:</span>
+                            <span className="font-mono font-bold text-slate-900 block truncate" dir="ltr">
+                              @{sk.username || '—'}
+                            </span>
+                            {sk.email && (
+                              <span className="text-[10px] text-slate-400 block truncate" dir="ltr">
+                                {sk.email}
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="min-w-0">
+                            <span className="text-[10px] font-bold text-slate-500 block mb-0.5">מתקן משויך:</span>
+                            {isGM || isChief ? (
+                              <span className="text-xs font-bold text-indigo-900 truncate block">
+                                🌐 כלל המחסנים
+                              </span>
+                            ) : (
+                              <select
+                                value={sk.assignedWarehouseId || ''}
+                                onChange={(e) => handleWarehouseReassign(sk.id, e.target.value)}
+                                className="w-full bg-white border border-slate-300 text-slate-900 text-[11px] font-bold rounded-lg px-2 py-1 focus:border-purple-600 focus:outline-none cursor-pointer truncate"
+                              >
+                                {availableFacilities.map((fac) => (
+                                  <option key={fac.warehouseId} value={fac.warehouseId}>
+                                    {fac.warehouseName}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Bottom: Action buttons (Edit/Delete) */}
+                        {!isGM && (
+                          <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-100">
+                            {isChief ? (
+                              <button
+                                type="button"
+                                onClick={() => handleRoleChange(sk.id, 'storekeeper')}
+                                className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-indigo-50 text-indigo-800 border border-indigo-200 hover:bg-indigo-100 transition-all cursor-pointer"
+                              >
+                                הגדר כמחסנאי
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleRoleChange(sk.id, 'chief_operations')}
+                                className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-blue-50 text-blue-800 border border-blue-200 hover:bg-blue-100 transition-all cursor-pointer"
+                              >
+                                קדם לתפעול
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={() => handleToggleActive(sk.id, sk.isActive)}
+                              className={`px-2.5 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                                isActive
+                                  ? 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-200'
+                                  : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
+                              }`}
+                            >
+                              {isActive ? 'השבת' : 'הפעל'}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteStorekeeper(sk)}
+                              className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 transition-all cursor-pointer flex items-center gap-1 active:scale-95"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>מחיקה</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -1830,7 +2037,7 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                     ניהול אתרים, מפעלים ומחסנים
                   </h2>
                 </div>
-                <p className="text-xs text-slate-500 mt-1">
+                <p className="hidden sm:block text-xs text-slate-500 mt-1">
                   הגדרה וסנכרון של מחסנים מרכזיים, מכולות שטח באתרי בנייה ורכבי שירות ניידים
                 </p>
               </div>
@@ -2118,7 +2325,8 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                   <Building2 className="w-4 h-4 text-purple-700" />
                   <span>מאזן שווי וכלים בחלוקה לפי מחסנים ואתרים</span>
                 </h4>
-                <div className="overflow-x-auto rounded-xl border border-slate-200">
+                {/* Desktop Table (>= 768px) */}
+                <div className="hidden md:block overflow-x-auto rounded-xl border border-slate-200">
                   <table className="w-full text-right text-xs">
                     <thead className="bg-slate-100 text-slate-700 font-black border-b border-slate-200">
                       <tr>
@@ -2147,6 +2355,45 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                       ))}
                     </tbody>
                   </table>
+                </div>
+
+                {/* Mobile Cards View (< 768px) */}
+                <div className="block md:hidden space-y-2.5">
+                  {data.facilityDistribution.map((fac) => (
+                    <div
+                      key={fac.warehouseId}
+                      className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-2.5"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-sm text-slate-900">{fac.warehouseName}</span>
+                        <span className="font-mono text-xs font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-lg border border-purple-200" dir="ltr">
+                          {fac.warehouseCode}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-4 gap-1.5 text-center">
+                        <div className="bg-white p-2 rounded-lg border border-slate-100">
+                          <span className="text-[10px] text-slate-400 font-bold block">סה&quot;כ</span>
+                          <span className="text-xs font-black text-slate-900">{fac.totalAssets}</span>
+                        </div>
+                        <div className="bg-white p-2 rounded-lg border border-slate-100">
+                          <span className="text-[10px] text-emerald-600 font-bold block">זמינים</span>
+                          <span className="text-xs font-black text-emerald-700">{fac.available}</span>
+                        </div>
+                        <div className="bg-white p-2 rounded-lg border border-slate-100">
+                          <span className="text-[10px] text-blue-600 font-bold block">בשטח</span>
+                          <span className="text-xs font-black text-blue-900">{fac.checkedOut}</span>
+                        </div>
+                        <div className="bg-white p-2 rounded-lg border border-slate-100">
+                          <span className="text-[10px] text-rose-600 font-bold block">בתיקון</span>
+                          <span className="text-xs font-black text-rose-700">{fac.maintenance}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-200/60">
+                        <span className="text-slate-500 font-bold">ניצולת מלאי</span>
+                        <span className="font-black text-purple-950 font-mono">{fac.utilizationRate}%</span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
 

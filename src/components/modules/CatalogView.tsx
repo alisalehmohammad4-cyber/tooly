@@ -2,6 +2,8 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
+  SlidersHorizontal,
+  X,
   Flame,
   Anchor,
   Scissors,
@@ -91,6 +93,7 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
 
   // 3 Instant status toggle pills
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState<boolean>(false);
 
   // Modal inspection & custody state
   const [selectedAsset, setSelectedAsset] = useState<ScannedAssetDetails | null>(null);
@@ -252,7 +255,53 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
       }
     >
       <div className="max-w-lg mx-auto px-4 py-4 space-y-4">
-        {/* 1. Warehouse Filter Bar */}
+        {/* MOBILE-FIRST COMPACT FILTER BAR (< 768px) */}
+        <div className="md:hidden flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+            <input
+              type="text"
+              value={rawSearchQuery}
+              onChange={(e) => setRawSearchQuery(e.target.value)}
+              placeholder="חיפוש כלי, מותג, דגם, מק״ט..."
+              className="w-full min-h-[46px] bg-white text-blue-950 font-medium text-xs pr-10 pl-10 py-2 rounded-xl border-2 border-blue-100 focus:border-blue-600 focus:outline-none shadow-xs placeholder:text-slate-400"
+            />
+            {rawSearchQuery && (
+              <button
+                type="button"
+                onClick={() => {
+                  setRawSearchQuery('');
+                  setDebouncedSearchQuery('');
+                }}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400 hover:text-blue-600 p-1"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setIsMobileFiltersOpen(true)}
+            className={`min-h-[46px] px-3.5 rounded-xl border-2 font-black text-xs flex items-center gap-1.5 shrink-0 transition-all cursor-pointer shadow-xs ${
+              (selectedWarehouseId !== 'all' || statusFilter !== 'all')
+                ? 'bg-blue-600 border-blue-600 text-white'
+                : 'bg-white border-blue-200 text-blue-950 hover:bg-blue-50'
+            }`}
+          >
+            <SlidersHorizontal className="w-4 h-4" />
+            <span>⚙️ מסננים</span>
+            {(selectedWarehouseId !== 'all' || statusFilter !== 'all') && (
+              <span className="w-5 h-5 rounded-full bg-amber-400 text-amber-950 font-black text-[10px] flex items-center justify-center">
+                {(selectedWarehouseId !== 'all' ? 1 : 0) + (statusFilter !== 'all' ? 1 : 0)}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {/* DESKTOP FILTER BAR (>= 768px) */}
+        <div className="hidden md:block space-y-4">
+          {/* 1. Warehouse Filter Bar */}
         <div>
           <div className="relative">
             <Building2 className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-600 pointer-events-none" />
@@ -362,6 +411,120 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
             </button>
           </div>
         </div>
+
+        {/* MOBILE FILTER BOTTOM SHEET DRAWER */}
+        {isMobileFiltersOpen && (
+          <div
+            onClick={() => setIsMobileFiltersOpen(false)}
+            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex flex-col justify-end md:hidden animate-in fade-in duration-200"
+          >
+            <div
+              className="bg-white rounded-t-3xl max-h-[85vh] overflow-y-auto p-5 space-y-4 shadow-2xl animate-in slide-in-from-bottom duration-200"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Drawer Handle */}
+              <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto" />
+
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
+                  <SlidersHorizontal className="w-5 h-5 text-blue-600" />
+                  <span>מסנני קטלוג ומלאי</span>
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setIsMobileFiltersOpen(false)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-600"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Warehouse Selector */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-black text-slate-700 block">מחסן / אתר:</label>
+                <div className="relative">
+                  <Building2 className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-600 pointer-events-none" />
+                  <select
+                    value={selectedWarehouseId}
+                    onChange={(e) => setSelectedWarehouseId(e.target.value)}
+                    className="w-full min-h-[46px] bg-slate-50 text-blue-950 font-bold text-xs pr-10 pl-8 py-2.5 rounded-xl border border-slate-200 focus:border-blue-600 focus:outline-none appearance-none"
+                  >
+                    <option value="all">כל המחסנים והאתרים הפעילים</option>
+                    {initialData.warehouses.map((wh) => (
+                      <option key={wh.id} value={wh.id}>
+                        {wh.code ? `[${wh.code}] ` : ''}
+                        {wh.name}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-xs">▼</div>
+                </div>
+              </div>
+
+              {/* Status Filter */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-black text-slate-700 block">סטטוס כלי:</label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setStatusFilter('all')}
+                    className={`py-2.5 px-2 rounded-xl text-xs font-bold text-center border transition-all ${
+                      statusFilter === 'all'
+                        ? 'bg-blue-600 text-white border-blue-600 font-black'
+                        : 'bg-slate-50 text-slate-700 border-slate-200'
+                    }`}
+                  >
+                    הכל ({totalWarehouseToolsCount})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStatusFilter('available')}
+                    className={`py-2.5 px-2 rounded-xl text-xs font-bold text-center border transition-all ${
+                      statusFilter === 'available'
+                        ? 'bg-emerald-600 text-white border-emerald-600 font-black'
+                        : 'bg-emerald-50/70 text-emerald-800 border-emerald-200'
+                    }`}
+                  >
+                    זמין ({availableWarehouseToolsCount})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStatusFilter('checked_out')}
+                    className={`py-2.5 px-2 rounded-xl text-xs font-bold text-center border transition-all ${
+                      statusFilter === 'checked_out'
+                        ? 'bg-amber-600 text-white border-amber-600 font-black'
+                        : 'bg-amber-50/70 text-amber-900 border-amber-200'
+                    }`}
+                  >
+                    בשטח ({inUseWarehouseToolsCount})
+                  </button>
+                </div>
+              </div>
+
+              {/* Action / Apply Button */}
+              <div className="pt-2 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedWarehouseId('all');
+                    setStatusFilter('all');
+                  }}
+                  className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-700 font-bold text-xs hover:bg-slate-50 cursor-pointer"
+                >
+                  איפוס
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsMobileFiltersOpen(false)}
+                  className="flex-2 py-3 rounded-xl bg-blue-600 text-white font-black text-xs hover:bg-blue-700 shadow-md shadow-blue-600/20 cursor-pointer"
+                >
+                  החל מסננים ({statusFilteredAssets.length} כלים)
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
 
         {/* Zero State for Production Reset */}
         {totalWarehouseToolsCount === 0 && (

@@ -563,11 +563,11 @@ export default function ToolPassportModal({
         </div>
 
         {/* TABS HEADER */}
-        <div className="flex border-b border-slate-200 bg-white px-4 shrink-0">
+        <div className="flex overflow-x-auto no-scrollbar py-1 gap-2 border-b border-slate-200 bg-white px-4 shrink-0">
           <button
             type="button"
             onClick={() => setActiveTab('timeline')}
-            className={`py-3 px-4 text-xs font-black border-b-2 flex items-center gap-2 cursor-pointer transition-colors ${
+            className={`shrink-0 whitespace-nowrap py-3 px-4 text-xs font-black border-b-2 flex items-center gap-2 cursor-pointer transition-colors ${
               activeTab === 'timeline'
                 ? 'border-indigo-600 text-indigo-900'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -585,7 +585,7 @@ export default function ToolPassportModal({
           <button
             type="button"
             onClick={() => setActiveTab('management')}
-            className={`py-3 px-4 text-xs font-black border-b-2 flex items-center gap-2 cursor-pointer transition-colors ${
+            className={`shrink-0 whitespace-nowrap py-3 px-4 text-xs font-black border-b-2 flex items-center gap-2 cursor-pointer transition-colors ${
               activeTab === 'management'
                 ? 'border-indigo-600 text-indigo-900'
                 : 'border-transparent text-slate-500 hover:text-slate-800'

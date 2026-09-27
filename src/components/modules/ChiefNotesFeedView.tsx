@@ -52,6 +52,13 @@ export default function ChiefNotesFeedView({
   const [selectedType, setSelectedType] = useState<NoteTypeFilter>('ALL');
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>('all');
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const PAGE_SIZE = 10;
+
+  // Reset page when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedType, selectedWarehouseId]);
 
   const loadFeed = useCallback(
     async (silent = false) => {
@@ -95,6 +102,12 @@ export default function ChiefNotesFeedView({
         n.warehouseName.toLowerCase().includes(q)
     );
   }, [notes, searchQuery]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredNotes.length / PAGE_SIZE));
+  const paginatedNotes = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return filteredNotes.slice(start, start + PAGE_SIZE);
+  }, [filteredNotes, currentPage]);
 
   // Export to CSV
   const handleExportCsv = () => {
@@ -278,6 +291,30 @@ export default function ChiefNotesFeedView({
             )}
           </div>
 
+          {/* Quick Note Keyword Chips */}
+          <div className="md:col-span-3 flex flex-wrap items-center gap-1.5 pt-0.5">
+            <span className="text-[11px] font-bold text-slate-500 flex items-center gap-1">
+              <Sparkles className="w-3 h-3 text-indigo-500" />
+              <span>מילות מפתח נפוצות:</span>
+            </span>
+            {['כבל', 'סוללה', 'תקלה', 'דיסק'].map((kw) => (
+              <button
+                key={kw}
+                type="button"
+                onClick={() => {
+                  setSearchQuery((prev) => (prev === kw ? '' : kw));
+                }}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer border ${
+                  searchQuery === kw
+                    ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
+                    : 'bg-indigo-50 text-indigo-800 border-indigo-200/80 hover:bg-indigo-100'
+                }`}
+              >
+                #{kw}
+              </button>
+            ))}
+          </div>
+
           {/* Warehouse Dropdown */}
           <div className="relative">
             <select
@@ -385,12 +422,16 @@ export default function ChiefNotesFeedView({
       ) : (
         <div className="space-y-3">
           <div className="text-[11px] font-bold text-slate-500 flex items-center justify-between px-1">
-            <span>מציג {filteredNotes.length} הערות מתועדות</span>
-            <span>מסודר לפי האירוע האחרון</span>
+            <span>
+              מציג {Math.min(filteredNotes.length, (currentPage - 1) * PAGE_SIZE + 1)}-
+              {Math.min(filteredNotes.length, currentPage * PAGE_SIZE)} מתוך {filteredNotes.length} הערות
+            </span>
+            <span>עמוד {currentPage} מתוך {totalPages}</span>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-            {filteredNotes.map((item) => {
+          <div className="max-h-[500px] overflow-y-auto pr-1">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+              {paginatedNotes.map((item) => {
               const style = getTypeStyle(item.action);
 
               return (
@@ -501,6 +542,35 @@ export default function ChiefNotesFeedView({
             })}
           </div>
         </div>
+
+        {/* Pagination Controls */}
+        {totalPages > 1 && (
+          <div className="pt-3 border-t border-slate-200 flex items-center justify-between">
+            <div className="text-xs text-slate-500 font-bold">
+              עמוד <span className="text-indigo-950 font-black font-mono">{currentPage}</span> מתוך{' '}
+              <span className="text-indigo-950 font-black font-mono">{totalPages}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={currentPage <= 1}
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                className="px-3 py-1.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 text-xs font-bold text-slate-800 transition-all cursor-pointer disabled:cursor-not-allowed"
+              >
+                הקודם
+              </button>
+              <button
+                type="button"
+                disabled={currentPage >= totalPages}
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                className="px-3 py-1.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 text-xs font-bold text-slate-800 transition-all cursor-pointer disabled:cursor-not-allowed"
+              >
+                הבא
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
       )}
     </div>
   );

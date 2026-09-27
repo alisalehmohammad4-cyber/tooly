@@ -586,12 +586,12 @@ export default function ManualCheckinModal({
             /* SELECTION STEP: TABS (Camera Scanner vs Manual Omnisearch) */
             <div className="space-y-4">
               {/* TOP TAB TOGGLE */}
-              <div className="flex items-center gap-2 p-1 bg-slate-100 rounded-2xl border border-slate-200">
+              <div className="flex overflow-x-auto no-scrollbar py-1 gap-2 border-b border-slate-200 sm:border sm:border-slate-200 sm:p-1 sm:bg-slate-100 sm:rounded-2xl">
                 {/* Tab 1: Scanner */}
                 <button
                   type="button"
                   onClick={() => setActiveTab('scanner')}
-                  className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                  className={`shrink-0 whitespace-nowrap flex-1 py-2.5 px-4 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer ${
                     activeTab === 'scanner'
                       ? 'bg-white text-blue-950 shadow-sm border border-slate-200'
                       : 'text-slate-600 hover:text-blue-900'
@@ -605,7 +605,7 @@ export default function ManualCheckinModal({
                 <button
                   type="button"
                   onClick={() => setActiveTab('manual')}
-                  className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                  className={`shrink-0 whitespace-nowrap flex-1 py-2.5 px-4 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer ${
                     activeTab === 'manual'
                       ? 'bg-white text-blue-950 shadow-sm border border-slate-200'
                       : 'text-slate-600 hover:text-blue-900'

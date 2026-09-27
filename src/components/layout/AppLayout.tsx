@@ -9,6 +9,7 @@ import {
   History as HistoryIcon,
   Printer,
   Warehouse as WarehouseIcon,
+  Building2,
   LayoutDashboard,
   Lock,
   LogOut,
@@ -30,6 +31,7 @@ interface RoleHeaderProps {
   subtitle?: string;
   cartCount?: number;
   onOpenCart?: () => void;
+  warehouseSelector?: React.ReactNode;
   children?: React.ReactNode;
 }
 
@@ -38,217 +40,205 @@ export function RoleHeader({
   subtitle,
   cartCount = 0,
   onOpenCart,
+  warehouseSelector,
   children,
 }: RoleHeaderProps) {
   const { role, user, openPinModal, switchToWorker } = useAuth();
   const { t } = useLanguage();
 
-  // 1. Worker Header: Discrete and minimalist
-  if (role === 'worker') {
-    return (
-      <header className="print:hidden sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-blue-100 px-4 py-3 shadow-sm shadow-blue-950/5">
-        <div className="max-w-xl mx-auto flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white font-black text-xl shadow-md shadow-blue-500/25 shrink-0">
-              T
-            </div>
-            <div>
-              <div className="text-[10px] uppercase tracking-wider text-blue-600 font-extrabold">
-                {subtitle || t('header.fieldOperations', 'תפעול שטח')}
-              </div>
-              <h1 className="text-base font-black text-blue-950 leading-tight">
-                {title || t('header.appName', 'Tooly')}
-              </h1>
-            </div>
-          </div>
+  // Role visual styling & tokens
+  const isWorker = role === 'worker';
+  const isStorekeeper = role === 'storekeeper' || role === 'supervisor';
+  const isChief = role === 'chief_operations';
+  const isGM = role === 'general_manager' || role === 'admin';
 
-          <div className="flex items-center gap-2">
-            <LanguageSwitcher />
-            <NetworkSyncPill />
-            <button
-              type="button"
-              onClick={() => openPinModal()}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-900 border border-slate-300 hover:border-blue-300 text-xs font-bold shadow-sm transition-all active:scale-95 cursor-pointer"
-              title="התחברות מורשית באמצעות קוד PIN"
-            >
-              <Lock className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-              <span>🔒 {t('header.authorizedLogin', 'התחברות מורשית')}</span>
-            </button>
+  const brandBgClass = isGM
+    ? 'bg-purple-700'
+    : isChief
+    ? 'bg-indigo-600'
+    : 'bg-blue-600';
+
+  const headerBorderClass = isGM
+    ? 'border-purple-100 shadow-purple-950/5'
+    : isChief
+    ? 'border-indigo-100 shadow-indigo-950/5'
+    : 'border-blue-100 shadow-blue-950/5';
+
+  const userPillClasses = isGM
+    ? 'bg-purple-700 hover:bg-purple-800 text-white border border-purple-800'
+    : isChief
+    ? 'bg-indigo-600 hover:bg-indigo-700 text-white border border-indigo-700'
+    : isStorekeeper
+    ? 'bg-blue-600 hover:bg-blue-700 text-white border border-blue-700'
+    : 'bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-900 border border-slate-300 hover:border-blue-300';
+
+  const compactUserPillLabel = isGM
+    ? `👑 ${t('roles.generalManagerShort', 'מנהל')}`
+    : isChief
+    ? `🌐 ${t('roles.chiefOperationsShort', 'תפעול')}`
+    : isStorekeeper
+    ? `🔑 ${user.assignedWarehouseName ? user.assignedWarehouseName.split(' ')[0] : t('roles.storekeeper', 'מחסנאי')}`
+    : `🔒 ${t('header.authorizedLoginShort', 'התחברות')}`;
+
+  const desktopUserPillLabel = isGM
+    ? `👑 ${t('roles.generalManager', 'מנהל כללי')}`
+    : isChief
+    ? `🌐 ${t('roles.chiefOperations', 'אחראי תפעול ראשי')}`
+    : isStorekeeper
+    ? (user.assignedWarehouseName ? `🔑 ${user.assignedWarehouseName}` : `🔑 ${t('roles.storekeeper', 'עמדת מחסנאי')}`)
+    : `🔒 ${t('header.authorizedLogin', 'התחברות מורשית')}`;
+
+  const defaultSubtitle = isGM
+    ? t('header.executiveManagement', 'ניהול ובקרה ניהולית')
+    : isChief
+    ? t('header.crossDepotControl', 'שליטה ובקרה חוצת-מחסנים')
+    : isStorekeeper
+    ? (user.assignedWarehouseName ? `${t('common.facilities', 'משויך')}: ${user.assignedWarehouseName}` : t('header.activeStorekeeper', 'עמדת מחסנאי פעיל'))
+    : t('header.fieldOperations', 'תפעול שטח');
+
+  const defaultTitle = isGM
+    ? `${t('header.appName', 'Tooly')} - ${t('header.plantManager', 'מנהל מפעל ופרויקטים')}`
+    : isChief
+    ? `${t('header.appName', 'Tooly')} - ${t('header.mainOperationsCenter', 'מרכז תפעול ראשי')}`
+    : isStorekeeper
+    ? `${t('header.appName', 'Tooly')} - ${t('roles.storekeeper', 'מחסן שטח')}`
+    : t('header.appName', 'Tooly');
+
+  return (
+    <header className={`print:hidden sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b ${headerBorderClass} shadow-sm`}>
+      {/* 1. Mobile Compact Single-Row Navbar (< 768px, strictly h-14 max) */}
+      <div className="md:hidden flex h-14 items-center justify-between gap-1.5 px-3">
+        {/* Left: Brand Logo + App Name */}
+        <div className="flex items-center gap-2 shrink-0">
+          <div className={`w-8 h-8 rounded-xl ${brandBgClass} flex items-center justify-center text-white font-black text-sm shadow-sm shrink-0`}>
+            T
           </div>
+          <span className="text-base font-black text-blue-950 tracking-tight">Tooly</span>
         </div>
-        {children}
-      </header>
-    );
-  }
 
-  // 2. Storekeeper Header
-  if (role === 'storekeeper' || role === 'supervisor') {
-    return (
-      <header className="print:hidden sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-blue-100 px-4 py-3 shadow-sm shadow-blue-950/5">
-        <div className="max-w-4xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white font-black text-xl shadow-md shadow-blue-500/25 shrink-0">
-              T
+        {/* Center / Right: Slim warehouse indicator dropdown + Compact user pill */}
+        <div className="flex items-center gap-1.5 min-w-0">
+          {/* Slim Warehouse Indicator / Dropdown */}
+          {warehouseSelector ? (
+            <div className="shrink min-w-0 max-w-[125px] sm:max-w-[150px]">
+              {warehouseSelector}
             </div>
-            <div>
-              <div className="text-[10px] uppercase tracking-wider text-blue-600 font-extrabold truncate max-w-[200px]">
-                {subtitle || (user.assignedWarehouseName ? `${t('common.facilities', 'משויך')}: ${user.assignedWarehouseName}` : t('header.activeStorekeeper', 'עמדת מחסנאי פעיל'))}
-              </div>
-              <h1 className="text-base font-black text-blue-950 leading-tight">
-                {title || `${t('header.appName', 'Tooly')} - ${t('roles.storekeeper', 'מחסן שטח')}`}
-              </h1>
+          ) : user.assignedWarehouseName && !isWorker ? (
+            <div
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-xl bg-slate-100 text-slate-700 border border-slate-200 text-[11px] font-bold max-w-[110px] truncate"
+              title={user.assignedWarehouseName}
+            >
+              <Building2 className="w-3 h-3 text-blue-600 shrink-0" />
+              <span className="truncate">{user.assignedWarehouseName}</span>
             </div>
-          </div>
+          ) : null}
 
-          <div className="flex items-center gap-1.5 sm:gap-2">
-            <LanguageSwitcher />
-            <NetworkSyncPill />
+          {/* Compact Active User Pill */}
+          <button
+            type="button"
+            onClick={() => openPinModal()}
+            className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-black shadow-2xs transition-all active:scale-95 cursor-pointer max-w-[110px] truncate shrink-0 ${userPillClasses}`}
+            title={`${user.fullName} - ${t('header.switchUser', 'לחץ להחלפת משתמש')}`}
+          >
+            <span className="truncate">{compactUserPillLabel}</span>
+          </button>
 
-            {cartCount > 0 && onOpenCart && (
-              <button
-                type="button"
-                onClick={onOpenCart}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-black transition-all active:scale-95 shadow-sm cursor-pointer animate-pulse"
-                title="פתיחת סל ניפוק כלים"
-              >
-                <ShoppingCart className="w-3.5 h-3.5" />
-                <span>{t('header.cart', 'סל ניפוק')} ({cartCount})</span>
-              </button>
-            )}
-
+          {/* Cart Button (If items staged) */}
+          {cartCount > 0 && onOpenCart && (
             <button
               type="button"
-              onClick={() => openPinModal()}
-              className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white border border-blue-700 text-xs font-black shadow-sm transition-all active:scale-95 cursor-pointer max-w-[180px] sm:max-w-none truncate"
-              title={`${user.fullName} - ${t('header.switchUser', 'לחץ להחלפת משתמש')}`}
+              onClick={onOpenCart}
+              className="p-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-black transition-all active:scale-95 shadow-2xs cursor-pointer animate-pulse relative shrink-0"
+              title="פתיחת סל ניפוק כלים"
             >
-              <span className="truncate">
-                {user.assignedWarehouseName ? `🔑 ${user.assignedWarehouseName}` : `🔑 ${t('roles.storekeeper', 'עמדת מחסנאי')}`}
+              <ShoppingCart className="w-3.5 h-3.5" />
+              <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-600 text-white rounded-full text-[9px] font-black flex items-center justify-center">
+                {cartCount}
               </span>
             </button>
+          )}
 
+          {/* Station Lock / Exit (Elevated roles) */}
+          {!isWorker && (
             <button
               type="button"
               onClick={switchToWorker}
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-red-50 text-slate-700 hover:text-red-700 border border-slate-300 hover:border-red-200 text-xs font-bold transition-all cursor-pointer active:scale-95 shadow-sm"
-              title={`${t('header.lockOrExit', 'נעילת עמדה / יציאה')} - ${t('header.backToWorkerScanner', 'חזרה למצב עובד שטח')}`}
+              className="p-1.5 rounded-xl bg-slate-100 hover:bg-red-50 text-slate-700 hover:text-red-700 border border-slate-300 hover:border-red-200 text-xs font-bold transition-all cursor-pointer active:scale-95 shadow-2xs shrink-0"
+              title={`${t('header.lockOrExit', 'נעילת עמדה / יציאה')}`}
             >
-              <LogOut className="w-3.5 h-3.5 text-red-600 shrink-0" />
-              <span className="hidden md:inline">{t('header.lockOrExit', 'נעילת עמדה / יציאה')}</span>
-              <span className="md:hidden">{t('header.lock', 'נעילה')}</span>
+              <LogOut className="w-3.5 h-3.5 text-red-600" />
             </button>
-          </div>
+          )}
         </div>
-        {children}
-      </header>
-    );
-  }
+      </div>
 
-  // 3. Chief Operations Header
-  if (role === 'chief_operations') {
-    return (
-      <header className="print:hidden sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-indigo-100 px-4 py-3 shadow-sm shadow-indigo-950/5">
-        <div className="max-w-5xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-black text-xl shadow-md shadow-indigo-600/25 shrink-0">
-              T
-            </div>
-            <div>
-              <div className="text-[10px] uppercase tracking-wider text-indigo-700 font-extrabold">
-                {subtitle || t('header.crossDepotControl', 'שליטה ובקרה חוצת-מחסנים')}
-              </div>
-              <h1 className="text-base font-black text-blue-950 leading-tight">
-                {title || `${t('header.appName', 'Tooly')} - ${t('header.mainOperationsCenter', 'מרכז תפעול ראשי')}`}
-              </h1>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-1.5 sm:gap-2">
-            <LanguageSwitcher />
-            <NetworkSyncPill />
-
-            {cartCount > 0 && onOpenCart && (
-              <button
-                type="button"
-                onClick={onOpenCart}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-black transition-all active:scale-95 shadow-sm cursor-pointer animate-pulse"
-                title="פתיחת סל ניפוק כלים"
-              >
-                <ShoppingCart className="w-3.5 h-3.5" />
-                <span>{t('header.cart', 'סל ניפוק')} ({cartCount})</span>
-              </button>
-            )}
-
-            <button
-              type="button"
-              onClick={() => openPinModal()}
-              className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white border border-indigo-700 text-xs font-black shadow-sm transition-all active:scale-95 cursor-pointer"
-              title={`${user.fullName} - ${t('header.switchUser', 'לחץ להחלפת משתמש')}`}
-            >
-              <span>🌐 {t('roles.chiefOperations', 'אחראי תפעול ראשי')}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={switchToWorker}
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-red-50 text-slate-700 hover:text-red-700 border border-slate-300 hover:border-red-200 text-xs font-bold transition-all cursor-pointer active:scale-95 shadow-sm"
-              title={`${t('header.lockOrExit', 'נעילת עמדה / יציאה')} - ${t('header.backToWorkerScanner', 'חזרה למצב עובד שטח')}`}
-            >
-              <LogOut className="w-3.5 h-3.5 text-red-600 shrink-0" />
-              <span className="hidden md:inline">{t('header.lockOrExit', 'נעילת עמדה / יציאה')}</span>
-              <span className="md:hidden">{t('header.lock', 'נעילה')}</span>
-            </button>
-          </div>
-        </div>
-        {children}
-      </header>
-    );
-  }
-
-  // 4. Executive General Manager Header
-  return (
-    <header className="print:hidden sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-purple-100 px-4 py-3 shadow-sm shadow-purple-950/5">
-      <div className="max-w-5xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
+      {/* 2. Desktop Header (>= 768px, with title & subtitle) */}
+      <div className="hidden md:flex max-w-5xl mx-auto items-center justify-between gap-3 px-4 py-3">
         <div className="flex items-center gap-2.5">
-          <div className="w-10 h-10 rounded-xl bg-purple-700 flex items-center justify-center text-white font-black text-xl shadow-md shadow-purple-600/25 shrink-0">
+          <div className={`w-10 h-10 rounded-xl ${brandBgClass} flex items-center justify-center text-white font-black text-xl shadow-md shrink-0`}>
             T
           </div>
           <div>
-            <div className="text-[10px] uppercase tracking-wider text-purple-700 font-extrabold">
-              {subtitle || t('header.executiveManagement', 'ניהול ובקרה ניהולית')}
+            <div className="text-[10px] uppercase tracking-wider text-blue-600 font-extrabold truncate max-w-[240px]">
+              {subtitle || defaultSubtitle}
             </div>
             <h1 className="text-base font-black text-blue-950 leading-tight">
-              {title || `${t('header.appName', 'Tooly')} - ${t('header.plantManager', 'מנהל מפעל ופרויקטים')}`}
+              {title || defaultTitle}
             </h1>
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5 sm:gap-2">
+        <div className="flex items-center gap-2">
+          {warehouseSelector && (
+            <div className="shrink min-w-0 max-w-[200px]">
+              {warehouseSelector}
+            </div>
+          )}
           <LanguageSwitcher />
           <NetworkSyncPill />
+
+          {cartCount > 0 && onOpenCart && (
+            <button
+              type="button"
+              onClick={onOpenCart}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-black transition-all active:scale-95 shadow-sm cursor-pointer animate-pulse"
+              title="פתיחת סל ניפוק כלים"
+            >
+              <ShoppingCart className="w-3.5 h-3.5" />
+              <span>{t('header.cart', 'סל ניפוק')} ({cartCount})</span>
+            </button>
+          )}
 
           <button
             type="button"
             onClick={() => openPinModal()}
-            className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-purple-700 hover:bg-purple-800 text-white border border-purple-800 text-xs font-black shadow-sm transition-all active:scale-95 cursor-pointer"
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-black shadow-sm transition-all active:scale-95 cursor-pointer max-w-[200px] truncate ${userPillClasses}`}
             title={`${user.fullName} - ${t('header.switchUser', 'לחץ להחלפת משתמש')}`}
           >
-            <span>👑 {t('roles.generalManager', 'מנהל כללי')}</span>
+            <span className="truncate">{desktopUserPillLabel}</span>
           </button>
 
-          <button
-            type="button"
-            onClick={switchToWorker}
-            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-red-50 text-slate-700 hover:text-red-700 border border-slate-300 hover:border-red-200 text-xs font-bold transition-all cursor-pointer active:scale-95 shadow-sm"
-            title={`${t('header.lockOrExit', 'נעילת עמדה / יציאה')} - ${t('header.backToWorkerScanner', 'חזרה למצב עובד שטח')}`}
-          >
-            <LogOut className="w-3.5 h-3.5 text-red-600 shrink-0" />
-            <span className="hidden md:inline">{t('header.lockOrExit', 'נעילת עמדה / יציאה')}</span>
-            <span className="md:hidden">{t('header.lock', 'נעילה')}</span>
-          </button>
+          {!isWorker && (
+            <button
+              type="button"
+              onClick={switchToWorker}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-red-50 text-slate-700 hover:text-red-700 border border-slate-300 hover:border-red-200 text-xs font-bold transition-all cursor-pointer active:scale-95 shadow-sm shrink-0"
+              title={`${t('header.lockOrExit', 'נעילת עמדה / יציאה')} - ${t('header.backToWorkerScanner', 'חזרה למצב עובד שטח')}`}
+            >
+              <LogOut className="w-3.5 h-3.5 text-red-600 shrink-0" />
+              <span className="hidden lg:inline">{t('header.lockOrExit', 'נעילת עמדה / יציאה')}</span>
+              <span className="lg:hidden">{t('header.lock', 'נעילה')}</span>
+            </button>
+          )}
         </div>
       </div>
-      {children}
+
+      {/* Optional Desktop-only extra header content */}
+      {children && (
+        <div className="hidden md:block">
+          {children}
+        </div>
+      )}
     </header>
   );
 }
@@ -383,6 +373,7 @@ interface AppLayoutProps {
   cartCount?: number;
   onOpenCart?: () => void;
   extraHeader?: React.ReactNode;
+  warehouseSelector?: React.ReactNode;
   requiredRole?:
     | 'general_manager'
     | 'chief_operations'
@@ -551,6 +542,7 @@ export default function AppLayout({
   cartCount = 0,
   onOpenCart,
   extraHeader,
+  warehouseSelector,
   requiredRole,
 }: AppLayoutProps) {
   const { role } = useAuth();
@@ -572,7 +564,7 @@ export default function AppLayout({
   if (isUnauthorized) {
     return (
       <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col justify-between" dir={dir}>
-        <RoleHeader title={title} subtitle={subtitle} />
+        <RoleHeader title={title} subtitle={subtitle} warehouseSelector={warehouseSelector} />
 
         <main className="flex-1 max-w-md mx-auto px-4 py-12 sm:py-16 flex flex-col items-center justify-center w-full">
           <AuthGateLoginForm requiredRole={requiredRole} />
@@ -593,6 +585,7 @@ export default function AppLayout({
         subtitle={subtitle}
         cartCount={cartCount}
         onOpenCart={onOpenCart}
+        warehouseSelector={warehouseSelector}
       >
         {extraHeader}
       </RoleHeader>

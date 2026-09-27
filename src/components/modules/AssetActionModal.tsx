@@ -712,18 +712,14 @@ export default function AssetActionModal({
           ) : (
             /* SUPERVISOR & ADMIN VIEW: FULL ACTION TABS */
             <>
-              <div
-                className={`grid ${
-                  role === 'admin' ? 'grid-cols-4' : 'grid-cols-3'
-                } gap-1 p-2 bg-slate-100/80 border-b border-blue-100 text-xs font-black`}
-              >
+              <div className="flex overflow-x-auto no-scrollbar py-1 gap-1.5 p-2 bg-slate-100/80 border-b border-blue-100 text-xs font-black">
                 <button
                   type="button"
                   onClick={() => {
                     setActiveTab('checkout');
                     setActionError(null);
                   }}
-                  className={`min-h-[48px] rounded-xl flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                  className={`shrink-0 whitespace-nowrap min-w-[70px] flex-1 min-h-[46px] px-3 rounded-xl flex items-center justify-center gap-1 transition-all cursor-pointer ${
                     activeTab === 'checkout'
                       ? 'bg-blue-600 text-white shadow-md font-black'
                       : 'text-slate-600 hover:text-blue-700'
@@ -739,7 +735,7 @@ export default function AssetActionModal({
                     setActiveTab('checkin');
                     setActionError(null);
                   }}
-                  className={`min-h-[48px] rounded-xl flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                  className={`shrink-0 whitespace-nowrap min-w-[70px] flex-1 min-h-[46px] px-3 rounded-xl flex items-center justify-center gap-1 transition-all cursor-pointer ${
                     activeTab === 'checkin'
                       ? 'bg-blue-600 text-white shadow-md font-black'
                       : 'text-slate-600 hover:text-blue-700'
@@ -755,7 +751,7 @@ export default function AssetActionModal({
                     setActiveTab('transfer');
                     setActionError(null);
                   }}
-                  className={`min-h-[48px] rounded-xl flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                  className={`shrink-0 whitespace-nowrap min-w-[70px] flex-1 min-h-[46px] px-3 rounded-xl flex items-center justify-center gap-1 transition-all cursor-pointer ${
                     activeTab === 'transfer'
                       ? 'bg-blue-600 text-white shadow-md font-black'
                       : 'text-slate-600 hover:text-blue-700'
@@ -772,7 +768,7 @@ export default function AssetActionModal({
                       setActiveTab('retire');
                       setActionError(null);
                     }}
-                    className={`min-h-[48px] rounded-xl flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                    className={`shrink-0 whitespace-nowrap min-w-[70px] flex-1 min-h-[46px] px-3 rounded-xl flex items-center justify-center gap-1 transition-all cursor-pointer ${
                       activeTab === 'retire'
                         ? 'bg-red-600 text-white shadow-md font-black'
                         : 'text-red-700 hover:bg-red-50'

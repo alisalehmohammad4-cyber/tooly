@@ -463,11 +463,11 @@ export default function PrintTagsView() {
         </div>
 
         {/* Mode Selector Tabs */}
-        <div className="flex items-center gap-2 p-1.5 bg-slate-100/80 rounded-2xl border border-slate-200">
+        <div className="flex overflow-x-auto no-scrollbar py-1 gap-2 border-b border-slate-200 sm:border sm:border-slate-200 sm:bg-slate-100/80 sm:p-1.5 sm:rounded-2xl">
           <button
             type="button"
             onClick={() => setActiveTab('batch')}
-            className={`flex-1 min-h-[46px] rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer ${
+            className={`shrink-0 whitespace-nowrap flex-1 min-h-[46px] px-4 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer ${
               activeTab === 'batch'
                 ? 'bg-white text-blue-950 shadow-md shadow-slate-300/40 border border-slate-200'
                 : 'text-slate-600 hover:text-blue-900 hover:bg-white/60'
@@ -480,7 +480,7 @@ export default function PrintTagsView() {
           <button
             type="button"
             onClick={() => setActiveTab('reprint')}
-            className={`flex-1 min-h-[46px] rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer ${
+            className={`shrink-0 whitespace-nowrap flex-1 min-h-[46px] px-4 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer ${
               activeTab === 'reprint'
                 ? 'bg-white text-blue-950 shadow-md shadow-slate-300/40 border border-slate-200'
                 : 'text-slate-600 hover:text-blue-900 hover:bg-white/60'

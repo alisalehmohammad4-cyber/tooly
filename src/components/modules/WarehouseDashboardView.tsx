@@ -138,6 +138,8 @@ export default function WarehouseDashboardView({
     return initialData.warehouse.id;
   });
   const [isLoadingWarehouse, setIsLoadingWarehouse] = useState<boolean>(false);
+  // 4-Tab Navigation Architecture State
+  const [activeTab, setActiveTab] = useState<'operations' | 'transfers' | 'maintenance' | 'notes'>('operations');
   const [passportAsset, setPassportAsset] = useState<ScannedAssetDetails | null>(null);
   const [isPassportOpen, setIsPassportOpen] = useState<boolean>(false);
   const [passportLookupInput, setPassportLookupInput] = useState<string>('');
@@ -403,10 +405,10 @@ export default function WarehouseDashboardView({
 
   // Sync data on load and role/warehouse change
   React.useEffect(() => {
+    void loadInTransitFleet();
+    void loadMaintenanceAssets();
     if (isChiefOperations || isGeneralManager) {
       void loadChiefInbox();
-      void loadInTransitFleet();
-      void loadMaintenanceAssets();
     }
     void loadSiteStorekeeperData(selectedWarehouseId);
   }, [
@@ -1224,10 +1226,112 @@ export default function WarehouseDashboardView({
           : 'תפעול מלאי והחזרות'
       }
       requiredRole="any_elevated"
+      warehouseSelector={
+        warehouses && warehouses.length > 0 ? (
+          <div className="relative">
+            <select
+              value={selectedWarehouseId}
+              onChange={(e) => handleWarehouseChange(e.target.value)}
+              disabled={isLoadingWarehouse || (isStorekeeper && !!assignedWarehouseId)}
+              className="w-full h-8 text-[11px] font-black px-2 pr-5 rounded-lg border border-blue-200 bg-blue-50/80 text-blue-950 focus:border-blue-600 focus:outline-none appearance-none truncate cursor-pointer shadow-2xs"
+            >
+              <option value="all">כלל המחסנים</option>
+              {warehouses.map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.name}
+                </option>
+              ))}
+            </select>
+            <div className="absolute left-1.5 top-1/2 -translate-y-1/2 pointer-events-none text-blue-600 text-[9px]">
+              ▼
+            </div>
+          </div>
+        ) : undefined
+      }
     >
-      <div className="max-w-5xl mx-auto px-4 py-5 space-y-6">
+      <div className="max-w-5xl mx-auto px-3 sm:px-4 py-3 sm:py-5 space-y-4 sm:space-y-6">
+        {/* MOBILE PINNED PRIMARY STOREKEEPER ACTION BAR (< 768px, 2x2 touch targets min-h-[56px] at very top of content area) */}
+        <div className="md:hidden grid grid-cols-2 gap-2.5">
+          <button
+            type="button"
+            onClick={() => {
+              setCheckoutFeedback(null);
+              setCheckoutAsset(null);
+              setCheckoutAssetInput('');
+              setCheckoutWorkerName('');
+              setCheckoutWorkerPhone('');
+              setCheckoutReturnDate('');
+              setCheckoutNotes('');
+              setIsCheckoutModalOpen(true);
+            }}
+            className="min-h-[56px] p-3 rounded-2xl bg-gradient-to-br from-blue-600 to-blue-700 hover:from-blue-700 text-white font-black text-xs flex flex-col items-center justify-center text-center gap-1.5 shadow-md shadow-blue-600/25 active:scale-95 transition-all cursor-pointer"
+          >
+            <Zap className="w-5 h-5 stroke-[2.5]" />
+            <span>הנפקה לעובד</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setCheckinPreselectedAssetId(null);
+              setIsCheckinModalOpen(true);
+            }}
+            className="min-h-[56px] p-3 rounded-2xl bg-white hover:bg-blue-50 text-blue-950 border-2 border-blue-200 font-black text-xs flex flex-col items-center justify-center text-center gap-1.5 shadow-sm active:scale-95 transition-all cursor-pointer"
+          >
+            <Scan className="w-5 h-5 text-blue-600" />
+            <span>קליטת ציוד</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setDirectTransferFeedback(null);
+              setSelectedDirectAsset(null);
+              setTransporterNotes('');
+              setDirectSearchQuery('');
+              const otherWh = warehouses.find((w) => w.id !== 'all' && w.id !== selectedWarehouseId);
+              setDirectTargetWarehouseId(otherWh ? otherWh.id : '');
+              setIsDirectTransferModalOpen(true);
+            }}
+            className="min-h-[56px] p-3 rounded-2xl bg-white hover:bg-sky-50 text-sky-950 border-2 border-sky-200 font-black text-xs flex flex-col items-center justify-center text-center gap-1.5 shadow-sm active:scale-95 transition-all cursor-pointer"
+          >
+            <Truck className="w-5 h-5 text-sky-600" />
+            <span>העברה</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsQuickOcrOpen(true)}
+            className="min-h-[56px] p-3 rounded-2xl bg-gradient-to-br from-emerald-600 to-teal-700 hover:from-emerald-700 text-white font-black text-xs flex flex-col items-center justify-center text-center gap-1.5 shadow-md shadow-emerald-600/25 active:scale-95 transition-all cursor-pointer"
+          >
+            <Sparkles className="w-5 h-5 text-amber-300 stroke-[2.5]" />
+            <span>סריקה</span>
+          </button>
+        </div>
+
         {/* 2. FACILITY SELECTOR & WAREHOUSE STATUS BAR */}
-        <div className="p-4 rounded-2xl bg-white border-2 border-blue-100 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        {/* Mobile Quick Stats Scroll Bar (< 768px) */}
+        <div className="md:hidden flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+          <div className="shrink-0 px-2.5 py-1 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 flex items-center gap-1 text-[11px] font-bold shadow-2xs">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+            <span>{data.availableCount} זמינים</span>
+          </div>
+          <div className="shrink-0 px-2.5 py-1 rounded-xl bg-blue-50 text-blue-800 border border-blue-200 flex items-center gap-1 text-[11px] font-bold shadow-2xs">
+            <Clock className="w-3.5 h-3.5 text-blue-600" />
+            <span>{data.checkedOutCount} בשטח</span>
+          </div>
+          <div className="shrink-0 px-2.5 py-1 rounded-xl bg-rose-50 text-rose-800 border border-rose-200 flex items-center gap-1 text-[11px] font-bold shadow-2xs">
+            <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
+            <span>{maintenanceAssets.length || data.quarantinedCount} בטיפול</span>
+          </div>
+          <div className="shrink-0 px-2.5 py-1 rounded-xl bg-sky-50 text-sky-800 border border-sky-200 flex items-center gap-1 text-[11px] font-bold shadow-2xs">
+            <Truck className="w-3.5 h-3.5 text-sky-600" />
+            <span>{inTransitFleet.length} בשינוע</span>
+          </div>
+        </div>
+
+        {/* Desktop Facility Selector & Warehouse Status Bar (>= 768px) */}
+        <div className="hidden md:flex p-4 rounded-2xl bg-white border-2 border-blue-100 shadow-sm flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shadow-md shrink-0 ${
               isChiefOperations
@@ -1284,28 +1388,120 @@ export default function WarehouseDashboardView({
 
           {/* Quick Stats Pills */}
           <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
-            <div className="px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 flex items-center gap-1.5">
+            <div className="px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 flex items-center gap-1.5 shadow-2xs">
               <CheckCircle2 className="w-4 h-4 text-emerald-600" />
               <span>{data.availableCount} זמינים במלאי</span>
             </div>
-            <div className="px-3 py-1.5 rounded-xl bg-blue-50 text-blue-800 border border-blue-200 flex items-center gap-1.5">
+            <div className="px-3 py-1.5 rounded-xl bg-blue-50 text-blue-800 border border-blue-200 flex items-center gap-1.5 shadow-2xs">
               <Clock className="w-4 h-4 text-blue-600" />
               <span>{data.checkedOutCount} בשימוש בשטח</span>
             </div>
-            {data.quarantinedCount > 0 && (
-              <div className="px-3 py-1.5 rounded-xl bg-rose-50 text-rose-800 border border-rose-200 flex items-center gap-1.5">
-                <AlertTriangle className="w-4 h-4 text-rose-600" />
-                <span>{data.quarantinedCount} מושבת / בתיקון</span>
-              </div>
-            )}
+            <div className="px-3 py-1.5 rounded-xl bg-rose-50 text-rose-800 border border-rose-200 flex items-center gap-1.5 shadow-2xs">
+              <AlertTriangle className="w-4 h-4 text-rose-600" />
+              <span>{maintenanceAssets.length || data.quarantinedCount} בטיפול ואחזקה</span>
+            </div>
+            <div className="px-3 py-1.5 rounded-xl bg-sky-50 text-sky-800 border border-sky-200 flex items-center gap-1.5 shadow-2xs">
+              <Truck className="w-4 h-4 text-sky-600" />
+              <span>{inTransitFleet.length} בשינוע ומעבר</span>
+            </div>
             {isLoadingWarehouse && (
               <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
             )}
           </div>
         </div>
 
-        {/* 1. PRIMARY ACTION CONTROLS & SHORTCUTS (AT VERY TOP FOR INSTANT ACCESS WITHOUT SCROLLING) */}
-        <div className="grid grid-cols-2 sm:grid-cols-6 gap-2.5">
+        {/* 3. FOUR-TAB NAVIGATION ARCHITECTURE */}
+        <div className="flex overflow-x-auto no-scrollbar py-1 gap-2 border-b border-slate-200 sm:border sm:border-slate-200/90 sm:grid sm:grid-cols-4 sm:p-1.5 sm:bg-slate-100 sm:rounded-2xl shadow-2xs">
+          {/* Tab 1: Daily Operations */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('operations')}
+            className={`shrink-0 whitespace-nowrap sm:whitespace-normal flex items-center justify-center gap-2 py-3 px-3.5 rounded-xl text-xs sm:text-sm font-black transition-all cursor-pointer ${
+              activeTab === 'operations'
+                ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25 ring-2 ring-blue-600/20'
+                : 'bg-white/70 hover:bg-white text-slate-700 hover:text-blue-900 border border-transparent hover:border-slate-200'
+            }`}
+          >
+            <Zap className={`w-4 h-4 shrink-0 ${activeTab === 'operations' ? 'text-amber-300' : 'text-blue-600'}`} />
+            <span>⚡ תפעול וניפוק</span>
+            {data.overdueAssets.length > 0 && (
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black ${
+                activeTab === 'operations'
+                  ? 'bg-amber-400 text-amber-950'
+                  : 'bg-amber-100 text-amber-900 border border-amber-300'
+              }`}>
+                {data.overdueAssets.length} באיחור
+              </span>
+            )}
+          </button>
+
+          {/* Tab 2: Transfers & Requisitions */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('transfers')}
+            className={`shrink-0 whitespace-nowrap sm:whitespace-normal flex items-center justify-center gap-2 py-3 px-3.5 rounded-xl text-xs sm:text-sm font-black transition-all cursor-pointer ${
+              activeTab === 'transfers'
+                ? 'bg-sky-600 text-white shadow-md shadow-sky-600/25 ring-2 ring-sky-600/20'
+                : 'bg-white/70 hover:bg-white text-slate-700 hover:text-sky-900 border border-transparent hover:border-slate-200'
+            }`}
+          >
+            <Truck className={`w-4 h-4 shrink-0 ${activeTab === 'transfers' ? 'text-white' : 'text-sky-600'}`} />
+            <span>🚚 שינוע ובקשות שטח</span>
+            {(inTransitFleet.length + pendingTransfers.length) > 0 && (
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black ${
+                activeTab === 'transfers'
+                  ? 'bg-sky-900/80 text-sky-100 border border-sky-400/40'
+                  : 'bg-sky-100 text-sky-900 border border-sky-200'
+              }`}>
+                {inTransitFleet.length + pendingTransfers.length}
+              </span>
+            )}
+          </button>
+
+          {/* Tab 3: Maintenance Hub */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('maintenance')}
+            className={`shrink-0 whitespace-nowrap sm:whitespace-normal flex items-center justify-center gap-2 py-3 px-3.5 rounded-xl text-xs sm:text-sm font-black transition-all cursor-pointer ${
+              activeTab === 'maintenance'
+                ? 'bg-amber-600 text-white shadow-md shadow-amber-600/25 ring-2 ring-amber-600/20'
+                : 'bg-white/70 hover:bg-white text-slate-700 hover:text-amber-900 border border-transparent hover:border-slate-200'
+            }`}
+          >
+            <Wrench className={`w-4 h-4 shrink-0 ${activeTab === 'maintenance' ? 'text-white' : 'text-amber-600'}`} />
+            <span>🔧 מרכז אחזקה ותיקונים</span>
+            {(maintenanceAssets.length || data.quarantinedCount) > 0 && (
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black ${
+                activeTab === 'maintenance'
+                  ? 'bg-amber-900/80 text-amber-100 border border-amber-400/40'
+                  : 'bg-amber-100 text-amber-900 border border-amber-200'
+              }`}>
+                {maintenanceAssets.length || data.quarantinedCount} כלים
+              </span>
+            )}
+          </button>
+
+          {/* Tab 4: Field Notes & Feed */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('notes')}
+            className={`shrink-0 whitespace-nowrap sm:whitespace-normal flex items-center justify-center gap-2 py-3 px-3.5 rounded-xl text-xs sm:text-sm font-black transition-all cursor-pointer ${
+              activeTab === 'notes'
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25 ring-2 ring-indigo-600/20'
+                : 'bg-white/70 hover:bg-white text-slate-700 hover:text-indigo-900 border border-transparent hover:border-slate-200'
+            }`}
+          >
+            <FileText className={`w-4 h-4 shrink-0 ${activeTab === 'notes' ? 'text-white' : 'text-indigo-600'}`} />
+            <span>📝 מרכז הערות ותיעוד</span>
+          </button>
+        </div>
+        {/* ========================================================================= */}
+        {/* TAB 1: ⚡ תפעול וניפוק (DAILY OPERATIONS)                                 */}
+        {/* ========================================================================= */}
+        {activeTab === 'operations' && (
+          <div className="space-y-5 animate-in fade-in duration-200">
+            {/* 1. PRIMARY ACTION CONTROLS & SHORTCUTS (DESKTOP VIEW) */}
+        <div className="hidden md:grid md:grid-cols-6 gap-2.5">
           <button
             type="button"
             onClick={() => {
@@ -1318,7 +1514,7 @@ export default function WarehouseDashboardView({
               setCheckoutNotes('');
               setIsCheckoutModalOpen(true);
             }}
-            className="p-3.5 rounded-2xl bg-gradient-to-br from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-black text-xs sm:text-sm flex flex-col items-center justify-center text-center gap-2 shadow-md shadow-blue-600/20 active:scale-95 transition-all cursor-pointer"
+            className="min-h-[56px] sm:min-h-[64px] p-3 rounded-2xl bg-gradient-to-br from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-black text-xs sm:text-sm flex flex-col items-center justify-center text-center gap-2 shadow-md shadow-blue-600/20 active:scale-95 transition-all cursor-pointer"
           >
             <Zap className="w-6 h-6 stroke-[2.5]" />
             <span>⚡ ניפוק כלי לעובד</span>
@@ -1330,7 +1526,7 @@ export default function WarehouseDashboardView({
               setCheckinPreselectedAssetId(null);
               setIsCheckinModalOpen(true);
             }}
-            className="p-3.5 rounded-2xl bg-white hover:bg-blue-50 text-blue-900 border-2 border-blue-200 font-black text-xs sm:text-sm flex flex-col items-center justify-center text-center gap-2 shadow-sm active:scale-95 transition-all cursor-pointer"
+            className="min-h-[56px] sm:min-h-[64px] p-3 rounded-2xl bg-white hover:bg-blue-50 text-blue-900 border-2 border-blue-200 font-black text-xs sm:text-sm flex flex-col items-center justify-center text-center gap-2 shadow-sm active:scale-95 transition-all cursor-pointer"
           >
             <Scan className="w-6 h-6 text-blue-600" />
             <span>קליטת ציוד והחזרה</span>
@@ -1347,7 +1543,7 @@ export default function WarehouseDashboardView({
               setDirectTargetWarehouseId(otherWh ? otherWh.id : '');
               setIsDirectTransferModalOpen(true);
             }}
-            className="p-3.5 rounded-2xl bg-white hover:bg-sky-50 text-sky-900 border-2 border-sky-200 font-black text-xs sm:text-sm flex flex-col items-center justify-center text-center gap-2 shadow-sm active:scale-95 transition-all cursor-pointer"
+            className="min-h-[56px] sm:min-h-[64px] p-3 rounded-2xl bg-white hover:bg-sky-50 text-sky-900 border-2 border-sky-200 font-black text-xs sm:text-sm flex flex-col items-center justify-center text-center gap-2 shadow-sm active:scale-95 transition-all cursor-pointer"
           >
             <Truck className="w-6 h-6 text-sky-600" />
             <span>🚚 העברה ישירה לאתר</span>
@@ -1356,7 +1552,7 @@ export default function WarehouseDashboardView({
           <button
             type="button"
             onClick={() => setIsQuickOcrOpen(true)}
-            className="p-3.5 rounded-2xl bg-gradient-to-br from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white font-black text-xs sm:text-sm flex flex-col items-center justify-center text-center gap-2 shadow-md shadow-emerald-600/20 active:scale-95 transition-all cursor-pointer"
+            className="min-h-[56px] sm:min-h-[64px] p-3 rounded-2xl bg-gradient-to-br from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white font-black text-xs sm:text-sm flex flex-col items-center justify-center text-center gap-2 shadow-md shadow-emerald-600/20 active:scale-95 transition-all cursor-pointer"
           >
             <Sparkles className="w-6 h-6 text-amber-300 stroke-[2.5]" />
             <span>🔦 סורק OCR שטח</span>
@@ -1364,7 +1560,7 @@ export default function WarehouseDashboardView({
 
           <Link
             href="/print-tags"
-            className="p-3.5 rounded-2xl bg-white hover:bg-blue-50 text-blue-900 border-2 border-blue-200 font-black text-xs sm:text-sm flex flex-col items-center justify-center text-center gap-2 shadow-sm active:scale-95 transition-all"
+            className="min-h-[56px] sm:min-h-[64px] p-3 rounded-2xl bg-white hover:bg-blue-50 text-blue-900 border-2 border-blue-200 font-black text-xs sm:text-sm flex flex-col items-center justify-center text-center gap-2 shadow-sm active:scale-95 transition-all"
           >
             <Printer className="w-6 h-6 text-blue-600" />
             <span>הדפסת תגיות QR</span>
@@ -1372,14 +1568,14 @@ export default function WarehouseDashboardView({
 
           <Link
             href="/catalog"
-            className="p-3.5 rounded-2xl bg-white hover:bg-blue-50 text-blue-900 border-2 border-blue-200 font-black text-xs sm:text-sm flex flex-col items-center justify-center text-center gap-2 shadow-sm active:scale-95 transition-all"
+            className="min-h-[56px] sm:min-h-[64px] p-3 rounded-2xl bg-white hover:bg-blue-50 text-blue-900 border-2 border-blue-200 font-black text-xs sm:text-sm flex flex-col items-center justify-center text-center gap-2 shadow-sm active:scale-95 transition-all"
           >
             <Layers className="w-6 h-6 text-blue-600" />
             <span>קטלוג ומלאי מלא</span>
           </Link>
         </div>
 
-        {/* CHIEF STOREKEEPER: INSTANT TOOL PASSPORT LOOKUP */}
+            {/* CHIEF STOREKEEPER: INSTANT TOOL PASSPORT LOOKUP */}
         {(isChiefOperations || isGeneralManager || canSwitchDepots) && (
           <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-blue-950 border-2 border-indigo-300 rounded-3xl p-4 sm:p-5 text-white shadow-md space-y-3">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -1465,7 +1661,685 @@ export default function WarehouseDashboardView({
           </div>
         )}
 
-        {/* CHIEF STOREKEEPER: FIELD REQUISITIONS INBOX (תיבת בקשות ציוד מהאתרים) */}
+            {/* Zero State Alert for Live Production */}
+        {data.availableCount === 0 && data.checkedOutCount === 0 && data.quarantinedCount === 0 && (
+          <div className="p-8 rounded-2xl bg-amber-50/90 border-2 border-amber-200 text-center space-y-3 shadow-sm">
+            <div className="w-12 h-12 mx-auto rounded-2xl bg-amber-100 text-amber-800 flex items-center justify-center border border-amber-200">
+              <Package className="w-6 h-6" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-base font-black text-amber-950">
+                אין עדיין כלים רשומים במערכת - התחל בקליטת כלי חדש
+              </h3>
+              <p className="text-xs text-amber-800/90 max-w-md mx-auto">
+                המחסן הנוכחי ריק מציוד פעיל. ניתן לקלוט כלי עבודה חדשים, לקודד תגיות QR או לנייד כלים ממחסנים אחרים.
+              </p>
+            </div>
+            <div className="pt-2 flex flex-wrap justify-center gap-2">
+              <Link
+                href="/"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-black shadow transition-all active:scale-95"
+              >
+                <Plus className="w-4 h-4" />
+                <span>התחל בקליטת כלי חדש</span>
+              </Link>
+              <Link
+                href="/catalog"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white hover:bg-amber-100 text-amber-900 border border-amber-300 text-xs font-black shadow-sm transition-all active:scale-95"
+              >
+                <Layers className="w-4 h-4" />
+                <span>צפייה בקטלוג הציוד</span>
+              </Link>
+            </div>
+          </div>
+        )}
+
+            {/* 4. SECTION A: OVERDUE ASSETS WITH ONE-TAP CONTACT */}
+        <div className="rounded-2xl border-2 border-rose-200 bg-white p-5 shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-rose-900 font-black">
+              <AlertTriangle className="w-5 h-5 text-rose-600" />
+              <h2 className="text-base">
+                כלים באיחור להחזרה &bull; מעקב דחוף ({data.overdueAssets.length})
+              </h2>
+            </div>
+            <span className="text-xs font-bold text-rose-700 bg-rose-50 px-2.5 py-1 rounded-full border border-rose-200">
+              טיפול מיידי
+            </span>
+          </div>
+
+          {data.overdueAssets.length === 0 ? (
+            <div className="p-6 text-center bg-emerald-50/60 rounded-xl border border-emerald-200 text-xs font-bold text-emerald-800">
+              כל הכלים שהונפקו מוחזרים בזמן! אין כרגע איחורים פעילים במחסן זה.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[500px] overflow-y-auto pr-1">
+              {data.overdueAssets.map((tool) => {
+                const waLink = getWhatsAppLink(
+                  tool.workerPhone,
+                  tool.workerName,
+                  tool.toolName,
+                  tool.qrCode,
+                  tool.daysOverdue
+                );
+
+                return (
+                  <div
+                    key={tool.assetId}
+                    className="p-3.5 rounded-xl bg-rose-50/40 border border-rose-200 space-y-3 hover:border-rose-300 transition-colors"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] font-black uppercase px-1.5 py-0.5 rounded bg-rose-100 text-rose-800">
+                            +{tool.daysOverdue} ימים באיחור
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenPassport(tool.qrCode)}
+                            className="font-mono text-[11px] font-black text-rose-950 hover:underline cursor-pointer flex items-center gap-1"
+                            title={`לחץ לפתיחת תיק כלי מלא עבור ${tool.qrCode}`}
+                            dir="ltr"
+                          >
+                            <QrCode className="w-3 h-3 text-rose-600" />
+                            <span>{tool.qrCode}</span>
+                          </button>
+                        </div>
+                        <h3 className="text-sm font-black text-blue-950 mt-1">
+                          {tool.toolName}
+                        </h3>
+                        <div className="text-xs text-slate-500 font-medium">
+                          {tool.brand} {tool.modelNumber ? `• ${tool.modelNumber}` : ''}
+                        </div>
+                      </div>
+
+                      <div className="text-left font-bold text-xs text-slate-700">
+                        <div className="text-blue-950 font-black">{tool.workerName}</div>
+                        <div className="text-[11px] text-slate-500" dir="ltr">
+                          {tool.workerPhone || 'ללא טלפון'}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Checkout Note if present */}
+                    {tool.checkoutNote && (
+                      <div className="p-2 rounded-lg bg-amber-50/80 border border-amber-200/80 text-[11px] text-amber-950 font-medium flex items-center gap-1.5">
+                        <FileText className="w-3 h-3 text-amber-600 shrink-0" />
+                        <span className="font-bold">הערת ניפוק:</span>
+                        <span className="italic truncate">&ldquo;{tool.checkoutNote}&rdquo;</span>
+                      </div>
+                    )}
+
+                    {/* Direct Contact & Passport Buttons */}
+                    <div className="pt-2 border-t border-rose-200/80 flex items-center gap-2">
+                      {tool.workerPhone ? (
+                        <>
+                          <a
+                            href={`tel:${tool.workerPhone}`}
+                            className="flex-1 py-2 px-2.5 rounded-xl bg-white hover:bg-slate-50 text-blue-900 border border-slate-300 text-xs font-black flex items-center justify-center gap-1 shadow-sm active:scale-95 transition-all"
+                          >
+                            <Phone className="w-3.5 h-3.5 text-blue-600" />
+                            <span>חייג</span>
+                          </a>
+
+                          {waLink && (
+                            <a
+                              href={waLink}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex-1 py-2 px-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center justify-center gap-1 shadow-sm active:scale-95 transition-all"
+                            >
+                              <MessageCircle className="w-3.5 h-3.5" />
+                              <span>וואטסאפ</span>
+                            </a>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-xs text-slate-400 italic flex-1">
+                          ללא טלפון
+                        </span>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => handleOpenPassport(tool.qrCode)}
+                        className="py-2 px-3 rounded-xl bg-white hover:bg-blue-50 text-blue-900 border border-slate-300 text-xs font-bold flex items-center justify-center gap-1 shadow-sm active:scale-95 transition-all cursor-pointer"
+                        title="צפה בדרכון הכלי"
+                      >
+                        <FileText className="w-3.5 h-3.5 text-blue-600" />
+                        <span>דרכון</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCheckinPreselectedAssetId(tool.assetId);
+                          setIsCheckinModalOpen(true);
+                        }}
+                        className="py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black flex items-center justify-center gap-1 shadow-sm active:scale-95 transition-all cursor-pointer"
+                        title="קלוט כלי זה חזרה למחסן"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>קלוט</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+            {/* 5. SECTION B: RETURNS DUE TODAY */}
+        <div className="rounded-2xl border-2 border-blue-100 bg-white p-5 shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-blue-950 font-black">
+              <Calendar className="w-5 h-5 text-blue-600" />
+              <h2 className="text-base">
+                החזרות צפויות היום במשמרת ({data.returnsDueToday.length})
+              </h2>
+            </div>
+            <span className="text-xs font-bold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-200">
+              משמרת פעילה
+            </span>
+          </div>
+
+          {data.returnsDueToday.length === 0 ? (
+            <div className="p-6 text-center bg-slate-50 rounded-xl border border-slate-200 text-xs font-bold text-slate-500">
+              לא רשומות החזרות שתוזמנו להיום
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[500px] overflow-y-auto pr-1">
+              {data.returnsDueToday.map((item) => (
+                <div
+                  key={item.assetId}
+                  className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <h3 className="text-sm font-black text-blue-950">
+                        {item.toolName}
+                      </h3>
+                      <div className="text-xs text-slate-500 font-mono mt-0.5" dir="ltr">
+                        {item.brand} &bull; {item.qrCode}
+                      </div>
+                    </div>
+                    <span className="text-[11px] font-bold text-blue-700 bg-blue-100/60 px-2 py-0.5 rounded">
+                      היום ב-
+                      {new Date(item.expectedReturnDate).toLocaleTimeString('he-IL', {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-200">
+                    <span className="text-slate-600">
+                      אצל: <strong>{item.workerName}</strong>
+                    </span>
+                    <div className="flex items-center gap-2">
+                      {item.accessoriesSummary && (
+                        <span className="text-[11px] text-slate-500 font-medium">
+                          {item.accessoriesSummary}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Checkout Note if present */}
+                    {item.checkoutNote && (
+                      <div className="p-1.5 rounded-lg bg-amber-50 border border-amber-200/70 text-[11px] text-amber-950 font-medium flex items-center gap-1.5">
+                        <FileText className="w-3 h-3 text-amber-600 shrink-0" />
+                        <span className="font-bold">הערת ניפוק:</span>
+                        <span className="italic truncate">&ldquo;{item.checkoutNote}&rdquo;</span>
+                      </div>
+                    )}
+                      <button
+                        type="button"
+                        onClick={() => handleOpenPassport(item.qrCode)}
+                        className="px-2 py-0.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-800 text-[11px] font-bold border border-blue-200 cursor-pointer"
+                        title="צפה בדרכון הכלי"
+                      >
+                        דרכון
+                      </button>
+                    </div>
+                  </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+            {/* 6. SECTION C: LOW STOCK ALERTS */}
+        <div className="rounded-2xl border-2 border-amber-200 bg-white p-5 shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-amber-950 font-black">
+              <TrendingDown className="w-5 h-5 text-amber-600" />
+              <h2 className="text-base">
+                התרעות מלאי קריטי במחסן ({data.lowStockAlerts.length})
+              </h2>
+            </div>
+            <span className="text-xs font-bold text-amber-800 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200">
+              נדרש חידוש מלאי
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {data.lowStockAlerts.map((alert) => (
+              <div
+                key={alert.categoryId}
+                className="p-3.5 rounded-xl bg-amber-50/50 border border-amber-200 space-y-1.5"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black text-amber-950">
+                    {alert.categoryName}
+                  </span>
+                  <span
+                    className={`text-[10px] font-black px-1.5 py-0.5 rounded uppercase ${
+                      alert.status === 'critical'
+                        ? 'bg-rose-100 text-rose-800'
+                        : 'bg-amber-100 text-amber-800'
+                    }`}
+                  >
+                    {alert.status === 'critical' ? 'מלאי קריטי' : 'מלאי נמוך'}
+                  </span>
+                </div>
+                <div className="flex items-baseline gap-1 text-xs">
+                  <span className="text-xl font-black text-amber-950">
+                    {alert.availableCount}
+                  </span>
+                  <span className="text-slate-500">
+                    זמינים (סף התרעה: {alert.minStockThreshold})
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* TAB 2: 🚚 שינוע ובקשות שטח (TRANSFERS & REQUISITIONS)                     */}
+        {/* ========================================================================= */}
+        {activeTab === 'transfers' && (
+          <div className="space-y-5 animate-in fade-in duration-200">
+            {/* SITE STOREKEEPER: REQUEST TOOL FOR SITE BANNER */}
+        {(!isChiefOperations && !isGeneralManager) && (
+          <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-blue-700/40">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-600/50 text-blue-200 flex items-center justify-center border border-blue-400/30 shrink-0">
+                <Send className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-white flex items-center gap-2">
+                  <span>בקשת ציוד לאתר (מכולת שטח)</span>
+                  <span className="text-[10px] font-bold bg-blue-500/30 text-blue-200 px-2 py-0.5 rounded-full border border-blue-400/30">
+                    דרישה מבצעית ישירה
+                  </span>
+                </h3>
+                <p className="text-xs text-blue-200 mt-0.5">
+                  חסר כלי עבודה באתר? הגש דרישה מנומקת ישירות לאחראי תפעול ראשי לצורך אספקה וניוד מיידי
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setSiteRequestFeedback(null);
+                setRequestToolDesc('');
+                setRequestQuantity(1);
+                setRequestUrgency('NORMAL');
+                setRequestReason('');
+                setIsSiteRequestModalOpen(true);
+              }}
+              className="py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-black flex items-center justify-center gap-2 shadow-md shadow-blue-500/20 active:scale-95 transition-all cursor-pointer shrink-0"
+            >
+              <Plus className="w-4 h-4" />
+              <span>בקשת ציוד לאתר</span>
+            </button>
+          </div>
+        )}
+
+            {/* DIRECT OUTBOUND EQUIPMENT TRANSFER (העברה ישירה ע"י מחסנאי ללא צורך באישור מנהל) */}
+        <div className="p-4 rounded-2xl bg-gradient-to-r from-sky-950 via-blue-900 to-indigo-950 text-white shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-sky-500/40">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-sky-500/30 text-sky-200 flex items-center justify-center border border-sky-400/30 shrink-0">
+              <Truck className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-black text-white flex items-center gap-2">
+                <span>העברה ישירה לאתר אחר</span>
+                <span className="text-[10px] font-bold bg-sky-500/30 text-sky-200 px-2 py-0.5 rounded-full border border-sky-400/30">
+                  שילוח מיידי &bull; ללא אישור מנהל
+                </span>
+              </h3>
+              <p className="text-xs text-sky-200 mt-0.5">
+                שילוח ישיר של כלי עבודה זמין ממחסן זה ישירות לאתר בנייה או מחסן אחר בארגון
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              setDirectTransferFeedback(null);
+              setSelectedDirectAsset(null);
+              setTransporterNotes('');
+              setDirectSearchQuery('');
+              const otherWh = warehouses.find((w) => w.id !== 'all' && w.id !== selectedWarehouseId);
+              setDirectTargetWarehouseId(otherWh ? otherWh.id : '');
+              setIsDirectTransferModalOpen(true);
+            }}
+            className="py-2.5 px-4 rounded-xl bg-sky-500 hover:bg-sky-600 text-white text-xs sm:text-sm font-black flex items-center justify-center gap-2 shadow-md shadow-sky-500/20 active:scale-95 transition-all cursor-pointer shrink-0"
+          >
+            <Truck className="w-4 h-4" />
+            <span>העברה ישירה לאתר אחר</span>
+          </button>
+        </div>
+
+            {/* INTER-SITE EQUIPMENT TRANSFER REQUEST (Storekeeper -> Operations Manager) */}
+        <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-blue-700/40">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-blue-600/50 text-blue-200 flex items-center justify-center border border-blue-400/30 shrink-0">
+              <ArrowLeftRight className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-black text-white flex items-center gap-2">
+                <span>בקשת העברת ציוד בין אתרים</span>
+                <span className="text-[10px] font-bold bg-blue-500/30 text-blue-200 px-2 py-0.5 rounded-full border border-blue-400/30">
+                  נוהל מבוקר &bull; אישור מנהל תפעול
+                </span>
+              </h3>
+              <p className="text-xs text-blue-200 mt-0.5">
+                חסר כלי עבודה באתר? בחר כלי זמין ממתקן אחר והגש בקשה מנומקת לאישור אחראי תפעול ראשי
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              setTransferRequestFeedback(null);
+              setSelectedAssetToTransfer(null);
+              setTransferRequestReason('');
+              setAssetSearchQuery('');
+              setIsTransferRequestModalOpen(true);
+            }}
+            className="py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-black flex items-center justify-center gap-2 shadow-md shadow-blue-500/20 active:scale-95 transition-all cursor-pointer shrink-0"
+          >
+            <Plus className="w-4 h-4" />
+            <span>בקשת העברת ציוד בין אתרים</span>
+          </button>
+        </div>
+
+            {/* SITE EQUIPMENT DISPATCH WITH TAG VERIFICATION & DIGITAL SIGNATURE */}
+        <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-900 via-teal-900 to-slate-900 text-white shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-emerald-700/40">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-emerald-600/50 text-emerald-200 flex items-center justify-center border border-emerald-400/30 shrink-0">
+              <FileSignature className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-black text-white flex items-center gap-2">
+                <span>הוצאת ציוד לאתר (אישור תיוג וחתימה)</span>
+                <span className="text-[10px] font-bold bg-emerald-500/30 text-emerald-200 px-2 py-0.5 rounded-full border border-emerald-400/30">
+                  אישור תיוג &bull; חתימה חיה
+                </span>
+              </h3>
+              <p className="text-xs text-emerald-200 mt-0.5">
+                נוהל שחרור ציוד לאתרי בנייה: אימות תג QR פיזי על הכלי והחתמה דיגיטלית של מקבל הציוד בשטח
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              setDispatchFeedback(null);
+              setDispatchAsset(null);
+              setDispatchTagInput('');
+              setIsTagVerified(false);
+              setDispatchWorkerName('');
+              setDispatchWorkerPhone('');
+              setDispatchSignature(null);
+              setIsDispatchModalOpen(true);
+            }}
+            className="py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-black flex items-center justify-center gap-2 shadow-md shadow-emerald-500/20 active:scale-95 transition-all cursor-pointer shrink-0"
+          >
+            <PenTool className="w-4 h-4" />
+            <span>הוצאת ציוד לאתר (אישור תיוג וחתימה)</span>
+          </button>
+        </div>
+
+            {/* IN-TRANSIT EQUIPMENT ARRIVING TO THIS WAREHOUSE */}
+        {incomingTransfers.length > 0 && (
+          <div className="p-4 rounded-2xl bg-amber-50/90 border-2 border-amber-300 shadow-sm space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-amber-950 font-black">
+                <Truck className="w-5 h-5 text-amber-600" />
+                <h3 className="text-sm font-black">
+                  ציוד בשינוע הממתין לקליטה במחסן ({incomingTransfers.length})
+                </h3>
+              </div>
+              <span className="text-[11px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-200">
+                In-Transit
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[500px] overflow-y-auto pr-1">
+              {incomingTransfers.map((req) => (
+                <div
+                  key={req.id}
+                  className="p-3.5 rounded-xl bg-white border border-amber-200 shadow-xs flex flex-col justify-between gap-2"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <span className="font-mono text-[10px] font-bold text-slate-500" dir="ltr">
+                        {req.qrCode} {req.tagNumber ? `(${req.tagNumber})` : ''}
+                      </span>
+                      <h4 className="text-sm font-black text-slate-900">{req.assetName}</h4>
+                      <p className="text-xs text-slate-500">
+                        {req.assetBrand} {req.assetModel ? `• ${req.assetModel}` : ''}
+                      </p>
+                    </div>
+                    <div className="text-left text-[11px] font-bold text-slate-600">
+                      <div>ממחסן: <strong className="text-slate-900">{req.sourceWarehouseName}</strong></div>
+                      <div>ליעד: <strong className="text-blue-900">{req.targetWarehouseName}</strong></div>
+                    </div>
+                  </div>
+
+                  {req.reason && (
+                    <div className="p-2.5 rounded-xl bg-amber-50/80 border border-amber-200 text-xs text-amber-950 font-medium space-y-0.5">
+                      <div className="flex items-center gap-1 font-bold text-amber-900 text-[10px]">
+                        <Truck className="w-3 h-3 text-amber-600" />
+                        <span>🚚 הערת שינוע / סיבת העברה:</span>
+                      </div>
+                      <p className="text-xs font-bold italic leading-relaxed whitespace-pre-wrap">
+                        &ldquo;{req.reason}&rdquo;
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                    <span className="text-[11px] text-slate-500">
+                      הוגש ע&quot;י {req.requestedBy}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={receivingTransferId === req.id}
+                      onClick={() => handleCompleteReception(req)}
+                      className="py-1.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center gap-1.5 shadow-sm active:scale-95 transition-all cursor-pointer"
+                    >
+                      {receivingTransferId === req.id ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>קולט כלי...</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>קליטת ציוד במחסן</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+            {/* CHIEF STOREKEEPER: IN-TRANSIT FLEET TRACKER (מעקב שינוע וציוד בדרך) */}
+        
+          <div className="bg-white border-2 border-sky-200/90 rounded-3xl p-5 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-sky-100/70 border border-sky-200 text-sky-700 flex items-center justify-center shrink-0">
+                  <Truck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
+                    <span>מעקב שינוע וציוד בדרך</span>
+                    <span className="text-xs font-bold text-slate-500 font-mono" dir="ltr">(In-Transit Fleet Logistics)</span>
+                    {inTransitFleet.length > 0 && (
+                      <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-sky-600 text-white animate-pulse">
+                        {inTransitFleet.length} בשינוע פעיל
+                      </span>
+                    )}
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    ניטור ציוד בתנועה בין מתקנים ומחסני שטח &bull; מעקב זמני שינוע, אתרי יעד ואחראי ניוד
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 self-end sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => void loadInTransitFleet()}
+                  disabled={isLoadingInTransit}
+                  className="px-3 py-1.5 rounded-xl border border-sky-200 hover:bg-sky-50 text-sky-800 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingInTransit ? 'animate-spin' : ''}`} />
+                  <span>רענן נתוני שינוע</span>
+                </button>
+              </div>
+            </div>
+
+            {isLoadingInTransit && inTransitFleet.length === 0 ? (
+              <div className="p-8 text-center bg-slate-50/70 rounded-2xl border border-slate-200 text-xs font-bold text-slate-500 flex items-center justify-center gap-2">
+                <Loader2 className="w-5 h-5 animate-spin text-sky-600" />
+                <span>טוען נתוני שינוע ציוד...</span>
+              </div>
+            ) : inTransitFleet.length === 0 ? (
+              <div className="p-6 text-center bg-slate-50/70 rounded-2xl border border-slate-200 text-xs font-bold text-slate-500 flex items-center justify-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                <span>כל הכלים נמצאים כרגע במחסנים ובאתרי העבודה &bull; אין ציוד בתנועה בין מתקנים</span>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 max-h-[500px] overflow-y-auto pr-1">
+                {inTransitFleet.map((item) => (
+                  <div
+                    key={item.id}
+                    className="p-4 rounded-2xl bg-gradient-to-br from-white to-sky-50/30 border-2 border-sky-200 shadow-sm flex flex-col justify-between gap-3.5 hover:border-sky-400 transition-all"
+                  >
+                    <div className="space-y-3">
+                      {/* Top Bar: Tool Tag, Model, and Delivery Status badge */}
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenPassport(item.qrCode)}
+                              className="font-mono text-xs font-black text-indigo-900 bg-white hover:bg-indigo-50 px-2.5 py-0.5 rounded-lg border border-slate-300 hover:border-indigo-400 transition-colors cursor-pointer group flex items-center gap-1 shadow-2xs"
+                              title={`לחץ לפתיחת תיק כלי מלא עבור ${item.qrCode}`}
+                              dir="ltr"
+                            >
+                              <QrCode className="w-3.5 h-3.5 text-indigo-600 group-hover:scale-110 transition-transform" />
+                              <span className="underline decoration-indigo-300">{item.qrCode}</span>
+                            </button>
+                            {item.serialNumber && (
+                              <span className="font-mono text-[10px] text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+                                מס&quot;ד: {item.serialNumber}
+                              </span>
+                            )}
+                          </div>
+                          <h4 className="text-base font-black text-slate-900 mt-1">
+                            {item.toolName}
+                          </h4>
+                          <p className="text-xs text-slate-500">
+                            {item.brand} {item.modelNumber ? `• דגם: ${item.modelNumber}` : ''}
+                          </p>
+                        </div>
+
+                        {/* Delivery Status Badge: 🚚 "בשינוע לשטח" (En Route) */}
+                        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-sky-500 text-white text-xs font-black shadow-xs shrink-0 animate-pulse">
+                          <Truck className="w-3.5 h-3.5" />
+                          <span>🚚 בשינוע לשטח</span>
+                        </div>
+                      </div>
+
+                      {/* Origin Warehouse (מקור) ➔ Destination Site (יעד) */}
+                      <div className="p-3 rounded-xl bg-white border border-sky-100 flex items-center justify-between text-xs shadow-xs">
+                        <div className="flex items-center gap-2 text-slate-700">
+                          <Building2 className="w-4 h-4 text-slate-400 shrink-0" />
+                          <div>
+                            <div className="text-[10px] text-slate-400 font-bold">מקור (מחסן שולח)</div>
+                            <div className="font-black text-slate-900">{item.originWarehouseName}</div>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col items-center px-2">
+                          <ArrowLeftRight className="w-4 h-4 text-sky-600" />
+                        </div>
+
+                        <div className="flex items-center gap-2 text-sky-950 text-right">
+                          <div>
+                            <div className="text-[10px] text-sky-600 font-bold">יעד (אתר מקבל)</div>
+                            <div className="font-black text-sky-900">{item.destinationWarehouseName}</div>
+                          </div>
+                          <Building2 className="w-4 h-4 text-sky-500 shrink-0" />
+                        </div>
+                      </div>
+
+                      {/* Transporter Notes if present */}
+                      {item.transporterNotes && (
+                        <div className="p-2.5 rounded-xl bg-sky-50 border border-sky-200/80 text-xs text-sky-950 font-medium space-y-0.5">
+                          <div className="flex items-center gap-1 font-bold text-sky-900 text-[10px]">
+                            <Truck className="w-3 h-3 text-sky-600" />
+                            <span>🚚 הערת שינוע / מוביל:</span>
+                          </div>
+                          <p className="text-xs font-bold italic leading-relaxed whitespace-pre-wrap">
+                            &ldquo;{item.transporterNotes}&rdquo;
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Transit Details: Dispatch timestamp + elapsed transit time + authorized storekeeper */}
+                      <div className="grid grid-cols-2 gap-2 text-xs pt-1">
+                        <div className="p-2 rounded-lg bg-slate-50 border border-slate-200">
+                          <span className="text-[10px] text-slate-400 block font-bold">משך שינוע / יציאה</span>
+                          <span className="font-bold text-slate-800 flex items-center gap-1 mt-0.5">
+                            <Clock className="w-3 h-3 text-sky-600" />
+                            <span>{item.elapsedTransitTimeText}</span>
+                          </span>
+                        </div>
+
+                        <div className="p-2 rounded-lg bg-slate-50 border border-slate-200">
+                          <span className="text-[10px] text-slate-400 block font-bold">אחראי ניוד / מנפק</span>
+                          <span className="font-bold text-slate-800 flex items-center gap-1 mt-0.5 truncate">
+                            <ShieldCheck className="w-3 h-3 text-emerald-600 shrink-0" />
+                            <span className="truncate">{item.dispatchedBy}</span>
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+            {/* CHIEF STOREKEEPER: FIELD REQUISITIONS INBOX (תיבת בקשות ציוד מהאתרים) */}
         {(isChiefOperations || isGeneralManager) && (
           <div className="bg-white border-2 border-indigo-300/80 rounded-3xl p-5 shadow-sm space-y-4">
             <div className="flex items-center justify-between">
@@ -1519,7 +2393,7 @@ export default function WarehouseDashboardView({
                 <span>אין כרגע בקשות ציוד ממתינות מהאתרים &bull; כל הדרישות טופלו במלואן</span>
               </div>
             ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 max-h-[500px] overflow-y-auto pr-1">
                 {siteRequestsInbox.map((req) => (
                   <div
                     key={req.id}
@@ -1680,7 +2554,7 @@ export default function WarehouseDashboardView({
           </div>
         )}
 
-        {/* PENDING INTER-SITE TRANSFER REQUESTS (Chief Operations / Operations Manager Approval) */}
+            {/* PENDING INTER-SITE TRANSFER REQUESTS (Chief Operations / Operations Manager Approval) */}
         {(isChiefOperations || isGeneralManager) && (
           <div className="bg-white border-2 border-indigo-200 rounded-3xl p-5 shadow-sm space-y-4">
             <div className="flex items-center justify-between">
@@ -1733,7 +2607,7 @@ export default function WarehouseDashboardView({
                 <span>אין כרגע בקשות העברה ממתינות לאישור</span>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 max-h-[500px] overflow-y-auto pr-1">
                 {pendingTransfers.map((req) => (
                   <div
                     key={req.id}
@@ -1874,160 +2748,192 @@ export default function WarehouseDashboardView({
           </div>
         )}
 
-        {/* CHIEF STOREKEEPER: IN-TRANSIT FLEET TRACKER (מעקב שינוע וציוד בדרך) */}
-        {(isChiefOperations || isGeneralManager) && (
-          <div className="bg-white border-2 border-sky-200/90 rounded-3xl p-5 shadow-sm space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-sky-100/70 border border-sky-200 text-sky-700 flex items-center justify-center shrink-0">
-                  <Truck className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
-                    <span>מעקב שינוע וציוד בדרך</span>
-                    <span className="text-xs font-bold text-slate-500 font-mono" dir="ltr">(In-Transit Fleet Logistics)</span>
-                    {inTransitFleet.length > 0 && (
-                      <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-sky-600 text-white animate-pulse">
-                        {inTransitFleet.length} בשינוע פעיל
-                      </span>
-                    )}
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    ניטור ציוד בתנועה בין מתקנים ומחסני שטח &bull; מעקב זמני שינוע, אתרי יעד ואחראי ניוד
-                  </p>
-                </div>
+            {/* SITE STOREKEEPER: INCOMING IN-TRANSIT TOOLS TO THIS SITE */}
+        {(!isChiefOperations && !isGeneralManager) && siteIncomingShipments.length > 0 && (
+          <div className="p-4 rounded-2xl bg-amber-50/90 border-2 border-amber-300 shadow-sm space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-amber-950 font-black">
+                <Truck className="w-5 h-5 text-amber-600" />
+                <h3 className="text-sm font-black">
+                  ציוד בדרך לאתר (במשלוח / In-Transit) ({siteIncomingShipments.length})
+                </h3>
               </div>
-
-              <div className="flex items-center gap-2 self-end sm:self-auto">
-                <button
-                  type="button"
-                  onClick={() => void loadInTransitFleet()}
-                  disabled={isLoadingInTransit}
-                  className="px-3 py-1.5 rounded-xl border border-sky-200 hover:bg-sky-50 text-sky-800 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingInTransit ? 'animate-spin' : ''}`} />
-                  <span>רענן נתוני שינוע</span>
-                </button>
-              </div>
+              <span className="text-[11px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-200">
+                ממתין לקליטה ואישור הגעה
+              </span>
             </div>
 
-            {isLoadingInTransit && inTransitFleet.length === 0 ? (
-              <div className="p-8 text-center bg-slate-50/70 rounded-2xl border border-slate-200 text-xs font-bold text-slate-500 flex items-center justify-center gap-2">
-                <Loader2 className="w-5 h-5 animate-spin text-sky-600" />
-                <span>טוען נתוני שינוע ציוד...</span>
+            {siteActionFeedback && (
+              <div
+                className={`p-3 rounded-xl border text-xs font-bold flex items-center justify-between ${
+                  siteActionFeedback.type === 'success'
+                    ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
+                    : 'bg-rose-50 border-rose-300 text-rose-950'
+                }`}
+              >
+                <span>{siteActionFeedback.text}</span>
+                <button
+                  type="button"
+                  onClick={() => setSiteActionFeedback(null)}
+                  className="text-slate-400 hover:text-slate-600 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
               </div>
-            ) : inTransitFleet.length === 0 ? (
-              <div className="p-6 text-center bg-slate-50/70 rounded-2xl border border-slate-200 text-xs font-bold text-slate-500 flex items-center justify-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                <span>כל הכלים נמצאים כרגע במחסנים ובאתרי העבודה &bull; אין ציוד בתנועה בין מתקנים</span>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {inTransitFleet.map((item) => (
-                  <div
-                    key={item.id}
-                    className="p-4 rounded-2xl bg-gradient-to-br from-white to-sky-50/30 border-2 border-sky-200 shadow-sm flex flex-col justify-between gap-3.5 hover:border-sky-400 transition-all"
-                  >
-                    <div className="space-y-3">
-                      {/* Top Bar: Tool Tag, Model, and Delivery Status badge */}
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => handleOpenPassport(item.qrCode)}
-                              className="font-mono text-xs font-black text-indigo-900 bg-white hover:bg-indigo-50 px-2.5 py-0.5 rounded-lg border border-slate-300 hover:border-indigo-400 transition-colors cursor-pointer group flex items-center gap-1 shadow-2xs"
-                              title={`לחץ לפתיחת תיק כלי מלא עבור ${item.qrCode}`}
-                              dir="ltr"
-                            >
-                              <QrCode className="w-3.5 h-3.5 text-indigo-600 group-hover:scale-110 transition-transform" />
-                              <span className="underline decoration-indigo-300">{item.qrCode}</span>
-                            </button>
-                            {item.serialNumber && (
-                              <span className="font-mono text-[10px] text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
-                                מס&quot;ד: {item.serialNumber}
-                              </span>
-                            )}
-                          </div>
-                          <h4 className="text-base font-black text-slate-900 mt-1">
-                            {item.toolName}
-                          </h4>
-                          <p className="text-xs text-slate-500">
-                            {item.brand} {item.modelNumber ? `• דגם: ${item.modelNumber}` : ''}
-                          </p>
-                        </div>
+            )}
 
-                        {/* Delivery Status Badge: 🚚 "בשינוע לשטח" (En Route) */}
-                        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-sky-500 text-white text-xs font-black shadow-xs shrink-0 animate-pulse">
-                          <Truck className="w-3.5 h-3.5" />
-                          <span>🚚 בשינוע לשטח</span>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 max-h-[500px] overflow-y-auto pr-1">
+              {siteIncomingShipments.map((req) => (
+                <div
+                  key={req.id}
+                  className="p-4 rounded-xl bg-white border border-amber-300/80 shadow-xs flex flex-col justify-between gap-3"
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          {req.assignedAssetQr && (
+                            <span className="font-mono text-[11px] font-black text-slate-700 bg-slate-50 px-2 py-0.5 rounded border border-slate-200" dir="ltr">
+                              {req.assignedAssetQr}
+                            </span>
+                          )}
+                          {req.assignedAssetTag && (
+                            <span className="font-mono text-[10px] font-bold text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200" dir="ltr">
+                              {req.assignedAssetTag}
+                            </span>
+                          )}
                         </div>
+                        <h4 className="text-sm font-black text-slate-900 mt-1">
+                          {req.assignedAssetName || req.toolDescription}
+                        </h4>
+                        <p className="text-xs text-slate-500">
+                          {req.assignedAssetBrand} {req.assignedAssetModel ? `• ${req.assignedAssetModel}` : ''} {req.assignedAssetSerial ? `(מס"ד: ${req.assignedAssetSerial})` : ''}
+                        </p>
                       </div>
+                      <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 shrink-0">
+                        במשלוח לאתר
+                      </span>
+                    </div>
 
-                      {/* Origin Warehouse (מקור) ➔ Destination Site (יעד) */}
-                      <div className="p-3 rounded-xl bg-white border border-sky-100 flex items-center justify-between text-xs shadow-xs">
-                        <div className="flex items-center gap-2 text-slate-700">
-                          <Building2 className="w-4 h-4 text-slate-400 shrink-0" />
-                          <div>
-                            <div className="text-[10px] text-slate-400 font-bold">מקור (מחסן שולח)</div>
-                            <div className="font-black text-slate-900">{item.originWarehouseName}</div>
-                          </div>
-                        </div>
-
-                        <div className="flex flex-col items-center px-2">
-                          <ArrowLeftRight className="w-4 h-4 text-sky-600" />
-                        </div>
-
-                        <div className="flex items-center gap-2 text-sky-950 text-right">
-                          <div>
-                            <div className="text-[10px] text-sky-600 font-bold">יעד (אתר מקבל)</div>
-                            <div className="font-black text-sky-900">{item.destinationWarehouseName}</div>
-                          </div>
-                          <Building2 className="w-4 h-4 text-sky-500 shrink-0" />
-                        </div>
+                    <div className="mt-2.5 p-2 rounded-lg bg-amber-50/50 border border-amber-200/60 text-xs space-y-1">
+                      <div className="text-slate-700">
+                        נשלח מ: <strong className="text-slate-900">{req.sourceWarehouseName || 'מחסן מרכזי'}</strong>
                       </div>
-
-                      {/* Transporter Notes if present */}
-                      {item.transporterNotes && (
-                        <div className="p-2.5 rounded-xl bg-sky-50 border border-sky-200/80 text-xs text-sky-950 font-medium space-y-0.5">
-                          <div className="flex items-center gap-1 font-bold text-sky-900 text-[10px]">
-                            <Truck className="w-3 h-3 text-sky-600" />
-                            <span>🚚 הערת שינוע / מוביל:</span>
-                          </div>
-                          <p className="text-xs font-bold italic leading-relaxed whitespace-pre-wrap">
-                            &ldquo;{item.transporterNotes}&rdquo;
-                          </p>
-                        </div>
-                      )}
-
-                      {/* Transit Details: Dispatch timestamp + elapsed transit time + authorized storekeeper */}
-                      <div className="grid grid-cols-2 gap-2 text-xs pt-1">
-                        <div className="p-2 rounded-lg bg-slate-50 border border-slate-200">
-                          <span className="text-[10px] text-slate-400 block font-bold">משך שינוע / יציאה</span>
-                          <span className="font-bold text-slate-800 flex items-center gap-1 mt-0.5">
-                            <Clock className="w-3 h-3 text-sky-600" />
-                            <span>{item.elapsedTransitTimeText}</span>
-                          </span>
-                        </div>
-
-                        <div className="p-2 rounded-lg bg-slate-50 border border-slate-200">
-                          <span className="text-[10px] text-slate-400 block font-bold">אחראי ניוד / מנפק</span>
-                          <span className="font-bold text-slate-800 flex items-center gap-1 mt-0.5 truncate">
-                            <ShieldCheck className="w-3 h-3 text-emerald-600 shrink-0" />
-                            <span className="truncate">{item.dispatchedBy}</span>
-                          </span>
-                        </div>
+                      <div className="text-slate-500 text-[11px]">
+                        אושר ע&quot;י: <strong>{req.decidedBy || 'אחראי תפעול'}</strong> &bull; {req.decidedAt ? new Date(req.decidedAt).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}
                       </div>
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
+
+                  <div className="pt-2 border-t border-slate-100 flex items-center justify-end">
+                    <button
+                      type="button"
+                      disabled={receivingSiteRequestId === req.id}
+                      onClick={() => handleConfirmSiteReception(req)}
+                      className="py-1.5 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center gap-1.5 shadow-sm active:scale-95 transition-all cursor-pointer"
+                    >
+                      {receivingSiteRequestId === req.id ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>קולט כלי...</span>
+                        </>
+                      ) : (
+                        <>
+                          <PackageCheck className="w-4 h-4" />
+                          <span>קליטה ואישור הגעה באתר</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
-        {/* CHIEF STOREKEEPER: CENTRAL MAINTENANCE & REPAIR HUB (מרכז אחזקה ובקרת תיקונים) */}
-        {(isChiefOperations || isGeneralManager) && (
+            {/* SITE STOREKEEPER: MY REQUESTS STATUS TRACKER */}
+        {(!isChiefOperations && !isGeneralManager) && mySiteRequests.length > 0 && (
+          <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                  <ClipboardCheck className="w-4 h-4 text-indigo-600" />
+                  <span>סטטוס בקשות שנשלחו מהאתר ({mySiteRequests.length})</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  מעקב אחר דרישות ציוד שהוגשו לאחראי תפעול ראשי
+                </p>
+              </div>
+
+              {isLoadingSiteData && (
+                <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {mySiteRequests.slice(0, 6).map((req) => (
+                <div
+                  key={req.id}
+                  className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex flex-col justify-between gap-2"
+                >
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between gap-1.5">
+                      <span className="text-[10px] font-bold text-slate-500" dir="ltr">
+                        {new Date(req.createdAt).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit' })}
+                      </span>
+                      {req.status === 'PENDING' ? (
+                        <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                          🟡 בטיפול
+                        </span>
+                      ) : req.status === 'IN_TRANSIT' ? (
+                        <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 animate-pulse">
+                          🟢 אושר ובדרך
+                        </span>
+                      ) : req.status === 'REJECTED' ? (
+                        <span className="text-[10px] font-bold text-rose-800 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200">
+                          🔴 נדחה
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-bold text-slate-700 bg-slate-200 px-2 py-0.5 rounded-full">
+                          ⚪ נקלט באתר
+                        </span>
+                      )}
+                    </div>
+
+                    <h4 className="text-xs font-black text-slate-900 leading-snug">
+                      {req.toolDescription}
+                    </h4>
+                    <div className="text-[11px] text-slate-500">
+                      כמות: <strong className="text-slate-800">{req.quantity}</strong>
+                      {req.urgency === 'CRITICAL' && (
+                        <span className="text-rose-600 font-bold mr-2">&bull; קריטי</span>
+                      )}
+                      {req.urgency === 'URGENT' && (
+                        <span className="text-amber-600 font-bold mr-2">&bull; דחוף</span>
+                      )}
+                    </div>
+
+                    {req.rejectionReason && (
+                      <div className="p-1.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-[10px]">
+                        סיבת דחייה: {req.rejectionReason}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* TAB 3: 🔧 מרכז אחזקה ותיקונים (MAINTENANCE HUB)                           */}
+        {/* ========================================================================= */}
+        {activeTab === 'maintenance' && (
+          <div className="space-y-5 animate-in fade-in duration-200">
+            {/* CHIEF STOREKEEPER: CENTRAL MAINTENANCE & REPAIR HUB (מרכז אחזקה ובקרת תיקונים) */}
+        
           <div className="bg-white border-2 border-amber-300/80 rounded-3xl p-5 shadow-sm space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-3">
@@ -2074,7 +2980,7 @@ export default function WarehouseDashboardView({
                 <span>כל הציוד הארגוני תקין ועומד לרשות המחסנים והאתרים &bull; אין כרגע כלים בתיקון או במעבדה</span>
               </div>
             ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 max-h-[500px] overflow-y-auto pr-1">
                 {maintenanceAssets.map((asset) => (
                   <div
                     key={asset.id}
@@ -2181,712 +3087,21 @@ export default function WarehouseDashboardView({
               </div>
             )}
           </div>
-        )}
-
-        {/* CHIEF STOREKEEPER: CENTRAL NOTES & FIELD REMARKS FEED (מרכז הערות ותיעוד שטח) */}
-        {(isChiefOperations || isGeneralManager) && (
-          <ChiefNotesFeedView
-            warehouses={data.allWarehouses || data.warehouses}
-            onOpenPassport={handleOpenPassport}
-          />
-        )}
-
-        {/* SITE STOREKEEPER: REQUEST TOOL FOR SITE BANNER */}
-        {(!isChiefOperations && !isGeneralManager) && (
-          <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-blue-700/40">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-blue-600/50 text-blue-200 flex items-center justify-center border border-blue-400/30 shrink-0">
-                <Send className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="text-sm font-black text-white flex items-center gap-2">
-                  <span>בקשת ציוד לאתר (מכולת שטח)</span>
-                  <span className="text-[10px] font-bold bg-blue-500/30 text-blue-200 px-2 py-0.5 rounded-full border border-blue-400/30">
-                    דרישה מבצעית ישירה
-                  </span>
-                </h3>
-                <p className="text-xs text-blue-200 mt-0.5">
-                  חסר כלי עבודה באתר? הגש דרישה מנומקת ישירות לאחראי תפעול ראשי לצורך אספקה וניוד מיידי
-                </p>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => {
-                setSiteRequestFeedback(null);
-                setRequestToolDesc('');
-                setRequestQuantity(1);
-                setRequestUrgency('NORMAL');
-                setRequestReason('');
-                setIsSiteRequestModalOpen(true);
-              }}
-              className="py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-black flex items-center justify-center gap-2 shadow-md shadow-blue-500/20 active:scale-95 transition-all cursor-pointer shrink-0"
-            >
-              <Plus className="w-4 h-4" />
-              <span>בקשת ציוד לאתר</span>
-            </button>
           </div>
         )}
 
-        {/* SITE STOREKEEPER: INCOMING IN-TRANSIT TOOLS TO THIS SITE */}
-        {(!isChiefOperations && !isGeneralManager) && siteIncomingShipments.length > 0 && (
-          <div className="p-4 rounded-2xl bg-amber-50/90 border-2 border-amber-300 shadow-sm space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-amber-950 font-black">
-                <Truck className="w-5 h-5 text-amber-600" />
-                <h3 className="text-sm font-black">
-                  ציוד בדרך לאתר (במשלוח / In-Transit) ({siteIncomingShipments.length})
-                </h3>
-              </div>
-              <span className="text-[11px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-200">
-                ממתין לקליטה ואישור הגעה
-              </span>
-            </div>
-
-            {siteActionFeedback && (
-              <div
-                className={`p-3 rounded-xl border text-xs font-bold flex items-center justify-between ${
-                  siteActionFeedback.type === 'success'
-                    ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
-                    : 'bg-rose-50 border-rose-300 text-rose-950'
-                }`}
-              >
-                <span>{siteActionFeedback.text}</span>
-                <button
-                  type="button"
-                  onClick={() => setSiteActionFeedback(null)}
-                  className="text-slate-400 hover:text-slate-600 cursor-pointer"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-              {siteIncomingShipments.map((req) => (
-                <div
-                  key={req.id}
-                  className="p-4 rounded-xl bg-white border border-amber-300/80 shadow-xs flex flex-col justify-between gap-3"
-                >
-                  <div>
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          {req.assignedAssetQr && (
-                            <span className="font-mono text-[11px] font-black text-slate-700 bg-slate-50 px-2 py-0.5 rounded border border-slate-200" dir="ltr">
-                              {req.assignedAssetQr}
-                            </span>
-                          )}
-                          {req.assignedAssetTag && (
-                            <span className="font-mono text-[10px] font-bold text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200" dir="ltr">
-                              {req.assignedAssetTag}
-                            </span>
-                          )}
-                        </div>
-                        <h4 className="text-sm font-black text-slate-900 mt-1">
-                          {req.assignedAssetName || req.toolDescription}
-                        </h4>
-                        <p className="text-xs text-slate-500">
-                          {req.assignedAssetBrand} {req.assignedAssetModel ? `• ${req.assignedAssetModel}` : ''} {req.assignedAssetSerial ? `(מס"ד: ${req.assignedAssetSerial})` : ''}
-                        </p>
-                      </div>
-                      <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 shrink-0">
-                        במשלוח לאתר
-                      </span>
-                    </div>
-
-                    <div className="mt-2.5 p-2 rounded-lg bg-amber-50/50 border border-amber-200/60 text-xs space-y-1">
-                      <div className="text-slate-700">
-                        נשלח מ: <strong className="text-slate-900">{req.sourceWarehouseName || 'מחסן מרכזי'}</strong>
-                      </div>
-                      <div className="text-slate-500 text-[11px]">
-                        אושר ע&quot;י: <strong>{req.decidedBy || 'אחראי תפעול'}</strong> &bull; {req.decidedAt ? new Date(req.decidedAt).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="pt-2 border-t border-slate-100 flex items-center justify-end">
-                    <button
-                      type="button"
-                      disabled={receivingSiteRequestId === req.id}
-                      onClick={() => handleConfirmSiteReception(req)}
-                      className="py-1.5 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center gap-1.5 shadow-sm active:scale-95 transition-all cursor-pointer"
-                    >
-                      {receivingSiteRequestId === req.id ? (
-                        <>
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          <span>קולט כלי...</span>
-                        </>
-                      ) : (
-                        <>
-                          <PackageCheck className="w-4 h-4" />
-                          <span>קליטה ואישור הגעה באתר</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
+        {/* ========================================================================= */}
+        {/* TAB 4: 📝 מרכז הערות ותיעוד (FIELD NOTES & FEED)                           */}
+        {/* ========================================================================= */}
+        {activeTab === 'notes' && (
+          <div className="space-y-5 animate-in fade-in duration-200">
+            {/* CENTRAL NOTES & FIELD REMARKS FEED (מרכז הערות ותיעוד שטח) */}
+        <ChiefNotesFeedView
+          warehouses={data.allWarehouses || data.warehouses}
+          onOpenPassport={handleOpenPassport}
+        />
           </div>
         )}
-
-        {/* SITE STOREKEEPER: MY REQUESTS STATUS TRACKER */}
-        {(!isChiefOperations && !isGeneralManager) && mySiteRequests.length > 0 && (
-          <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-black text-slate-900 flex items-center gap-2">
-                  <ClipboardCheck className="w-4 h-4 text-indigo-600" />
-                  <span>סטטוס בקשות שנשלחו מהאתר ({mySiteRequests.length})</span>
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  מעקב אחר דרישות ציוד שהוגשו לאחראי תפעול ראשי
-                </p>
-              </div>
-
-              {isLoadingSiteData && (
-                <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
-              )}
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {mySiteRequests.slice(0, 6).map((req) => (
-                <div
-                  key={req.id}
-                  className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex flex-col justify-between gap-2"
-                >
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between gap-1.5">
-                      <span className="text-[10px] font-bold text-slate-500" dir="ltr">
-                        {new Date(req.createdAt).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit' })}
-                      </span>
-                      {req.status === 'PENDING' ? (
-                        <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
-                          🟡 בטיפול
-                        </span>
-                      ) : req.status === 'IN_TRANSIT' ? (
-                        <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 animate-pulse">
-                          🟢 אושר ובדרך
-                        </span>
-                      ) : req.status === 'REJECTED' ? (
-                        <span className="text-[10px] font-bold text-rose-800 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200">
-                          🔴 נדחה
-                        </span>
-                      ) : (
-                        <span className="text-[10px] font-bold text-slate-700 bg-slate-200 px-2 py-0.5 rounded-full">
-                          ⚪ נקלט באתר
-                        </span>
-                      )}
-                    </div>
-
-                    <h4 className="text-xs font-black text-slate-900 leading-snug">
-                      {req.toolDescription}
-                    </h4>
-                    <div className="text-[11px] text-slate-500">
-                      כמות: <strong className="text-slate-800">{req.quantity}</strong>
-                      {req.urgency === 'CRITICAL' && (
-                        <span className="text-rose-600 font-bold mr-2">&bull; קריטי</span>
-                      )}
-                      {req.urgency === 'URGENT' && (
-                        <span className="text-amber-600 font-bold mr-2">&bull; דחוף</span>
-                      )}
-                    </div>
-
-                    {req.rejectionReason && (
-                      <div className="p-1.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-[10px]">
-                        סיבת דחייה: {req.rejectionReason}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* INTER-SITE EQUIPMENT TRANSFER REQUEST (Storekeeper -> Operations Manager) */}
-        <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-blue-700/40">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-600/50 text-blue-200 flex items-center justify-center border border-blue-400/30 shrink-0">
-              <ArrowLeftRight className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="text-sm font-black text-white flex items-center gap-2">
-                <span>בקשת העברת ציוד בין אתרים</span>
-                <span className="text-[10px] font-bold bg-blue-500/30 text-blue-200 px-2 py-0.5 rounded-full border border-blue-400/30">
-                  נוהל מבוקר &bull; אישור מנהל תפעול
-                </span>
-              </h3>
-              <p className="text-xs text-blue-200 mt-0.5">
-                חסר כלי עבודה באתר? בחר כלי זמין ממתקן אחר והגש בקשה מנומקת לאישור אחראי תפעול ראשי
-              </p>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => {
-              setTransferRequestFeedback(null);
-              setSelectedAssetToTransfer(null);
-              setTransferRequestReason('');
-              setAssetSearchQuery('');
-              setIsTransferRequestModalOpen(true);
-            }}
-            className="py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-black flex items-center justify-center gap-2 shadow-md shadow-blue-500/20 active:scale-95 transition-all cursor-pointer shrink-0"
-          >
-            <Plus className="w-4 h-4" />
-            <span>בקשת העברת ציוד בין אתרים</span>
-          </button>
-        </div>
-
-        {/* DIRECT OUTBOUND EQUIPMENT TRANSFER (העברה ישירה ע"י מחסנאי ללא צורך באישור מנהל) */}
-        <div className="p-4 rounded-2xl bg-gradient-to-r from-sky-950 via-blue-900 to-indigo-950 text-white shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-sky-500/40">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-sky-500/30 text-sky-200 flex items-center justify-center border border-sky-400/30 shrink-0">
-              <Truck className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="text-sm font-black text-white flex items-center gap-2">
-                <span>העברה ישירה לאתר אחר</span>
-                <span className="text-[10px] font-bold bg-sky-500/30 text-sky-200 px-2 py-0.5 rounded-full border border-sky-400/30">
-                  שילוח מיידי &bull; ללא אישור מנהל
-                </span>
-              </h3>
-              <p className="text-xs text-sky-200 mt-0.5">
-                שילוח ישיר של כלי עבודה זמין ממחסן זה ישירות לאתר בנייה או מחסן אחר בארגון
-              </p>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => {
-              setDirectTransferFeedback(null);
-              setSelectedDirectAsset(null);
-              setTransporterNotes('');
-              setDirectSearchQuery('');
-              const otherWh = warehouses.find((w) => w.id !== 'all' && w.id !== selectedWarehouseId);
-              setDirectTargetWarehouseId(otherWh ? otherWh.id : '');
-              setIsDirectTransferModalOpen(true);
-            }}
-            className="py-2.5 px-4 rounded-xl bg-sky-500 hover:bg-sky-600 text-white text-xs sm:text-sm font-black flex items-center justify-center gap-2 shadow-md shadow-sky-500/20 active:scale-95 transition-all cursor-pointer shrink-0"
-          >
-            <Truck className="w-4 h-4" />
-            <span>העברה ישירה לאתר אחר</span>
-          </button>
-        </div>
-
-        {/* IN-TRANSIT EQUIPMENT ARRIVING TO THIS WAREHOUSE */}
-        {incomingTransfers.length > 0 && (
-          <div className="p-4 rounded-2xl bg-amber-50/90 border-2 border-amber-300 shadow-sm space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-amber-950 font-black">
-                <Truck className="w-5 h-5 text-amber-600" />
-                <h3 className="text-sm font-black">
-                  ציוד בשינוע הממתין לקליטה במחסן ({incomingTransfers.length})
-                </h3>
-              </div>
-              <span className="text-[11px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-200">
-                In-Transit
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {incomingTransfers.map((req) => (
-                <div
-                  key={req.id}
-                  className="p-3.5 rounded-xl bg-white border border-amber-200 shadow-xs flex flex-col justify-between gap-2"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <span className="font-mono text-[10px] font-bold text-slate-500" dir="ltr">
-                        {req.qrCode} {req.tagNumber ? `(${req.tagNumber})` : ''}
-                      </span>
-                      <h4 className="text-sm font-black text-slate-900">{req.assetName}</h4>
-                      <p className="text-xs text-slate-500">
-                        {req.assetBrand} {req.assetModel ? `• ${req.assetModel}` : ''}
-                      </p>
-                    </div>
-                    <div className="text-left text-[11px] font-bold text-slate-600">
-                      <div>ממחסן: <strong className="text-slate-900">{req.sourceWarehouseName}</strong></div>
-                      <div>ליעד: <strong className="text-blue-900">{req.targetWarehouseName}</strong></div>
-                    </div>
-                  </div>
-
-                  {req.reason && (
-                    <div className="p-2.5 rounded-xl bg-amber-50/80 border border-amber-200 text-xs text-amber-950 font-medium space-y-0.5">
-                      <div className="flex items-center gap-1 font-bold text-amber-900 text-[10px]">
-                        <Truck className="w-3 h-3 text-amber-600" />
-                        <span>🚚 הערת שינוע / סיבת העברה:</span>
-                      </div>
-                      <p className="text-xs font-bold italic leading-relaxed whitespace-pre-wrap">
-                        &ldquo;{req.reason}&rdquo;
-                      </p>
-                    </div>
-                  )}
-
-                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-                    <span className="text-[11px] text-slate-500">
-                      הוגש ע&quot;י {req.requestedBy}
-                    </span>
-                    <button
-                      type="button"
-                      disabled={receivingTransferId === req.id}
-                      onClick={() => handleCompleteReception(req)}
-                      className="py-1.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center gap-1.5 shadow-sm active:scale-95 transition-all cursor-pointer"
-                    >
-                      {receivingTransferId === req.id ? (
-                        <>
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          <span>קולט כלי...</span>
-                        </>
-                      ) : (
-                        <>
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>קליטת ציוד במחסן</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* SITE EQUIPMENT DISPATCH WITH TAG VERIFICATION & DIGITAL SIGNATURE */}
-        <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-900 via-teal-900 to-slate-900 text-white shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-emerald-700/40">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-600/50 text-emerald-200 flex items-center justify-center border border-emerald-400/30 shrink-0">
-              <FileSignature className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="text-sm font-black text-white flex items-center gap-2">
-                <span>הוצאת ציוד לאתר (אישור תיוג וחתימה)</span>
-                <span className="text-[10px] font-bold bg-emerald-500/30 text-emerald-200 px-2 py-0.5 rounded-full border border-emerald-400/30">
-                  אישור תיוג &bull; חתימה חיה
-                </span>
-              </h3>
-              <p className="text-xs text-emerald-200 mt-0.5">
-                נוהל שחרור ציוד לאתרי בנייה: אימות תג QR פיזי על הכלי והחתמה דיגיטלית של מקבל הציוד בשטח
-              </p>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => {
-              setDispatchFeedback(null);
-              setDispatchAsset(null);
-              setDispatchTagInput('');
-              setIsTagVerified(false);
-              setDispatchWorkerName('');
-              setDispatchWorkerPhone('');
-              setDispatchSignature(null);
-              setIsDispatchModalOpen(true);
-            }}
-            className="py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-black flex items-center justify-center gap-2 shadow-md shadow-emerald-500/20 active:scale-95 transition-all cursor-pointer shrink-0"
-          >
-            <PenTool className="w-4 h-4" />
-            <span>הוצאת ציוד לאתר (אישור תיוג וחתימה)</span>
-          </button>
-        </div>
-
-        {/* Zero State Alert for Live Production */}
-        {data.availableCount === 0 && data.checkedOutCount === 0 && data.quarantinedCount === 0 && (
-          <div className="p-8 rounded-2xl bg-amber-50/90 border-2 border-amber-200 text-center space-y-3 shadow-sm">
-            <div className="w-12 h-12 mx-auto rounded-2xl bg-amber-100 text-amber-800 flex items-center justify-center border border-amber-200">
-              <Package className="w-6 h-6" />
-            </div>
-            <div className="space-y-1">
-              <h3 className="text-base font-black text-amber-950">
-                אין עדיין כלים רשומים במערכת - התחל בקליטת כלי חדש
-              </h3>
-              <p className="text-xs text-amber-800/90 max-w-md mx-auto">
-                המחסן הנוכחי ריק מציוד פעיל. ניתן לקלוט כלי עבודה חדשים, לקודד תגיות QR או לנייד כלים ממחסנים אחרים.
-              </p>
-            </div>
-            <div className="pt-2 flex flex-wrap justify-center gap-2">
-              <Link
-                href="/"
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-black shadow transition-all active:scale-95"
-              >
-                <Plus className="w-4 h-4" />
-                <span>התחל בקליטת כלי חדש</span>
-              </Link>
-              <Link
-                href="/catalog"
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white hover:bg-amber-100 text-amber-900 border border-amber-300 text-xs font-black shadow-sm transition-all active:scale-95"
-              >
-                <Layers className="w-4 h-4" />
-                <span>צפייה בקטלוג הציוד</span>
-              </Link>
-            </div>
-          </div>
-        )}
-
-        {/* 4. SECTION A: OVERDUE ASSETS WITH ONE-TAP CONTACT */}
-        <div className="rounded-2xl border-2 border-rose-200 bg-white p-5 shadow-sm space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-rose-900 font-black">
-              <AlertTriangle className="w-5 h-5 text-rose-600" />
-              <h2 className="text-base">
-                כלים באיחור להחזרה &bull; מעקב דחוף ({data.overdueAssets.length})
-              </h2>
-            </div>
-            <span className="text-xs font-bold text-rose-700 bg-rose-50 px-2.5 py-1 rounded-full border border-rose-200">
-              טיפול מיידי
-            </span>
-          </div>
-
-          {data.overdueAssets.length === 0 ? (
-            <div className="p-6 text-center bg-emerald-50/60 rounded-xl border border-emerald-200 text-xs font-bold text-emerald-800">
-              כל הכלים שהונפקו מוחזרים בזמן! אין כרגע איחורים פעילים במחסן זה.
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {data.overdueAssets.map((tool) => {
-                const waLink = getWhatsAppLink(
-                  tool.workerPhone,
-                  tool.workerName,
-                  tool.toolName,
-                  tool.qrCode,
-                  tool.daysOverdue
-                );
-
-                return (
-                  <div
-                    key={tool.assetId}
-                    className="p-3.5 rounded-xl bg-rose-50/40 border border-rose-200 space-y-3 hover:border-rose-300 transition-colors"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-[10px] font-black uppercase px-1.5 py-0.5 rounded bg-rose-100 text-rose-800">
-                            +{tool.daysOverdue} ימים באיחור
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => handleOpenPassport(tool.qrCode)}
-                            className="font-mono text-[11px] font-black text-rose-950 hover:underline cursor-pointer flex items-center gap-1"
-                            title={`לחץ לפתיחת תיק כלי מלא עבור ${tool.qrCode}`}
-                            dir="ltr"
-                          >
-                            <QrCode className="w-3 h-3 text-rose-600" />
-                            <span>{tool.qrCode}</span>
-                          </button>
-                        </div>
-                        <h3 className="text-sm font-black text-blue-950 mt-1">
-                          {tool.toolName}
-                        </h3>
-                        <div className="text-xs text-slate-500 font-medium">
-                          {tool.brand} {tool.modelNumber ? `• ${tool.modelNumber}` : ''}
-                        </div>
-                      </div>
-
-                      <div className="text-left font-bold text-xs text-slate-700">
-                        <div className="text-blue-950 font-black">{tool.workerName}</div>
-                        <div className="text-[11px] text-slate-500" dir="ltr">
-                          {tool.workerPhone || 'ללא טלפון'}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Checkout Note if present */}
-                    {tool.checkoutNote && (
-                      <div className="p-2 rounded-lg bg-amber-50/80 border border-amber-200/80 text-[11px] text-amber-950 font-medium flex items-center gap-1.5">
-                        <FileText className="w-3 h-3 text-amber-600 shrink-0" />
-                        <span className="font-bold">הערת ניפוק:</span>
-                        <span className="italic truncate">&ldquo;{tool.checkoutNote}&rdquo;</span>
-                      </div>
-                    )}
-
-                    {/* Direct Contact & Passport Buttons */}
-                    <div className="pt-2 border-t border-rose-200/80 flex items-center gap-2">
-                      {tool.workerPhone ? (
-                        <>
-                          <a
-                            href={`tel:${tool.workerPhone}`}
-                            className="flex-1 py-2 px-2.5 rounded-xl bg-white hover:bg-slate-50 text-blue-900 border border-slate-300 text-xs font-black flex items-center justify-center gap-1 shadow-sm active:scale-95 transition-all"
-                          >
-                            <Phone className="w-3.5 h-3.5 text-blue-600" />
-                            <span>חייג</span>
-                          </a>
-
-                          {waLink && (
-                            <a
-                              href={waLink}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="flex-1 py-2 px-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center justify-center gap-1 shadow-sm active:scale-95 transition-all"
-                            >
-                              <MessageCircle className="w-3.5 h-3.5" />
-                              <span>וואטסאפ</span>
-                            </a>
-                          )}
-                        </>
-                      ) : (
-                        <span className="text-xs text-slate-400 italic flex-1">
-                          ללא טלפון
-                        </span>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={() => handleOpenPassport(tool.qrCode)}
-                        className="py-2 px-3 rounded-xl bg-white hover:bg-blue-50 text-blue-900 border border-slate-300 text-xs font-bold flex items-center justify-center gap-1 shadow-sm active:scale-95 transition-all cursor-pointer"
-                        title="צפה בדרכון הכלי"
-                      >
-                        <FileText className="w-3.5 h-3.5 text-blue-600" />
-                        <span>דרכון</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setCheckinPreselectedAssetId(tool.assetId);
-                          setIsCheckinModalOpen(true);
-                        }}
-                        className="py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black flex items-center justify-center gap-1 shadow-sm active:scale-95 transition-all cursor-pointer"
-                        title="קלוט כלי זה חזרה למחסן"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5" />
-                        <span>קלוט</span>
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* 5. SECTION B: RETURNS DUE TODAY */}
-        <div className="rounded-2xl border-2 border-blue-100 bg-white p-5 shadow-sm space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-blue-950 font-black">
-              <Calendar className="w-5 h-5 text-blue-600" />
-              <h2 className="text-base">
-                החזרות צפויות היום במשמרת ({data.returnsDueToday.length})
-              </h2>
-            </div>
-            <span className="text-xs font-bold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-200">
-              משמרת פעילה
-            </span>
-          </div>
-
-          {data.returnsDueToday.length === 0 ? (
-            <div className="p-6 text-center bg-slate-50 rounded-xl border border-slate-200 text-xs font-bold text-slate-500">
-              לא רשומות החזרות שתוזמנו להיום
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {data.returnsDueToday.map((item) => (
-                <div
-                  key={item.assetId}
-                  className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <h3 className="text-sm font-black text-blue-950">
-                        {item.toolName}
-                      </h3>
-                      <div className="text-xs text-slate-500 font-mono mt-0.5" dir="ltr">
-                        {item.brand} &bull; {item.qrCode}
-                      </div>
-                    </div>
-                    <span className="text-[11px] font-bold text-blue-700 bg-blue-100/60 px-2 py-0.5 rounded">
-                      היום ב-
-                      {new Date(item.expectedReturnDate).toLocaleTimeString('he-IL', {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-200">
-                    <span className="text-slate-600">
-                      אצל: <strong>{item.workerName}</strong>
-                    </span>
-                    <div className="flex items-center gap-2">
-                      {item.accessoriesSummary && (
-                        <span className="text-[11px] text-slate-500 font-medium">
-                          {item.accessoriesSummary}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Checkout Note if present */}
-                    {item.checkoutNote && (
-                      <div className="p-1.5 rounded-lg bg-amber-50 border border-amber-200/70 text-[11px] text-amber-950 font-medium flex items-center gap-1.5">
-                        <FileText className="w-3 h-3 text-amber-600 shrink-0" />
-                        <span className="font-bold">הערת ניפוק:</span>
-                        <span className="italic truncate">&ldquo;{item.checkoutNote}&rdquo;</span>
-                      </div>
-                    )}
-                      <button
-                        type="button"
-                        onClick={() => handleOpenPassport(item.qrCode)}
-                        className="px-2 py-0.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-800 text-[11px] font-bold border border-blue-200 cursor-pointer"
-                        title="צפה בדרכון הכלי"
-                      >
-                        דרכון
-                      </button>
-                    </div>
-                  </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* 6. SECTION C: LOW STOCK ALERTS */}
-        <div className="rounded-2xl border-2 border-amber-200 bg-white p-5 shadow-sm space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-amber-950 font-black">
-              <TrendingDown className="w-5 h-5 text-amber-600" />
-              <h2 className="text-base">
-                התרעות מלאי קריטי במחסן ({data.lowStockAlerts.length})
-              </h2>
-            </div>
-            <span className="text-xs font-bold text-amber-800 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200">
-              נדרש חידוש מלאי
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {data.lowStockAlerts.map((alert) => (
-              <div
-                key={alert.categoryId}
-                className="p-3.5 rounded-xl bg-amber-50/50 border border-amber-200 space-y-1.5"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-black text-amber-950">
-                    {alert.categoryName}
-                  </span>
-                  <span
-                    className={`text-[10px] font-black px-1.5 py-0.5 rounded uppercase ${
-                      alert.status === 'critical'
-                        ? 'bg-rose-100 text-rose-800'
-                        : 'bg-amber-100 text-amber-800'
-                    }`}
-                  >
-                    {alert.status === 'critical' ? 'מלאי קריטי' : 'מלאי נמוך'}
-                  </span>
-                </div>
-                <div className="flex items-baseline gap-1 text-xs">
-                  <span className="text-xl font-black text-amber-950">
-                    {alert.availableCount}
-                  </span>
-                  <span className="text-slate-500">
-                    זמינים (סף התרעה: {alert.minStockThreshold})
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
       </div>
 
       {/* DIGITAL TOOL PASSPORT MODAL */}

@@ -70,33 +70,35 @@ export default function PortalLandingView({
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col justify-between selection:bg-blue-600 selection:text-white" dir="rtl">
       {/* Top Bar with System Identity and Sync Status */}
-      <header className="border-b border-slate-200 bg-white/95 backdrop-blur-md px-4 py-3.5 sticky top-0 z-30 shadow-xs">
-        <div className="max-w-5xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl bg-blue-600 flex items-center justify-center text-white font-black text-2xl shadow-md shadow-blue-600/20">
+      {/* Top Bar with System Identity and Sync Status (Compact single-row h-14 on mobile) */}
+      <header className="border-b border-slate-200 bg-white/95 backdrop-blur-md px-3 md:px-4 h-14 md:h-auto py-2 md:py-3.5 sticky top-0 z-30 shadow-xs flex items-center">
+        <div className="max-w-5xl mx-auto flex items-center justify-between w-full">
+          <div className="flex items-center gap-2 md:gap-3">
+            <div className="w-8 h-8 md:w-11 md:h-11 rounded-xl md:rounded-2xl bg-blue-600 flex items-center justify-center text-white font-black text-base md:text-2xl shadow-sm md:shadow-md md:shadow-blue-600/20 shrink-0">
               T
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <span className="text-xl font-black tracking-tight text-slate-900">Tooly</span>
-                <span className="text-[10px] bg-blue-50 text-blue-700 font-extrabold px-2 py-0.5 rounded-full border border-blue-200 uppercase tracking-widest">
+              <div className="flex items-center gap-1.5 md:gap-2">
+                <span className="text-base md:text-xl font-black tracking-tight text-slate-900">Tooly</span>
+                <span className="text-[9px] md:text-[10px] bg-blue-50 text-blue-700 font-extrabold px-1.5 md:px-2 py-0.5 rounded-full border border-blue-200 uppercase tracking-widest">
                   v2.5 Pro
                 </span>
               </div>
-              <p className="text-xs text-slate-500 font-medium">
+              <p className="hidden md:block text-xs text-slate-500 font-medium">
                 מערכת ניהול, בקרת מלאי ותנועת כלי עבודה
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 md:gap-3">
             <button
               type="button"
               onClick={() => setIsRegisterModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-bold transition-all cursor-pointer shadow-xs"
+              className="inline-flex items-center gap-1 md:gap-1.5 px-2.5 md:px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-bold transition-all cursor-pointer shadow-2xs"
             >
               <Building2 className="w-3.5 h-3.5" />
-              <span>הקמת ארגון חדש</span>
+              <span className="hidden sm:inline">הקמת ארגון חדש</span>
+              <span className="sm:hidden">ארגון חדש</span>
             </button>
             <NetworkSyncPill />
           </div>

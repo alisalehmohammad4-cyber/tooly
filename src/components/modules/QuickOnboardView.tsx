@@ -790,8 +790,34 @@ export default function QuickOnboardView({
         subtitle={role === 'worker' ? 'סורק מהיר' : undefined}
         cartCount={dispatchCart.length}
         onOpenCart={() => setIsBulkModalOpen(true)}
+        warehouseSelector={
+          role !== 'worker' && warehouses.length > 0 ? (
+            <div className="relative">
+              <select
+                value={selectedWarehouseId}
+                disabled={isStorekeeperScoped}
+                onChange={(e) => setSelectedWarehouseId(e.target.value)}
+                className={`w-full h-8 text-[11px] font-black px-2 pr-5 rounded-lg border focus:outline-none appearance-none truncate transition-colors ${
+                  isStorekeeperScoped
+                    ? 'bg-slate-100 border-slate-300 text-slate-700 cursor-not-allowed'
+                    : 'bg-blue-50/80 border-blue-200 text-blue-950 focus:border-blue-600 cursor-pointer shadow-2xs'
+                }`}
+                title="אתר / מחסן פעיל"
+              >
+                {warehouses.map((wh) => (
+                  <option key={wh.id} value={wh.id}>
+                    {wh.name}
+                  </option>
+                ))}
+              </select>
+              <div className="absolute left-1.5 top-1/2 -translate-y-1/2 pointer-events-none text-blue-600 text-[9px]">
+                ▼
+              </div>
+            </div>
+          ) : undefined
+        }
       >
-        {/* Sticky Warehouse Selection Dropdown (Only for Storekeeper & Executive) */}
+        {/* Sticky Warehouse Selection Dropdown (Only on Desktop) */}
         {role !== 'worker' && (
           <div className="mt-3 max-w-lg mx-auto">
             <div className="flex items-center justify-between mb-1">

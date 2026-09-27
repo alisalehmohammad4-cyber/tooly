@@ -2,6 +2,9 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import {
+  SlidersHorizontal,
+  ChevronLeft,
+  ChevronRight,
   UserCheck,
   CheckCircle2,
   Truck,
@@ -219,6 +222,9 @@ function renderActionBadge(action: AuditActionType) {
 export default function HistoryView({ initialData }: HistoryViewProps) {
   // Search & 300ms Debounce State
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState<boolean>(false);
+  const PAGE_SIZE = 10;
+  const [currentPage, setCurrentPage] = useState<number>(1);
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState<string>('');
   const [isDebouncing, setIsDebouncing] = useState<boolean>(false);
 
@@ -397,6 +403,16 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
     debouncedSearchQuery,
   ]);
 
+  const totalPages = Math.max(1, Math.ceil(filteredRecords.length / PAGE_SIZE));
+  const paginatedRecords = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return filteredRecords.slice(start, start + PAGE_SIZE);
+  }, [filteredRecords, currentPage]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedWarehouseId, selectedAction, selectedDateRange, debouncedSearchQuery, hasSignatureOnly, activeChip]);
+
   // Detect whether any non-default filter is active
   const hasActiveFilters =
     Boolean(debouncedSearchQuery.trim()) ||
@@ -492,13 +508,13 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
     >
       <div className="max-w-4xl mx-auto px-4 py-5 space-y-4">
         {/* HEADER BAR: TITLE, ACTIONS & EXPORT */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-blue-100 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3.5 sm:p-4 rounded-2xl border border-blue-100 shadow-sm">
           <div>
-            <h1 className="text-lg font-black text-blue-950 flex items-center gap-2">
+            <h1 className="text-base sm:text-lg font-black text-blue-950 flex items-center gap-2">
               <HistoryIcon className="w-5 h-5 text-blue-600" />
               <span>יומן תנועות ואישורי מסירה</span>
             </h1>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="hidden sm:block text-xs text-slate-500 mt-0.5">
               חיפוש מרובה שדות, סינון לפי תגי כלים, עובדים ואימותי חתימות
             </p>
           </div>
@@ -507,7 +523,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
             <button
               type="button"
               onClick={handleExportCsv}
-              className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-sm transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
+              className="flex-1 sm:flex-none px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
               title="ייצא את הרשומות המסוננות לקובץ אקסל CSV"
             >
               <FileSpreadsheet className="w-4 h-4" />
@@ -517,7 +533,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
             <button
               type="button"
               onClick={() => setIsPdfExportModalOpen(true)}
-              className="px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 text-blue-950 border border-slate-300 font-black text-xs shadow-sm transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
+              className="flex-1 sm:flex-none px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 text-blue-950 border border-slate-300 font-black text-xs shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
               title="הפק דוח מבוקר להדפסה או שמירה כ-PDF"
             >
               <Printer className="w-4 h-4 text-purple-600" />
@@ -526,186 +542,390 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
           </div>
         </div>
 
-        {/* TOP QUICK-FILTER CHIPS BAR */}
-        <div className="bg-white p-3 rounded-2xl border border-blue-100 shadow-sm space-y-2">
-          <div className="text-[11px] font-black text-slate-400 uppercase tracking-wider flex items-center justify-between">
-            <span className="flex items-center gap-1">
-              <Filter className="w-3.5 h-3.5 text-blue-500" />
-              <span>סינון מהיר לפי סוג אירוע:</span>
-            </span>
-            <span className="font-mono text-blue-900 font-bold">
-              {filteredRecords.length} / {initialData.records.length} רשומות
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
-            {quickChips.map((chip) => {
-              const isSelected = activeChip === chip.id;
-              return (
-                <button
-                  key={chip.id}
-                  type="button"
-                  onClick={() => {
-                    setActiveChip(chip.id);
-                    if (['CHECKOUT', 'CHECKIN', 'TRANSFERS', 'MAINTENANCE_FLAG', 'ONBOARD', 'all'].includes(chip.id)) {
-                      setSelectedAction(chip.id);
-                    } else {
-                      setSelectedAction('all');
-                    }
-                  }}
-                  className={`min-h-[42px] px-3.5 py-2 rounded-xl text-xs font-black shrink-0 border transition-all flex items-center gap-2 cursor-pointer active:scale-95 ${
-                    isSelected
-                      ? chip.activeClass
-                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:border-blue-300 hover:bg-blue-50/50'
-                  }`}
-                >
-                  {chip.icon}
-                  <span>{chip.label}</span>
-                  <span
-                    className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-full ${
-                      isSelected
-                        ? 'bg-white/20 text-white'
-                        : 'bg-slate-200/80 text-slate-700'
-                    }`}
-                  >
-                    {chip.count}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* OMNI-SEARCH & DETAILED FILTERS GRID */}
-        <div className="bg-white p-4 rounded-2xl border border-blue-100 shadow-sm space-y-3">
-          {/* DEBOUNCED SEARCH INPUT WITH LIVE SPINNER */}
-          <div className="relative">
-            <Search className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-600 pointer-events-none" />
+        {/* MOBILE-FIRST COMPACT FILTER BAR (< 768px) */}
+        <div className="md:hidden flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="חיפוש חכם: מספר תג (למשל 960), שם עובד, טלפון, מודל כלי, מנהל מבצע או הערות..."
-              className="w-full min-h-[50px] bg-slate-50 text-blue-950 font-bold text-sm pr-10 pl-24 rounded-xl border-2 border-slate-200 focus:border-blue-600 focus:bg-white focus:outline-none placeholder:text-slate-400 shadow-xs transition-colors"
+              placeholder="חיפוש לפי תג, עובד, טלפון, כלי..."
+              className="w-full min-h-[46px] bg-white text-blue-950 font-medium text-xs pr-10 pl-10 py-2 rounded-xl border-2 border-blue-100 focus:border-blue-600 focus:outline-none shadow-xs placeholder:text-slate-400"
             />
-            <div className="absolute left-3.5 top-1/2 -translate-y-1/2 flex items-center gap-2">
-              {isDebouncing && (
-                <div className="flex items-center gap-1 text-[11px] font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded-md border border-blue-200 animate-in fade-in">
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                  <span>מחפש...</span>
-                </div>
-              )}
-              {searchQuery && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSearchQuery('');
-                    setDebouncedSearchQuery('');
-                  }}
-                  className="text-xs font-bold text-slate-400 hover:text-slate-700 cursor-pointer p-1"
-                  title="נקה חיפוש"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              )}
+            {isDebouncing && (
+              <div className="absolute left-9 top-1/2 -translate-y-1/2">
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />
+              </div>
+            )}
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchQuery('');
+                  setDebouncedSearchQuery('');
+                }}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400 hover:text-blue-600 p-1 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setIsMobileFiltersOpen(true)}
+            className={`min-h-[46px] px-3.5 rounded-xl border-2 font-black text-xs flex items-center gap-1.5 shrink-0 transition-all cursor-pointer shadow-xs ${
+              (activeChip !== 'all' || selectedWarehouseId !== 'all' || selectedAction !== 'all' || selectedDateRange !== 'all' || hasSignatureOnly)
+                ? 'bg-blue-600 border-blue-600 text-white'
+                : 'bg-white border-blue-200 text-blue-950 hover:bg-blue-50'
+            }`}
+          >
+            <SlidersHorizontal className="w-4 h-4" />
+            <span>⚙️ מסננים</span>
+            {(activeChip !== 'all' || selectedWarehouseId !== 'all' || selectedAction !== 'all' || selectedDateRange !== 'all' || hasSignatureOnly) && (
+              <span className="w-5 h-5 rounded-full bg-amber-400 text-amber-950 font-black text-[10px] flex items-center justify-center">
+                {(activeChip !== 'all' ? 1 : 0) + (selectedWarehouseId !== 'all' ? 1 : 0) + (selectedAction !== 'all' ? 1 : 0) + (selectedDateRange !== 'all' ? 1 : 0) + (hasSignatureOnly ? 1 : 0)}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {/* DESKTOP FILTERS (>= 768px) */}
+        <div className="hidden md:block space-y-4">
+          {/* TOP QUICK-FILTER CHIPS BAR */}
+          <div className="bg-white p-3 rounded-2xl border border-blue-100 shadow-sm space-y-2">
+            <div className="text-[11px] font-black text-slate-400 uppercase tracking-wider flex items-center justify-between">
+              <span className="flex items-center gap-1">
+                <Filter className="w-3.5 h-3.5 text-blue-500" />
+                <span>סינון מהיר לפי סוג אירוע:</span>
+              </span>
+              <span className="font-mono text-blue-900 font-bold">
+                {filteredRecords.length} / {initialData.records.length} רשומות
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+              {quickChips.map((chip) => {
+                const isSelected = activeChip === chip.id;
+                return (
+                  <button
+                    key={chip.id}
+                    type="button"
+                    onClick={() => {
+                      setActiveChip(chip.id);
+                      if (['CHECKOUT', 'CHECKIN', 'TRANSFERS', 'MAINTENANCE_FLAG', 'ONBOARD', 'all'].includes(chip.id)) {
+                        setSelectedAction(chip.id);
+                      } else {
+                        setSelectedAction('all');
+                      }
+                    }}
+                    className={`min-h-[42px] px-3.5 py-2 rounded-xl text-xs font-black shrink-0 border transition-all flex items-center gap-2 cursor-pointer active:scale-95 ${
+                      isSelected
+                        ? chip.activeClass
+                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:border-blue-300 hover:bg-blue-50/50'
+                    }`}
+                  >
+                    {chip.icon}
+                    <span>{chip.label}</span>
+                    <span
+                      className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-full ${
+                        isSelected
+                          ? 'bg-white/20 text-white'
+                          : 'bg-slate-200/80 text-slate-700'
+                      }`}
+                    >
+                      {chip.count}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
-          {/* FACILITY, DATE & SIGNATURE DROPDOWNS */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-            {/* Warehouse Dropdown */}
+          {/* OMNI-SEARCH & DETAILED FILTERS GRID */}
+          <div className="bg-white p-4 rounded-2xl border border-blue-100 shadow-sm space-y-3">
+            {/* DEBOUNCED SEARCH INPUT WITH LIVE SPINNER */}
             <div className="relative">
-              <Building2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-600 pointer-events-none" />
-              <select
-                value={selectedWarehouseId}
-                onChange={(e) => setSelectedWarehouseId(e.target.value)}
-                className="w-full min-h-[44px] bg-white text-blue-950 font-bold text-xs pr-9 pl-7 py-2 rounded-xl border border-slate-200 focus:border-blue-600 focus:outline-none appearance-none cursor-pointer shadow-2xs"
-              >
-                <option value="all">כל האתרים והמחסנים</option>
-                {initialData.warehouses.map((wh) => (
-                  <option key={wh.id} value={wh.id}>
-                    {wh.code ? `[${wh.code}] ` : ''}
-                    {wh.name}
-                  </option>
-                ))}
-              </select>
-              <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-xs">
-                ▼
+              <Search className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-600 pointer-events-none" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="חיפוש חכם: מספר תג (למשל 960), שם עובד, טלפון, מודל כלי, מנהל מבצע או הערות..."
+                className="w-full min-h-[50px] bg-slate-50 text-blue-950 font-bold text-sm pr-10 pl-24 rounded-xl border-2 border-slate-200 focus:border-blue-600 focus:bg-white focus:outline-none placeholder:text-slate-400 shadow-xs transition-colors"
+              />
+              <div className="absolute left-3.5 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                {isDebouncing && (
+                  <div className="flex items-center gap-1 text-[11px] font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded-md border border-blue-200 animate-in fade-in">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    <span>מחפש...</span>
+                  </div>
+                )}
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchQuery('');
+                      setDebouncedSearchQuery('');
+                    }}
+                    className="text-xs font-bold text-slate-400 hover:text-slate-700 cursor-pointer p-1"
+                    title="נקה חיפוש"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
               </div>
             </div>
 
-            {/* Date Range Dropdown */}
-            <div className="relative">
-              <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-600 pointer-events-none" />
-              <select
-                value={selectedDateRange}
-                onChange={(e) => setSelectedDateRange(e.target.value as AuditDateRange)}
-                className="w-full min-h-[44px] bg-white text-blue-950 font-bold text-xs pr-9 pl-7 py-2 rounded-xl border border-slate-200 focus:border-blue-600 focus:outline-none appearance-none cursor-pointer shadow-2xs"
-              >
-                {DATE_RANGE_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-              <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-xs">
-                ▼
+            {/* FACILITY, DATE & SIGNATURE DROPDOWNS */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              {/* Warehouse Dropdown */}
+              <div className="relative">
+                <Building2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-600 pointer-events-none" />
+                <select
+                  value={selectedWarehouseId}
+                  onChange={(e) => setSelectedWarehouseId(e.target.value)}
+                  className="w-full min-h-[44px] bg-white text-blue-950 font-bold text-xs pr-9 pl-7 py-2 rounded-xl border border-slate-200 focus:border-blue-600 focus:outline-none appearance-none cursor-pointer shadow-2xs"
+                >
+                  <option value="all">כל האתרים והמחסנים</option>
+                  {initialData.warehouses.map((wh) => (
+                    <option key={wh.id} value={wh.id}>
+                      {wh.code ? `[${wh.code}] ` : ''}
+                      {wh.name}
+                    </option>
+                  ))}
+                </select>
+                <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-xs">
+                  ▼
+                </div>
               </div>
-            </div>
 
-            {/* Signature Verified Only Toggle */}
-            <button
-              type="button"
-              onClick={() => setHasSignatureOnly((prev) => !prev)}
-              className={`min-h-[44px] px-3 py-2 rounded-xl border text-xs font-bold flex items-center justify-between transition-all cursor-pointer ${
-                hasSignatureOnly
-                  ? 'bg-emerald-50 border-emerald-300 text-emerald-900 shadow-2xs'
-                  : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300'
-              }`}
-            >
-              <span className="flex items-center gap-1.5">
-                <FileSignature className="w-4 h-4 text-emerald-600" />
-                <span>חתימה דיגיטלית בלבד</span>
-              </span>
-              <span
-                className={`w-4 h-4 rounded flex items-center justify-center border ${
+              {/* Date Range Dropdown */}
+              <div className="relative">
+                <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-600 pointer-events-none" />
+                <select
+                  value={selectedDateRange}
+                  onChange={(e) => setSelectedDateRange(e.target.value as AuditDateRange)}
+                  className="w-full min-h-[44px] bg-white text-blue-950 font-bold text-xs pr-9 pl-7 py-2 rounded-xl border border-slate-200 focus:border-blue-600 focus:outline-none appearance-none cursor-pointer shadow-2xs"
+                >
+                  {DATE_RANGE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+                <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-xs">
+                  ▼
+                </div>
+              </div>
+
+              {/* Signature Verified Only Toggle */}
+              <button
+                type="button"
+                onClick={() => setHasSignatureOnly((prev) => !prev)}
+                className={`min-h-[44px] px-3 py-2 rounded-xl border text-xs font-bold flex items-center justify-between transition-all cursor-pointer ${
                   hasSignatureOnly
-                    ? 'bg-emerald-600 border-emerald-600 text-white'
-                    : 'border-slate-300 bg-white'
+                    ? 'bg-emerald-50 border-emerald-300 text-emerald-900 shadow-2xs'
+                    : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300'
                 }`}
               >
-                {hasSignatureOnly && <Check className="w-3 h-3" />}
-              </span>
-            </button>
-          </div>
-
-          {/* ACTION SPECIFIC SUB-PILLS */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pt-1 scrollbar-none">
-            {ACTION_FILTERS.map((f) => {
-              const isSelected = selectedAction === f.value;
-              return (
-                <button
-                  key={f.value}
-                  type="button"
-                  onClick={() => {
-                    setSelectedAction(f.value);
-                    if (['CHECKOUT', 'CHECKIN', 'TRANSFERS', 'MAINTENANCE_FLAG', 'ONBOARD', 'all'].includes(f.value)) {
-                      setActiveChip(f.value as QuickChipId);
-                    }
-                  }}
-                  className={`min-h-[36px] px-3 py-1 rounded-lg text-xs font-bold shrink-0 border transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer ${
-                    isSelected
-                      ? 'bg-blue-950 text-white border-blue-950 shadow-xs font-black'
-                      : 'bg-white text-slate-700 border-slate-200 hover:border-blue-200 hover:bg-slate-50'
+                <span className="flex items-center gap-1.5">
+                  <FileSignature className="w-4 h-4 text-emerald-600" />
+                  <span>חתימה דיגיטלית בלבד</span>
+                </span>
+                <span
+                  className={`w-4 h-4 rounded flex items-center justify-center border ${
+                    hasSignatureOnly
+                      ? 'bg-emerald-600 border-emerald-600 text-white'
+                      : 'border-slate-300 bg-white'
                   }`}
                 >
-                  {f.icon}
-                  <span>{f.labelHe}</span>
-                </button>
-              );
-            })}
+                  {hasSignatureOnly && <Check className="w-3 h-3" />}
+                </span>
+              </button>
+            </div>
+
+            {/* ACTION SPECIFIC SUB-PILLS */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pt-1 no-scrollbar">
+              {ACTION_FILTERS.map((f) => {
+                const isSelected = selectedAction === f.value;
+                return (
+                  <button
+                    key={f.value}
+                    type="button"
+                    onClick={() => {
+                      setSelectedAction(f.value);
+                      if (['CHECKOUT', 'CHECKIN', 'TRANSFERS', 'MAINTENANCE_FLAG', 'ONBOARD', 'all'].includes(f.value)) {
+                        setActiveChip(f.value as QuickChipId);
+                      }
+                    }}
+                    className={`min-h-[36px] px-3 py-1 rounded-lg text-xs font-bold shrink-0 border transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer ${
+                      isSelected
+                        ? 'bg-blue-950 text-white border-blue-950 shadow-xs font-black'
+                        : 'bg-white text-slate-700 border-slate-200 hover:border-blue-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    {f.icon}
+                    <span>{f.labelHe}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
+
+        {/* MOBILE FILTER BOTTOM SHEET DRAWER */}
+        {isMobileFiltersOpen && (
+          <div
+            onClick={() => setIsMobileFiltersOpen(false)}
+            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex flex-col justify-end md:hidden animate-in fade-in duration-200"
+          >
+            <div
+              className="bg-white rounded-t-3xl max-h-[85vh] overflow-y-auto p-5 space-y-4 shadow-2xl animate-in slide-in-from-bottom duration-200"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Drawer Handle */}
+              <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto" />
+
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
+                  <SlidersHorizontal className="w-5 h-5 text-blue-600" />
+                  <span>מסנני יומן תנועות</span>
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setIsMobileFiltersOpen(false)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-600 cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Quick Chip Event Type */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-black text-slate-700 block">סוג אירוע:</label>
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+                  {quickChips.map((chip) => {
+                    const isSelected = activeChip === chip.id;
+                    return (
+                      <button
+                        key={chip.id}
+                        type="button"
+                        onClick={() => {
+                          setActiveChip(chip.id);
+                          if (['CHECKOUT', 'CHECKIN', 'TRANSFERS', 'MAINTENANCE_FLAG', 'ONBOARD', 'all'].includes(chip.id)) {
+                            setSelectedAction(chip.id);
+                          } else {
+                            setSelectedAction('all');
+                          }
+                        }}
+                        className={`min-h-[38px] px-3 py-1.5 rounded-xl text-xs font-bold shrink-0 border transition-all flex items-center gap-1.5 cursor-pointer ${
+                          isSelected
+                            ? chip.activeClass
+                            : 'bg-slate-50 text-slate-700 border-slate-200'
+                        }`}
+                      >
+                        {chip.icon}
+                        <span>{chip.label}</span>
+                        <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-full bg-slate-200/80 text-slate-700">
+                          {chip.count}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Warehouse Selector */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-black text-slate-700 block">מחסן / אתר:</label>
+                <div className="relative">
+                  <Building2 className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-600 pointer-events-none" />
+                  <select
+                    value={selectedWarehouseId}
+                    onChange={(e) => setSelectedWarehouseId(e.target.value)}
+                    className="w-full min-h-[46px] bg-slate-50 text-blue-950 font-bold text-xs pr-10 pl-8 py-2.5 rounded-xl border border-slate-200 focus:border-blue-600 focus:outline-none appearance-none cursor-pointer"
+                  >
+                    <option value="all">כל האתרים והמחסנים</option>
+                    {initialData.warehouses.map((wh) => (
+                      <option key={wh.id} value={wh.id}>
+                        {wh.code ? `[${wh.code}] ` : ''}
+                        {wh.name}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-xs">▼</div>
+                </div>
+              </div>
+
+              {/* Date Range Selector */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-black text-slate-700 block">טווח תאריכים:</label>
+                <div className="relative">
+                  <Calendar className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-600 pointer-events-none" />
+                  <select
+                    value={selectedDateRange}
+                    onChange={(e) => setSelectedDateRange(e.target.value as AuditDateRange)}
+                    className="w-full min-h-[46px] bg-slate-50 text-blue-950 font-bold text-xs pr-10 pl-8 py-2.5 rounded-xl border border-slate-200 focus:border-blue-600 focus:outline-none appearance-none cursor-pointer"
+                  >
+                    {DATE_RANGE_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-xs">▼</div>
+                </div>
+              </div>
+
+              {/* Signature Verified Only Toggle */}
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={() => setHasSignatureOnly((prev) => !prev)}
+                  className={`w-full min-h-[46px] px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center justify-between transition-all cursor-pointer ${
+                    hasSignatureOnly
+                      ? 'bg-emerald-50 border-emerald-300 text-emerald-900 shadow-2xs'
+                      : 'bg-slate-50 border-slate-200 text-slate-700'
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <FileSignature className="w-4 h-4 text-emerald-600" />
+                    <span>חתימה דיגיטלית בלבד</span>
+                  </span>
+                  <span
+                    className={`w-4 h-4 rounded flex items-center justify-center border ${
+                      hasSignatureOnly
+                        ? 'bg-emerald-600 border-emerald-600 text-white'
+                        : 'border-slate-300 bg-white'
+                    }`}
+                  >
+                    {hasSignatureOnly && <Check className="w-3 h-3" />}
+                  </span>
+                </button>
+              </div>
+
+              {/* Action / Apply Button */}
+              <div className="pt-2 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleClearAllFilters}
+                  className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-700 font-bold text-xs hover:bg-slate-50 cursor-pointer"
+                >
+                  איפוס
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsMobileFiltersOpen(false)}
+                  className="flex-2 py-3 rounded-xl bg-blue-600 text-white font-black text-xs hover:bg-blue-700 shadow-md shadow-blue-600/20 cursor-pointer"
+                >
+                  החל מסננים ({filteredRecords.length} רשומות)
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ACTIVE FILTERS BAR & CLEAR ALL */}
         {hasActiveFilters && (
@@ -849,7 +1069,8 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
           </div>
         ) : (
           <div className="space-y-3">
-            {filteredRecords.map((item) => (
+            <div className="max-h-[500px] overflow-y-auto space-y-3 pr-1">
+            {paginatedRecords.map((item) => (
               <div
                 key={item.id}
                 className="rounded-2xl border-2 border-blue-100 bg-white p-4 shadow-xs shadow-blue-950/5 space-y-3 hover:border-blue-300 transition-colors"
@@ -1099,6 +1320,36 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
                 </div>
               </div>
             ))}
+            </div>
+
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between p-3.5 bg-white rounded-2xl border border-blue-100 shadow-xs text-xs font-bold">
+                <button
+                  type="button"
+                  disabled={currentPage <= 1}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  className={`px-3 py-1.5 rounded-xl border flex items-center gap-1 transition-all ${currentPage <= 1 ? 'opacity-40 cursor-not-allowed bg-slate-50 border-slate-200 text-slate-400' : 'bg-white hover:bg-blue-50 text-blue-900 border-blue-200 cursor-pointer'}`}
+                >
+                  <ChevronRight className="w-4 h-4" />
+                  <span>הקודם</span>
+                </button>
+
+                <span className="text-slate-600">
+                  עמוד <span className="text-blue-950 font-black">{currentPage}</span> מתוך <span className="text-blue-950 font-black">{totalPages}</span> ({filteredRecords.length} תנועות)
+                </span>
+
+                <button
+                  type="button"
+                  disabled={currentPage >= totalPages}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  className={`px-3 py-1.5 rounded-xl border flex items-center gap-1 transition-all ${currentPage >= totalPages ? 'opacity-40 cursor-not-allowed bg-slate-50 border-slate-200 text-slate-400' : 'bg-white hover:bg-blue-50 text-blue-900 border-blue-200 cursor-pointer'}`}
+                >
+                  <span>הבא</span>
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
