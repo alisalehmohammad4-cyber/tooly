@@ -2,7 +2,7 @@
 
 import { randomUUID } from 'crypto';
 import { revalidatePath } from 'next/cache';
-import type { AppUser } from '@/types/domain';
+import type { AppUser, UserRole } from '@/types/domain';
 import { isSupabaseConfigured, getSupabaseServerClient, supabaseAdmin } from '@/lib/supabase';
 import { getServerSessionOrgId } from '@/lib/auth/session';
 
@@ -472,18 +472,24 @@ export type CreateUserInput = CreateStorekeeperInput;
  * Permanently inserts the record into Supabase `public.app_users` table with tenant isolation.
  */
 export async function createStorekeeperAction(
-  formData: CreateStorekeeperInput | any
+  formData: CreateStorekeeperInput | FormData | Record<string, unknown>
 ): Promise<{ success: boolean; error?: string; message?: string; user?: AppUser }> {
   try {
-    const rawData =
-      typeof formData?.entries === 'function'
-        ? Object.fromEntries(formData.entries())
-        : (formData || {});
+    const rawData = (
+      formData && typeof (formData as FormData).entries === 'function'
+        ? Object.fromEntries((formData as FormData).entries())
+        : (formData || {})
+    ) as Record<string, unknown>;
 
-    const rawName = (rawData.name || rawData.fullName || '').trim();
-    const rawPin = (rawData.pin || rawData.pinCode || '').trim();
-    const cleanUsername = rawData.username?.trim() || null;
-    const effectiveOrg = rawData.organizationId || rawData.organization_id;
+    const rawName = String(rawData.name || rawData.fullName || '').trim();
+    const rawPin = String(rawData.pin || rawData.pinCode || '').trim();
+    const cleanUsername = typeof rawData.username === 'string' ? rawData.username.trim() : null;
+    const effectiveOrg =
+      typeof rawData.organizationId === 'string'
+        ? rawData.organizationId
+        : typeof rawData.organization_id === 'string'
+          ? rawData.organization_id
+          : undefined;
     const orgId = (await resolveActiveOrganizationId(effectiveOrg)) || DEFAULT_ORGANIZATION_ID;
 
     if (!rawName || rawName.length < 2) {
@@ -494,14 +500,17 @@ export async function createStorekeeperAction(
       return { success: false, error: 'קוד כניסה (PIN) חייב להכיל לפחות 4 ספרות.' };
     }
 
-    const role = (rawData.role as any) || 'storekeeper';
+    const role = (rawData.role as UserRole) || 'storekeeper';
     const isChief = role === 'chief_operations';
 
     // 1. Sanitize assigned_warehouse_id:
     // When the user selects "כלל המחסנים", the frontend sends warehouseId: 'all' (or empty string "").
     // In Postgres, this is a UUID column and throws `invalid input syntax for type uuid: "all"`.
     // Ensure it is strictly converted to null:
-    const rawWarehouseId = rawData.warehouseId ?? rawData.assignedWarehouseId ?? rawData.assigned_warehouse_id;
+    const rawWarehouseId =
+      (rawData.warehouseId as string | undefined) ??
+      (rawData.assignedWarehouseId as string | undefined) ??
+      (rawData.assigned_warehouse_id as string | undefined);
     const assignedWarehouseId =
       rawWarehouseId &&
       rawWarehouseId !== 'all' &&
@@ -517,20 +526,21 @@ export async function createStorekeeperAction(
         : getWarehouseNameById(assignedWarehouseId);
 
     const userId = randomUUID();
-    const userPhone = rawData.phone?.trim() || null;
+    const userPhone = typeof rawData.phone === 'string' ? rawData.phone.trim() : null;
     const userEmail =
-      rawData.email?.trim() ||
-      (cleanUsername ? `${cleanUsername}@company.local` : `${userId.slice(0, 8)}@company.local`);
+      typeof rawData.email === 'string'
+        ? rawData.email.trim()
+        : (cleanUsername ? `${cleanUsername}@company.local` : `${userId.slice(0, 8)}@company.local`);
 
     // 2. Safe Error Handling and Supabase Insert
     if (isSupabaseConfigured()) {
       try {
-        const payload: Record<string, any> = {
+        const payload: Record<string, unknown> = {
           id: userId,
           organization_id: orgId,
           name: rawName,
           // Map username: Ensure username: formData.username || null is passed to the insert payload
-          username: formData.username || cleanUsername || null,
+          username: (formData as CreateStorekeeperInput)?.username || cleanUsername || null,
           role: role,
           pin: rawPin,
           phone: userPhone,
@@ -565,7 +575,7 @@ export async function createStorekeeperAction(
             ...payload,
             full_name: rawName,
             pin_code: rawPin,
-            username: formData.username || cleanUsername || rawName.toLowerCase().replace(/\s+/g, '_'),
+            username: (formData as CreateStorekeeperInput)?.username || cleanUsername || rawName.toLowerCase().replace(/\s+/g, '_'),
           };
           const retry = await supabaseAdmin
             .from('app_users')
@@ -600,7 +610,7 @@ export async function createStorekeeperAction(
           username: data?.username || cleanUsername || undefined,
           email: data?.email || userEmail,
           phone: data?.phone || userPhone || undefined,
-          role: (data?.role as any) || role,
+          role: (data?.role as UserRole) || role,
           pinCode: data?.pin || data?.pin_code || rawPin,
           organizationId: data?.organization_id || orgId,
           organization_id: data?.organization_id || orgId,
@@ -630,11 +640,11 @@ export async function createStorekeeperAction(
               : `המחסנאי ${returnedUser.fullName} נוסף בהצלחה ושויך ל-${warehouseName}.`,
           user: returnedUser,
         };
-      } catch (insertError: any) {
+      } catch (insertError: unknown) {
         console.error("Supabase insert exception:", insertError);
         return {
           success: false,
-          error: insertError?.message || 'שגיאה בשמירת המשתמש במסד הנתונים',
+          error: insertError instanceof Error ? insertError.message : 'שגיאה בשמירת המשתמש במסד הנתונים',
         };
       }
     }
@@ -646,7 +656,7 @@ export async function createStorekeeperAction(
       username: cleanUsername || undefined,
       email: userEmail,
       phone: userPhone || undefined,
-      role: role as any,
+      role: role as UserRole,
       pinCode: rawPin,
       organizationId: orgId,
       organization_id: orgId,
@@ -667,29 +677,29 @@ export async function createStorekeeperAction(
           : `המחסנאי ${mockNewUser.fullName} נוסף בהצלחה ושויך ל-${warehouseName}.`,
       user: mockNewUser,
     };
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Unhandled exception in createStorekeeperAction:", err);
     return {
       success: false,
-      error: err?.message || 'שגיאה לא צפויה ביצירת המשתמש',
+      error: err instanceof Error ? err.message : 'שגיאה לא צפויה ביצירת המשתמש',
     };
   }
 }
 
 export async function createUserAction(
-  formData: CreateStorekeeperInput | any
+  formData: CreateStorekeeperInput | FormData | Record<string, unknown>
 ): Promise<{ success: boolean; error?: string; message?: string; user?: AppUser }> {
   return createStorekeeperAction(formData);
 }
 
 export async function createAppUserAction(
-  formData: CreateStorekeeperInput | any
+  formData: CreateStorekeeperInput | FormData | Record<string, unknown>
 ): Promise<{ success: boolean; error?: string; message?: string; user?: AppUser }> {
   return createStorekeeperAction(formData);
 }
 
 export async function onboardUserAction(
-  formData: CreateStorekeeperInput | any
+  formData: CreateStorekeeperInput | FormData | Record<string, unknown>
 ): Promise<{ success: boolean; error?: string; message?: string; user?: AppUser }> {
   return createStorekeeperAction(formData);
 }

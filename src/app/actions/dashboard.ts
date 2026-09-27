@@ -148,6 +148,11 @@ interface CacheEntry<T> {
 const analyticsCache = new Map<string, CacheEntry<PlantManagerAnalyticsPayload>>();
 const storekeeperOpsCache = new Map<string, CacheEntry<StorekeeperOperationsPayload>>();
 
+export async function clearDashboardCaches(): Promise<void> {
+  storekeeperOpsCache.clear();
+  analyticsCache.clear();
+}
+
 import { getServerSessionOrgId } from '@/lib/auth/session';
 
 async function resolveActiveOrganizationId(providedOrgId?: string): Promise<string | null> {
@@ -220,7 +225,7 @@ export async function getPlantManagerAnalytics(
   }
 
   // Fetch active organization details (name, serial_prefix, currency)
-  let organizationName = 'ארגון פעיל';
+  let organizationName = 'סאמי זעתות';
   let organizationPrefix = 'TOOL';
   let currency = 'ILS';
 
@@ -345,9 +350,17 @@ export async function getPlantManagerAnalytics(
           const days = Math.max(1, Math.floor((now - returnTime) / (1000 * 60 * 60 * 24)));
           const model = (row.tool_models as Record<string, unknown>) || {};
           const wh = (row.warehouses as Record<string, unknown>) || {};
+          const rawName = (row.name as string) || (model.name as string) || '';
+          const toolName =
+            !rawName ||
+            rawName.trim() === '' ||
+            rawName.trim().toUpperCase() === 'X' ||
+            rawName.trim() === '-'
+              ? 'ציוד כללי / כלי עבודה'
+              : rawName.trim();
           overdueList.push({
             assetId: row.id as string,
-            toolName: (row.name as string) || (model.name as string) || 'כלי עבודה',
+            toolName,
             brand: (row.brand as string) || (model.brand as string) || 'Standard',
             modelNumber: (row.model_number as string) || (model.model_number as string) || null,
             qrCode: row.qr_code as string,
@@ -587,8 +600,8 @@ export async function getStorekeeperOperations(
 
     // Fetch latest checkout notes for active checked-out assets in this warehouse
     const checkedOutAssetIds = whAssets
-      .filter((r: any) => r.status === 'checked_out')
-      .map((r: any) => r.id as string)
+      .filter((r: { status?: string }) => r.status === 'checked_out')
+      .map((r: { id?: string }) => r.id as string)
       .filter(Boolean);
 
     const checkoutNotesMap = new Map<string, string>();

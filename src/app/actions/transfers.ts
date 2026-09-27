@@ -2,12 +2,12 @@
 
 import { revalidatePath } from 'next/cache';
 import { supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase';
+import { clearDashboardCaches } from '@/app/actions/dashboard';
 import { getServerSessionOrgId, getServerSessionUser, DEFAULT_ORGANIZATION_ID } from '@/lib/auth/session';
 import {
   getMockWarehouses,
   getMockAssets,
   mutateMockAsset,
-  DEFAULT_ORGANIZATION,
 } from '@/lib/mockStore';
 
 export interface PendingTransferItem {
@@ -141,7 +141,6 @@ export async function createTransferRequestAction(data: {
   const requestId = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  let insertedInDb = false;
   if (isSupabaseConfigured()) {
     try {
       const { error: insertErr } = await supabaseAdmin.from('transfer_requests').insert({
@@ -158,9 +157,7 @@ export async function createTransferRequestAction(data: {
         updated_at: now,
       });
 
-      if (!insertErr) {
-        insertedInDb = true;
-      } else {
+      if (insertErr) {
         console.warn('[createTransferRequestAction] Supabase insert error, falling back to memory store:', insertErr);
       }
     } catch (dbEx) {
@@ -367,7 +364,7 @@ export async function getAvailableAssetsForTransferAction(
 
   if (isSupabaseConfigured()) {
     try {
-      let query = supabaseAdmin
+      const query = supabaseAdmin
         .from('assets')
         .select('id, name, brand, model_number, qr_code, tag_number, serial_number, current_warehouse_id, status, tool_models(name, brand, model_number), warehouses(id, name, code)')
         .eq('organization_id', orgId)
@@ -659,6 +656,14 @@ export async function completeTransferReceptionAction(
     }
   );
 
+  try {
+    await clearDashboardCaches();
+    revalidatePath('/dashboard/warehouse');
+    revalidatePath('/dashboard/manager');
+  } catch (e) {
+    console.warn('[completeTransferReceptionAction] revalidatePath warning:', e);
+  }
+
   return {
     success: true,
     message: 'הכלי נקלט בהצלחה במחסן היעד וזמין כעת לניפוק!',
@@ -928,23 +933,19 @@ export async function directStorekeeperTransferAction(data: {
         .eq('organization_id', orgId)
         .maybeSingle();
 
-      if (fetchErr || !asset) {
-        const m = getMockAssets(orgId).find((a) => a.id === assetId);
-        if (!m) {
-          return { success: false, error: 'כלי העבודה לא נמצא במערכת הארגון' };
-        }
-        if (m.status !== 'available') {
-          return { success: false, error: 'לא ניתן לשנע כלי שאינו במצב זמין במחסן (Available)' };
-        }
-        sourceWhId = m.warehouseId || m.currentWarehouseId || sourceWhId;
-      } else {
-        if (asset.status !== 'available') {
-          return { success: false, error: 'לא ניתן לשנע כלי שאינו במצב זמין במחסן (Available)' };
-        }
-        sourceWhId = asset.current_warehouse_id || sourceWhId;
+      if (fetchErr) {
+        return { success: false, error: fetchErr.message };
       }
-    } catch (err) {
-      console.warn('[directStorekeeperTransferAction] Asset fetch error:', err);
+      if (!asset) {
+        return { success: false, error: 'כלי העבודה לא נמצא במערכת הארגון' };
+      }
+      if (asset.status !== 'available') {
+        return { success: false, error: 'לא ניתן לשנע כלי שאינו במצב זמין במחסן (Available)' };
+      }
+      sourceWhId = asset.current_warehouse_id || sourceWhId;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Database error';
+      return { success: false, error: msg };
     }
   } else {
     const m = getMockAssets(orgId).find((a) => a.id === assetId);
@@ -979,7 +980,7 @@ export async function directStorekeeperTransferAction(data: {
         return { success: false, error: `שגיאה בעדכון סטטוס כלי: ${updateErr.message}` };
       }
 
-      await supabaseAdmin.from('custody_ledger').insert({
+      const { error: ledgerErr } = await supabaseAdmin.from('custody_ledger').insert({
         asset_id: assetId,
         organization_id: orgId,
         warehouse_id: targetWarehouseId,
@@ -989,8 +990,12 @@ export async function directStorekeeperTransferAction(data: {
         created_at: now,
       });
 
+      if (ledgerErr) {
+        return { success: false, error: `שגיאה ברישום תנועה: ${ledgerErr.message}` };
+      }
+
       // Insert pre-approved transfer_requests record so receiving site & chief tracker see the route
-      await supabaseAdmin.from('transfer_requests').insert({
+      const { error: trErr } = await supabaseAdmin.from('transfer_requests').insert({
         id: requestId,
         organization_id: orgId,
         asset_id: assetId,
@@ -1005,6 +1010,10 @@ export async function directStorekeeperTransferAction(data: {
         created_at: now,
         updated_at: now,
       });
+
+      if (trErr) {
+        return { success: false, error: `שגיאה ברישום בקשת שינוע: ${trErr.message}` };
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Database error';
       return { success: false, error: msg };
@@ -1039,9 +1048,13 @@ export async function directStorekeeperTransferAction(data: {
   );
 
   try {
+    await clearDashboardCaches();
     revalidatePath('/dashboard/warehouse');
+    revalidatePath('/dashboard/manager');
     revalidatePath('/dashboard/chief');
-  } catch {}
+  } catch (e) {
+    console.warn('[directStorekeeperTransferAction] revalidatePath warning:', e);
+  }
 
   return {
     success: true,

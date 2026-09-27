@@ -47,7 +47,15 @@ interface HistoryViewProps {
   initialData: AuditHistoryPayload;
 }
 
-type QuickChipId = 'all' | 'loans' | 'transfers' | 'maintenance' | 'signed' | 'today';
+type QuickChipId =
+  | 'all'
+  | 'CHECKOUT'
+  | 'CHECKIN'
+  | 'TRANSFERS'
+  | 'MAINTENANCE_FLAG'
+  | 'ONBOARD'
+  | 'signed'
+  | 'today';
 
 const ACTION_FILTERS: Array<{
   value: string;
@@ -255,17 +263,19 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
     const records = initialData.records;
     return {
       all: records.length,
-      loans: records.filter((r) => r.action === 'CHECKOUT').length,
-      transfers: records.filter(
+      CHECKOUT: records.filter((r) => r.action === 'CHECKOUT').length,
+      CHECKIN: records.filter((r) => r.action === 'CHECKIN').length,
+      TRANSFERS: records.filter(
         (r) => r.action === 'TRANSFER_INIT' || r.action === 'TRANSFER_RECEIVE'
       ).length,
-      maintenance: records.filter((r) => r.action === 'MAINTENANCE_FLAG').length,
+      MAINTENANCE_FLAG: records.filter((r) => r.action === 'MAINTENANCE_FLAG').length,
+      ONBOARD: records.filter((r) => r.action === 'ONBOARD').length,
       signed: records.filter((r) => Boolean(r.signatureData)).length,
       today: records.filter((r) => isWithinDateRange(r.createdAt, 'today')).length,
     };
   }, [initialData.records]);
 
-  // Quick Chips Configuration
+  // Quick Chips Configuration aligned with exact DB enum values
   const quickChips: Array<{
     id: QuickChipId;
     label: string;
@@ -281,36 +291,50 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
       activeClass: 'bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-500/20',
     },
     {
-      id: 'loans',
-      label: '📦 הנפקות פתוחות בשטח',
+      id: 'CHECKOUT',
+      label: '📦 הנפקות לעובדים',
       icon: <UserCheck className="w-3.5 h-3.5" />,
-      count: chipCounts.loans,
+      count: chipCounts.CHECKOUT,
       activeClass: 'bg-amber-600 text-white border-amber-600 shadow-md shadow-amber-500/20',
     },
     {
-      id: 'transfers',
-      label: '🚚 שינוע בין אתרים',
-      icon: <Truck className="w-3.5 h-3.5" />,
-      count: chipCounts.transfers,
-      activeClass: 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-500/20',
-    },
-    {
-      id: 'maintenance',
-      label: '🔧 קריאות תחזוקה',
-      icon: <AlertTriangle className="w-3.5 h-3.5" />,
-      count: chipCounts.maintenance,
-      activeClass: 'bg-rose-600 text-white border-rose-600 shadow-md shadow-rose-500/20',
-    },
-    {
-      id: 'signed',
-      label: '✍️ מאומת בחתימה דיגיטלית',
-      icon: <PenTool className="w-3.5 h-3.5" />,
-      count: chipCounts.signed,
+      id: 'CHECKIN',
+      label: '↩️ החזרות למחסן',
+      icon: <CheckCircle2 className="w-3.5 h-3.5" />,
+      count: chipCounts.CHECKIN,
       activeClass: 'bg-emerald-600 text-white border-emerald-600 shadow-md shadow-emerald-500/20',
     },
     {
+      id: 'TRANSFERS',
+      label: '🚚 שינוע בין אתרים',
+      icon: <Truck className="w-3.5 h-3.5" />,
+      count: chipCounts.TRANSFERS,
+      activeClass: 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-500/20',
+    },
+    {
+      id: 'MAINTENANCE_FLAG',
+      label: '🔧 קריאות שירות / תקלה',
+      icon: <AlertTriangle className="w-3.5 h-3.5" />,
+      count: chipCounts.MAINTENANCE_FLAG,
+      activeClass: 'bg-rose-600 text-white border-rose-600 shadow-md shadow-rose-500/20',
+    },
+    {
+      id: 'ONBOARD',
+      label: '✨ רישום כלי חדש',
+      icon: <Sparkles className="w-3.5 h-3.5" />,
+      count: chipCounts.ONBOARD,
+      activeClass: 'bg-teal-600 text-white border-teal-600 shadow-md shadow-teal-500/20',
+    },
+    {
+      id: 'signed',
+      label: '✍️ מאומת בחתימה',
+      icon: <PenTool className="w-3.5 h-3.5" />,
+      count: chipCounts.signed,
+      activeClass: 'bg-emerald-700 text-white border-emerald-700 shadow-md shadow-emerald-600/20',
+    },
+    {
       id: 'today',
-      label: "📅 תנועות היום (Today's Shift)",
+      label: "📅 תנועות היום",
       icon: <Calendar className="w-3.5 h-3.5" />,
       count: chipCounts.today,
       activeClass: 'bg-purple-600 text-white border-purple-600 shadow-md shadow-purple-500/20',
@@ -321,30 +345,30 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
   const filteredRecords = useMemo(() => {
     let list: AuditHistoryRecord[] = initialData.records;
 
-    // 1. Quick Chip preset
-    if (activeChip === 'loans') {
-      list = list.filter((r) => r.action === 'CHECKOUT');
-    } else if (activeChip === 'transfers') {
-      list = list.filter(
-        (r) => r.action === 'TRANSFER_INIT' || r.action === 'TRANSFER_RECEIVE'
-      );
-    } else if (activeChip === 'maintenance') {
-      list = list.filter((r) => r.action === 'MAINTENANCE_FLAG');
-    } else if (activeChip === 'signed') {
-      list = list.filter((r) => Boolean(r.signatureData));
-    } else if (activeChip === 'today') {
-      list = list.filter((r) => isWithinDateRange(r.createdAt, 'today'));
-    }
+    // 1. Action Filter from quick chips or action dropdown
+    const effectiveAction =
+      selectedAction !== 'all'
+        ? selectedAction
+        : ['CHECKOUT', 'CHECKIN', 'TRANSFERS', 'MAINTENANCE_FLAG', 'ONBOARD'].includes(activeChip)
+        ? activeChip
+        : 'all';
 
-    // 2. Action Filter
-    if (selectedAction !== 'all') {
-      if (selectedAction === 'TRANSFERS') {
+    if (effectiveAction !== 'all') {
+      if (effectiveAction === 'TRANSFERS') {
         list = list.filter(
           (r) => r.action === 'TRANSFER_INIT' || r.action === 'TRANSFER_RECEIVE'
         );
       } else {
-        list = list.filter((r) => r.action === selectedAction);
+        list = list.filter((r) => r.action === effectiveAction);
       }
+    }
+
+    // 2. Preset filters from quick chips
+    if (activeChip === 'signed' || hasSignatureOnly) {
+      list = list.filter((r) => Boolean(r.signatureData));
+    }
+    if (activeChip === 'today') {
+      list = list.filter((r) => isWithinDateRange(r.createdAt, 'today'));
     }
 
     // 3. Facility / Warehouse Filter
@@ -357,12 +381,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
       list = list.filter((r) => isWithinDateRange(r.createdAt, selectedDateRange));
     }
 
-    // 5. Signature Only Toggle
-    if (hasSignatureOnly) {
-      list = list.filter((r) => Boolean(r.signatureData));
-    }
-
-    // 6. Multi-field Smart Search (Tool Tag / QR / Worker / Phone / Performed By / Notes)
+    // 5. Multi-field Smart Search (Tool Tag / QR / Worker / Phone / Performed By / Notes)
     if (debouncedSearchQuery.trim()) {
       list = list.filter((r) => matchesSmartSearch(r, debouncedSearchQuery));
     }
@@ -526,7 +545,14 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
                 <button
                   key={chip.id}
                   type="button"
-                  onClick={() => setActiveChip(chip.id)}
+                  onClick={() => {
+                    setActiveChip(chip.id);
+                    if (['CHECKOUT', 'CHECKIN', 'TRANSFERS', 'MAINTENANCE_FLAG', 'ONBOARD', 'all'].includes(chip.id)) {
+                      setSelectedAction(chip.id);
+                    } else {
+                      setSelectedAction('all');
+                    }
+                  }}
                   className={`min-h-[42px] px-3.5 py-2 rounded-xl text-xs font-black shrink-0 border transition-all flex items-center gap-2 cursor-pointer active:scale-95 ${
                     isSelected
                       ? chip.activeClass
@@ -661,7 +687,12 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
                 <button
                   key={f.value}
                   type="button"
-                  onClick={() => setSelectedAction(f.value)}
+                  onClick={() => {
+                    setSelectedAction(f.value);
+                    if (['CHECKOUT', 'CHECKIN', 'TRANSFERS', 'MAINTENANCE_FLAG', 'ONBOARD', 'all'].includes(f.value)) {
+                      setActiveChip(f.value as QuickChipId);
+                    }
+                  }}
                   className={`min-h-[36px] px-3 py-1 rounded-lg text-xs font-bold shrink-0 border transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer ${
                     isSelected
                       ? 'bg-blue-950 text-white border-blue-950 shadow-xs font-black'

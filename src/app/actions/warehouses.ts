@@ -575,16 +575,26 @@ export async function getWarehouseToolsAction(
       return false;
     });
 
-    toolsList = filtered.map((a) => ({
-      id: a.id,
-      name: a.toolName || a.tool_name || 'כלי עבודה',
-      qr_code: a.qrCode || a.qr_code || '',
-      serial_number: a.serialNumber || a.serial_number || null,
-      category_name: a.categoryName || a.category_name || a.category || 'ציוד כללי',
-      status: a.status || 'available',
-      current_assigned_worker: a.currentAssignedWorker || a.current_assigned_worker || null,
-      order_number: a.orderNumber || a.order_number || null,
-    }));
+    toolsList = filtered.map((a) => {
+      const rawName = a.toolName || a.tool_name || '';
+      const name =
+        !rawName ||
+        rawName.trim() === '' ||
+        rawName.trim().toUpperCase() === 'X' ||
+        rawName.trim() === '-'
+          ? 'ציוד כללי / כלי עבודה'
+          : rawName.trim();
+      return {
+        id: a.id,
+        name,
+        qr_code: a.qrCode || a.qr_code || '',
+        serial_number: a.serialNumber || a.serial_number || null,
+        category_name: a.categoryName || a.category_name || a.category || 'ציוד כללי',
+        status: a.status || 'available',
+        current_assigned_worker: a.currentAssignedWorker || a.current_assigned_worker || null,
+        order_number: a.orderNumber || a.order_number || null,
+      };
+    });
 
     warehouseToolsCache.set(cacheKey, {
       data: toolsList,
@@ -641,9 +651,18 @@ export async function getWarehouseToolsAction(
           const cleanRawCat = isLegacyEnglishCategory({ name: rawCatName }) ? 'ציוד כללי' : rawCatName;
           const resolvedCatName = catMap.get(catId) || cleanRawCat || 'ציוד כללי';
 
+          const rawName = (row.name || row.tool_name || row.toolName || '') as string;
+          const name =
+            !rawName ||
+            rawName.trim() === '' ||
+            rawName.trim().toUpperCase() === 'X' ||
+            rawName.trim() === '-'
+              ? 'ציוד כללי / כלי עבודה'
+              : rawName.trim();
+
           return {
             id: (row.id as string) || qr,
-            name: (row.name || row.tool_name || row.toolName || 'כלי עבודה') as string,
+            name,
             qr_code: qr,
             serial_number: (row.serial_number || row.serialNumber || null) as string | null,
             category_name: resolvedCatName,

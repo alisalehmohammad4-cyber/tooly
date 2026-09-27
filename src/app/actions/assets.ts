@@ -474,11 +474,20 @@ export async function getCatalogData(
           mockFallback?.currentAssignedWorker ||
           null) as string | null;
 
-        const toolName = (row.tool_name ||
+        const rawToolName = (row.tool_name ||
           row.toolName ||
           row.name ||
+          (row.tool_models as { name?: string } | undefined)?.name ||
           mockFallback?.toolName ||
-          'כלי עבודה') as string;
+          '') as string;
+
+        const toolName =
+          !rawToolName ||
+          rawToolName.trim() === '' ||
+          rawToolName.trim().toUpperCase() === 'X' ||
+          rawToolName.trim() === '-'
+            ? 'ציוד כללי / כלי עבודה'
+            : rawToolName.trim();
 
         const brand = (row.brand || mockFallback?.brand || 'כללי') as string;
         const orderNum = (row.order_number ||

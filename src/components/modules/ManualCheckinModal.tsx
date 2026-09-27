@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   X,
   Scan,
@@ -50,6 +51,7 @@ export default function ManualCheckinModal({
   preSelectedAssetId,
   onSuccess,
 }: ManualCheckinModalProps) {
+  const router = useRouter();
   const { currentOrganization } = useAuth();
   const orgId = currentOrganization?.id;
 
@@ -273,30 +275,36 @@ export default function ManualCheckinModal({
         notes: notes.trim() || undefined,
       });
 
-      if (res.success) {
-        setSubmitFeedback({
-          type: 'success',
-          message: res.message || 'הכלי נקלט בהצלחה והוחזר למלאי המחסן!',
-        });
-        // Reload list and notify parent
-        await loadLoans();
-        if (onSuccess) onSuccess();
-
-        // After a moment, clear selected asset so user can check in another or finish
-        setTimeout(() => {
-          setSelectedAsset(null);
-          setNotes('');
-          setCondition('good');
-          setSubmitFeedback(null);
-        }, 1800);
-      } else {
+      if (!res.success) {
+        alert(`שגיאה בביצוע הפעולה: ${res.error || 'נסה שוב'}`);
         setSubmitFeedback({
           type: 'error',
           message: res.error || 'שגיאה בקליטת הכלי למחסן.',
         });
+        return;
       }
+
+      // Force Next.js to re-fetch Server Components and update all tables/metrics:
+      router.refresh();
+
+      setSubmitFeedback({
+        type: 'success',
+        message: res.message || 'הכלי נקלט בהצלחה והוחזר למלאי המחסן!',
+      });
+      // Reload list and notify parent
+      await loadLoans();
+      if (onSuccess) onSuccess();
+
+      // After a moment, clear selected asset so user can check in another or finish
+      setTimeout(() => {
+        setSelectedAsset(null);
+        setNotes('');
+        setCondition('good');
+        setSubmitFeedback(null);
+      }, 1500);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'שגיאת תקשורת עם השרת';
+      alert(`שגיאה בביצוע הפעולה: ${msg}`);
       setSubmitFeedback({ type: 'error', message: msg });
     } finally {
       setIsSubmitting(false);

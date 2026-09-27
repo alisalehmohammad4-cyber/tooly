@@ -83,12 +83,12 @@ export async function getAuditHistory(
     // Enforce strict tenant isolation on Supabase query
     query = query.eq('organization_id', orgId);
 
-    const actionFilter = filters?.actionType || filters?.action;
-    if (actionFilter && actionFilter !== 'all' && actionFilter !== 'ALL') {
-      if (actionFilter === 'TRANSFERS') {
+    const rawAction = (filters?.actionType || filters?.action || '').toUpperCase();
+    if (rawAction && rawAction !== 'ALL') {
+      if (rawAction === 'TRANSFERS' || rawAction === 'TRANSFER_INIT' || rawAction === 'TRANSFER_RECEIVE') {
         query = query.in('action', ['TRANSFER_INIT', 'TRANSFER_RECEIVE']);
       } else {
-        query = query.eq('action', actionFilter);
+        query = query.eq('action', rawAction);
       }
     }
 
@@ -151,12 +151,15 @@ export async function getAuditHistory(
     const records: AuditHistoryRecord[] = (rawRows as unknown as RawLedgerRow[]).map(
       (row) => {
         let normalizedAction: AuditActionType = 'CHECKIN';
-        if (row.action === 'CHECKOUT') normalizedAction = 'CHECKOUT';
-        else if (row.action === 'TRANSFER_RECEIVE') normalizedAction = 'TRANSFER_RECEIVE';
-        else if (row.action === 'MAINTENANCE_FLAG') normalizedAction = 'MAINTENANCE_FLAG';
-        else if (row.action === 'ONBOARD') normalizedAction = 'ONBOARD';
-        else if (row.action === 'LOCK_STATUS') normalizedAction = 'LOCK_STATUS';
-        else if (row.action === 'SAFETY_INSPECTION') normalizedAction = 'SAFETY_INSPECTION';
+        const raw = (row.action || '').toUpperCase();
+        if (raw === 'CHECKOUT') normalizedAction = 'CHECKOUT';
+        else if (raw === 'CHECKIN') normalizedAction = 'CHECKIN';
+        else if (raw === 'TRANSFER_INIT') normalizedAction = 'TRANSFER_INIT';
+        else if (raw === 'TRANSFER_RECEIVE') normalizedAction = 'TRANSFER_RECEIVE';
+        else if (raw === 'MAINTENANCE_FLAG') normalizedAction = 'MAINTENANCE_FLAG';
+        else if (raw === 'ONBOARD') normalizedAction = 'ONBOARD';
+        else if (raw === 'LOCK_STATUS') normalizedAction = 'LOCK_STATUS';
+        else if (raw === 'SAFETY_INSPECTION') normalizedAction = 'SAFETY_INSPECTION';
 
         return {
           id: row.id,

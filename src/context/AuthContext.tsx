@@ -538,7 +538,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const currentOrganization: Organization = user.organizationId
       ? getMockOrganizationById(user.organizationId) || {
           id: user.organizationId,
-          name: user.organizationId === DEFAULT_ORGANIZATION.id ? DEFAULT_ORGANIZATION.name : 'ארגון פעיל',
+          name: user.organizationId === DEFAULT_ORGANIZATION.id ? DEFAULT_ORGANIZATION.name : 'סאמי זעתות',
           slug: user.organizationId,
           serialPrefix: 'TOOL-',
           defaultCurrency: 'ILS',

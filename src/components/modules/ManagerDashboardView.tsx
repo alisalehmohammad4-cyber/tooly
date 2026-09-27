@@ -72,7 +72,7 @@ interface ManagerDashboardViewProps {
 export default function ManagerDashboardView({ data }: ManagerDashboardViewProps) {
   const { currentOrganization, user } = useAuth();
 
-  const orgDisplayName = data.organizationName || currentOrganization?.name || 'ארגון פעיל';
+  const orgDisplayName = data.organizationName || currentOrganization?.name || 'סאמי זעתות';
   const totalAssetsCount = data.utilization?.totalAssets ?? 0;
 
   // Main Tab Navigation: Warehouses vs Storekeepers vs Executive BI Analytics
@@ -1188,15 +1188,15 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                       {/* Breakdown pills */}
                       <div className="grid grid-cols-3 gap-1.5 text-center text-xs font-bold pt-1">
                         <div className="bg-white p-2 rounded-xl border border-slate-200/80 shadow-2xs">
-                          <div className="text-[10px] text-slate-500">זמינים</div>
+                          <div className="text-[10px] text-slate-500">זמינים במחסן</div>
                           <div className="text-emerald-700 font-black text-sm">{fac.available}</div>
                         </div>
                         <div className="bg-white p-2 rounded-xl border border-slate-200/80 shadow-2xs">
-                          <div className="text-[10px] text-slate-500">בשטח</div>
+                          <div className="text-[10px] text-slate-500">בשימוש בשטח</div>
                           <div className="text-blue-900 font-black text-sm">{fac.checkedOut}</div>
                         </div>
                         <div className="bg-white p-2 rounded-xl border border-slate-200/80 shadow-2xs">
-                          <div className="text-[10px] text-slate-500">בתיקון</div>
+                          <div className="text-[10px] text-slate-500">בתיקון / תקלה</div>
                           <div className="text-rose-600 font-black text-sm">{fac.maintenance}</div>
                         </div>
                       </div>
@@ -1731,8 +1731,10 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                                 <div className="text-[10px] text-slate-400 truncate max-w-[150px]">{sk.email}</div>
                               )}
                             </td>
-                            <td className="p-3.5 font-mono font-bold text-purple-800" dir="ltr">
-                              •••• ({sk.pinCode})
+                            <td className="p-3.5" dir="ltr">
+                              <span className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 font-mono text-xs tracking-widest border border-slate-200 select-none inline-block">
+                                ••••
+                              </span>
                             </td>
                             <td className="p-3.5">
                               {isGM || isChief ? (
@@ -1952,10 +1954,10 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                         </div>
                         <div className="grid grid-cols-3 gap-1 text-[11px] pt-1 border-t border-slate-200/60 text-center font-bold">
                           <div className="text-emerald-700 bg-emerald-50/80 py-1 rounded">
-                            {wh.availableCount} זמינים
+                            {wh.availableCount} זמינים במחסן
                           </div>
-                          <div className="text-amber-700 bg-amber-50/80 py-1 rounded">
-                            {wh.inUseCount} בשימוש
+                          <div className="text-blue-900 bg-blue-50/80 py-1 rounded">
+                            {wh.inUseCount} בשימוש בשטח
                           </div>
                           <div className="text-rose-700 bg-rose-50/80 py-1 rounded">
                             {wh.maintenanceCount} בתיקון
@@ -2123,7 +2125,8 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                         <th className="p-2.5">שם המתקן / מחסן</th>
                         <th className="p-2.5">קוד מתקן</th>
                         <th className="p-2.5">סה&quot;כ כלים</th>
-                        <th className="p-2.5">כלים פעילים</th>
+                        <th className="p-2.5">זמינים במחסן</th>
+                        <th className="p-2.5">בשימוש בשטח</th>
                         <th className="p-2.5">בתיקון / השבתה</th>
                         <th className="p-2.5">ניצולת מלאי</th>
                       </tr>
@@ -2134,7 +2137,8 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
                           <td className="p-2.5 font-bold text-slate-900">{fac.warehouseName}</td>
                           <td className="p-2.5 font-mono text-purple-700" dir="ltr">{fac.warehouseCode}</td>
                           <td className="p-2.5 font-black">{fac.totalAssets}</td>
-                          <td className="p-2.5 text-emerald-700 font-bold">{fac.checkedOut}</td>
+                          <td className="p-2.5 text-emerald-700 font-bold">{fac.available}</td>
+                          <td className="p-2.5 text-blue-900 font-bold">{fac.checkedOut}</td>
                           <td className="p-2.5 text-rose-700 font-bold">{fac.maintenance}</td>
                           <td className="p-2.5 font-black text-slate-900">
                             {fac.utilizationRate}%

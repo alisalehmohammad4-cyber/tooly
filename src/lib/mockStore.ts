@@ -25,7 +25,7 @@ import {
 
 export const DEFAULT_ORGANIZATION: Organization = {
   id: '00000000-0000-0000-0000-000000000001',
-  name: 'Sami Zatout Production',
+  name: 'סאמי זעתות',
   slug: 'zatout',
   serialPrefix: 'ZR-',
   defaultCurrency: 'ILS',
@@ -42383,6 +42383,16 @@ function generateInitialAuditRecords(assets: UnifiedAssetItem[]): AuditHistoryRe
       performedBy = 'בקר איכות';
       targetWorker = null;
       notes = 'העברה לבדיקה / תיקון טכני במעבדה';
+    } else if (idx % 5 === 1) {
+      action = 'CHECKIN';
+      performedBy = 'מחסנאי ראשי';
+      targetWorker = 'עובד שטח (הוחזר)';
+      notes = 'החזרת כלי עבודה למחסן וסיום שימוש שטח';
+    } else if (idx % 5 === 2) {
+      action = 'TRANSFER_RECEIVE';
+      performedBy = 'מחסנאי אתר';
+      targetWorker = null;
+      notes = 'קליטת שינוע כלי מאתר הבונים';
     }
 
     records.push({
@@ -42493,8 +42503,20 @@ function toScannedAssetDetails(asset: UnifiedAssetItem): ScannedAssetDetails {
     warehouse_name: asset.warehouseName,
     warehouseCode: asset.warehouseCode,
     warehouse_code: asset.warehouseCode,
-    toolName: asset.toolName,
-    tool_name: asset.toolName,
+    toolName:
+      !asset.toolName ||
+      asset.toolName.trim() === '' ||
+      asset.toolName.trim().toUpperCase() === 'X' ||
+      asset.toolName.trim() === '-'
+        ? 'ציוד כללי / כלי עבודה'
+        : asset.toolName.trim(),
+    tool_name:
+      !asset.toolName ||
+      asset.toolName.trim() === '' ||
+      asset.toolName.trim().toUpperCase() === 'X' ||
+      asset.toolName.trim() === '-'
+        ? 'ציוד כללי / כלי עבודה'
+        : asset.toolName.trim(),
     brand: asset.brand,
     modelNumber: asset.modelNumber,
     model_number: asset.modelNumber,

@@ -343,9 +343,11 @@ export default function AssetActionModal({
         currentWarehouseId: targetWarehouseId,
         warehouseName: targetWhMeta?.name || asset.warehouseName,
         warehouseCode: targetWhMeta?.code || asset.warehouseCode,
+        status: 'in_transit',
       });
       const optimistic = updated || {
         ...asset,
+        status: 'in_transit' as const,
         currentWarehouseId: targetWarehouseId,
         warehouseName: targetWhMeta?.name || asset.warehouseName,
         warehouseCode: targetWhMeta?.code || asset.warehouseCode,
@@ -377,10 +379,12 @@ export default function AssetActionModal({
         currentWarehouseId: targetWarehouseId,
         warehouseName: targetWhMeta?.name || asset.warehouseName,
         warehouseCode: targetWhMeta?.code || asset.warehouseCode,
+        status: 'in_transit',
       });
       setIsSubmitting(false);
       onActionComplete('נשמר במכשיר במצב לא מקוון ויסונכרן בהתחברות לרשת (העברת כלי)', updated || {
         ...asset,
+        status: 'in_transit' as const,
         currentWarehouseId: targetWarehouseId,
         warehouseName: targetWhMeta?.name || asset.warehouseName,
         warehouseCode: targetWhMeta?.code || asset.warehouseCode,

@@ -1,6 +1,8 @@
 'use server';
 
+import { revalidatePath } from 'next/cache';
 import { supabase, isSupabaseConfigured, supabaseAdmin } from '@/lib/supabase';
+import { clearDashboardCaches } from '@/app/actions/dashboard';
 import {
   CheckoutSchema,
   BulkCheckoutSchema,
@@ -645,7 +647,7 @@ export async function bulkCheckoutAssetAction(
         });
 
         if (ledgerErr) {
-          console.warn(`Custody ledger logging warning for asset ${item.id}:`, ledgerErr.message);
+          throw new Error(`Failed to log custody ledger: ${ledgerErr.message}`);
         }
       }
     } catch (err: unknown) {
@@ -741,6 +743,14 @@ export async function bulkCheckoutAssetAction(
     });
   }
 
+  try {
+    await clearDashboardCaches();
+    revalidatePath('/dashboard/warehouse');
+    revalidatePath('/dashboard/manager');
+  } catch (e) {
+    console.warn('[bulkCheckoutAssetAction] revalidatePath warning:', e);
+  }
+
   return {
     success: true,
     message: `נופקו בהצלחה ${assetIds.length} כלים לעובד ${workerName}`,
@@ -796,6 +806,14 @@ export async function checkoutAssetAction(
     return { success: false, error: bulkResult.error };
   }
 
+  try {
+    await clearDashboardCaches();
+    revalidatePath('/dashboard/warehouse');
+    revalidatePath('/dashboard/manager');
+  } catch (e) {
+    console.warn('[checkoutAssetAction] revalidatePath warning:', e);
+  }
+
   return {
     success: true,
     message: `הכלי נופק בהצלחה לעובד ${workerName}`,
@@ -834,7 +852,10 @@ export async function checkinAssetAction(
         .eq('id', assetId)
         .maybeSingle();
 
-      if (fetchErr || !currentAsset) {
+      if (fetchErr) {
+        return { success: false, error: fetchErr.message };
+      }
+      if (!currentAsset) {
         return { success: false, error: 'Asset not found in database.' };
       }
 
@@ -868,7 +889,7 @@ export async function checkinAssetAction(
       }
 
       // Record audit in custody_ledger
-      await supabase.from('custody_ledger').insert({
+      const { error: ledgerErr } = await supabase.from('custody_ledger').insert({
         asset_id: assetId,
         action: 'CHECKIN',
         performed_by: 'Field Agent',
@@ -878,6 +899,10 @@ export async function checkinAssetAction(
         gps_lat: gps?.lat ?? null,
         gps_lng: gps?.lng ?? null,
       });
+
+      if (ledgerErr) {
+        return { success: false, error: `Failed to record check-in in ledger: ${ledgerErr.message}` };
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Database error';
       return { success: false, error: msg };
@@ -928,6 +953,14 @@ export async function checkinAssetAction(
         gps: gps || null,
       });
 
+      try {
+        await clearDashboardCaches();
+        revalidatePath('/dashboard/warehouse');
+        revalidatePath('/dashboard/manager');
+      } catch (e) {
+        console.warn('[checkinAssetAction] revalidatePath warning:', e);
+      }
+
       return {
         success: true,
         message:
@@ -974,6 +1007,14 @@ export async function checkinAssetAction(
     damageReport: damageReport || null,
     gps: gps || null,
   });
+
+  try {
+    await clearDashboardCaches();
+    revalidatePath('/dashboard/warehouse');
+    revalidatePath('/dashboard/manager');
+  } catch (e) {
+    console.warn('[checkinAssetAction] revalidatePath warning:', e);
+  }
 
   return {
     success: true,
@@ -1045,6 +1086,16 @@ export async function checkinFromWorkerAction(
   input: CheckinInput
 ): Promise<CustodyActionResult> {
   return checkinAssetAction(input);
+}
+
+/**
+ * Check-out of an asset to an assigned worker from the warehouse.
+ * Used by storekeepers in manual and barcode checkout workflows.
+ */
+export async function checkoutToWorkerAction(
+  input: CheckoutInput
+): Promise<CustodyActionResult> {
+  return checkoutAssetAction(input);
 }
 
 /**
@@ -1289,7 +1340,10 @@ export async function transferAssetAction(
         .eq('id', assetId)
         .single();
 
-      if (fetchErr || !currentAsset) {
+      if (fetchErr) {
+        return { success: false, error: fetchErr.message };
+      }
+      if (!currentAsset) {
         return { success: false, error: 'Asset not found in database.' };
       }
 
@@ -1311,25 +1365,31 @@ export async function transferAssetAction(
       const { error: updateErr } = await supabase
         .from('assets')
         .update({
+          status: 'in_transit',
           current_warehouse_id: targetWarehouseId,
           version: nextVersion,
         })
-        .eq('id', assetId);
+        .eq('id', assetId)
+        .eq('organization_id', orgId);
 
       if (updateErr) {
         return { success: false, error: `Failed to transfer asset: ${updateErr.message}` };
       }
 
       // Record audit in custody_ledger
-      await supabase.from('custody_ledger').insert({
+      const { error: ledgerErr } = await supabase.from('custody_ledger').insert({
         asset_id: assetId,
-        action: 'TRANSFER_RECEIVE',
+        action: 'TRANSFER_INIT',
         performed_by: 'Field Agent',
         organization_id: orgId,
         gps_lat: gps?.lat ?? null,
         gps_lng: gps?.lng ?? null,
         notes: notes || `Transferred to warehouse ${targetWarehouseId}`,
       });
+
+      if (ledgerErr) {
+        return { success: false, error: ledgerErr.message };
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Database error';
       return { success: false, error: msg };
@@ -1349,6 +1409,7 @@ export async function transferAssetAction(
       FALLBACK_CUSTODY_ASSETS[key].currentWarehouseId = targetWarehouseId;
       FALLBACK_CUSTODY_ASSETS[key].warehouseName = targetWhMeta.name;
       FALLBACK_CUSTODY_ASSETS[key].warehouseCode = targetWhMeta.code;
+      FALLBACK_CUSTODY_ASSETS[key].status = 'in_transit';
       FALLBACK_CUSTODY_ASSETS[key].version += 1;
       mutateMockAsset(
         FALLBACK_CUSTODY_ASSETS[key].qrCode,
@@ -1356,34 +1417,53 @@ export async function transferAssetAction(
           warehouseId: targetWarehouseId,
           warehouseName: targetWhMeta.name,
           warehouseCode: targetWhMeta.code,
+          status: 'in_transit',
         },
         {
-          action: 'TRANSFER_RECEIVE',
+          action: 'TRANSFER_INIT',
           performedBy: 'מחסנאי',
           notes: `העברת כלי למחסן: ${targetWhMeta.name}`,
         }
       );
+      try {
+        await clearDashboardCaches();
+        revalidatePath('/catalog');
+        revalidatePath('/dashboard/warehouse');
+        revalidatePath('/dashboard/manager');
+      } catch (e) {
+        console.warn('[transferAssetAction] revalidatePath warning:', e);
+      }
+
       return {
         success: true,
-        message: `מיקום הכלי עודכן בהצלחה ל-${targetWhMeta.name}`,
+        message: `מיקום הכלי עודכן לשינוע אל ${targetWhMeta.name}`,
         asset: { ...FALLBACK_CUSTODY_ASSETS[key] },
       };
     }
   }
 
+  try {
+    await clearDashboardCaches();
+    revalidatePath('/catalog');
+    revalidatePath('/dashboard/warehouse');
+    revalidatePath('/dashboard/manager');
+  } catch (e) {
+    console.warn('[transferAssetAction] revalidatePath warning:', e);
+  }
+
   return {
     success: true,
-    message: `מיקום הכלי עודכן ל-${targetWhMeta.name}`,
+    message: `מיקום הכלי עודכן לשינוע אל ${targetWhMeta.name}`,
     asset: {
       id: assetId,
       qrCode: 'TOOL-CURRENT',
-      status: 'available',
+      status: 'in_transit',
       condition: 'good',
       currentAssignedWorker: null,
       currentWarehouseId: targetWarehouseId,
       warehouseName: targetWhMeta.name,
       warehouseCode: targetWhMeta.code,
-      toolName: 'Tool Asset',
+      toolName: 'כלי עבודה',
       brand: 'Standard',
       modelNumber: null,
       version: 2,
@@ -1759,43 +1839,34 @@ export async function dispatchAssetWithSignatureAction(data: {
         .eq('organization_id', orgId)
         .maybeSingle();
 
-      if (assetErr || !dbAsset) {
-        // Fallback check in mock store
-        const mockAsset = getMockAssets().find(
-          (a) => a.id === assetId && (!a.organizationId || a.organizationId === orgId)
-        );
-        if (!mockAsset) {
-          return { success: false, error: 'כלי העבודה אינו שייך לארגון הפעיל' };
-        }
-        assetName = mockAsset.toolName;
-        qrCode = mockAsset.qrCode;
-        brand = mockAsset.brand;
-        modelNumber = mockAsset.modelNumber;
-        condition = mockAsset.condition;
-      } else {
-        if (dbAsset.is_locked) {
+      if (assetErr) {
+        return { success: false, error: assetErr.message };
+      }
+      if (!dbAsset) {
+        return { success: false, error: 'כלי העבודה אינו שייך לארגון הפעיל' };
+      }
+      if (dbAsset.is_locked) {
+        return {
+          success: false,
+          error: `הכלי נעול מנהלית: ${dbAsset.lock_reason || 'נעול להוצאה מהמחסן'}`,
+        };
+      }
+      if (dbAsset.safety_inspection_due) {
+        const due = new Date(dbAsset.safety_inspection_due).getTime();
+        if (!isNaN(due) && due < Date.now()) {
           return {
             success: false,
-            error: `הכלי נעול מנהלית: ${dbAsset.lock_reason || 'נעול להוצאה מהמחסן'}`,
+            error: '⚠️ הכלי נעול לשימוש! פג תוקף בדיקת בטיחות תקופתית',
           };
         }
-        if (dbAsset.safety_inspection_due) {
-          const due = new Date(dbAsset.safety_inspection_due).getTime();
-          if (!isNaN(due) && due < Date.now()) {
-            return {
-              success: false,
-              error: '⚠️ הכלי נעול לשימוש! פג תוקף בדיקת בטיחות תקופתית',
-            };
-          }
-        }
-        const tmRaw = dbAsset.tool_models as unknown;
-        const tm = (Array.isArray(tmRaw) ? tmRaw[0] : tmRaw) as Record<string, unknown> || {};
-        assetName = (dbAsset.name as string) || (tm.name as string) || 'כלי עבודה';
-        qrCode = (dbAsset.qr_code as string) || '';
-        brand = (dbAsset.brand as string) || (tm.brand as string) || 'Standard';
-        modelNumber = (dbAsset.model_number as string) || (tm.model_number as string) || null;
-        condition = (dbAsset.condition as 'excellent' | 'good' | 'needs_repair' | 'retired') || 'good';
       }
+      const tmRaw = dbAsset.tool_models as unknown;
+      const tm = (Array.isArray(tmRaw) ? tmRaw[0] : tmRaw) as Record<string, unknown> || {};
+      assetName = (dbAsset.name as string) || (tm.name as string) || 'כלי עבודה';
+      qrCode = (dbAsset.qr_code as string) || '';
+      brand = (dbAsset.brand as string) || (tm.brand as string) || 'Standard';
+      modelNumber = (dbAsset.model_number as string) || (tm.model_number as string) || null;
+      condition = (dbAsset.condition as 'excellent' | 'good' | 'needs_repair' | 'retired') || 'good';
     } catch (err) {
       console.warn('[dispatchAssetWithSignatureAction] Asset check warning:', err);
     }
@@ -1862,7 +1933,7 @@ export async function dispatchAssetWithSignatureAction(data: {
         .eq('organization_id', orgId);
 
       if (updateErr) {
-        console.warn('[dispatchAssetWithSignatureAction] Asset update error:', updateErr);
+        return { success: false, error: `שגיאה בעדכון סטטוס כלי: ${updateErr.message}` };
       }
 
       // 4. Insert custody_ledger entry
@@ -1892,7 +1963,7 @@ export async function dispatchAssetWithSignatureAction(data: {
           '[dispatchAssetWithSignatureAction] Primary ledger insert notice, falling back to standard columns:',
           ledgerErr.message
         );
-        await supabaseAdmin.from('custody_ledger').insert({
+        const { error: fallbackErr } = await supabaseAdmin.from('custody_ledger').insert({
           asset_id: assetId,
           action: 'CHECKOUT',
           organization_id: orgId,
@@ -1903,9 +1974,13 @@ export async function dispatchAssetWithSignatureAction(data: {
           notes: `ניפוק לאתר ${targetWarehouseName} - תג פיזי מאומת (${isTagVerified ? 'כן' : 'לא'})`,
           created_at: now,
         });
+        if (fallbackErr) {
+          return { success: false, error: `שגיאה ברישום תנועה: ${fallbackErr.message}` };
+        }
       }
     } catch (err: unknown) {
-      console.warn('[dispatchAssetWithSignatureAction] DB exception:', err);
+      const msg = err instanceof Error ? err.message : 'Database exception';
+      return { success: false, error: msg };
     }
   }
 
@@ -1954,6 +2029,14 @@ export async function dispatchAssetWithSignatureAction(data: {
     isTagVerified,
     signedAt: now,
   });
+
+  try {
+    await clearDashboardCaches();
+    revalidatePath('/dashboard/warehouse');
+    revalidatePath('/dashboard/manager');
+  } catch (e) {
+    console.warn('[dispatchAssetWithSignatureAction] revalidatePath warning:', e);
+  }
 
   return {
     success: true,

@@ -167,18 +167,18 @@ export function filterAuditHistoryRecords(
   // 1. Action Type Filter
   const targetAction =
     filters.actionType && filters.actionType !== 'ALL' && filters.actionType !== 'all'
-      ? filters.actionType
+      ? filters.actionType.toUpperCase()
       : filters.action && filters.action !== 'all' && filters.action !== 'ALL'
-      ? filters.action
+      ? filters.action.toUpperCase()
       : undefined;
 
   if (targetAction) {
-    if (targetAction === 'TRANSFERS') {
+    if (targetAction === 'TRANSFERS' || targetAction === 'TRANSFER_INIT' || targetAction === 'TRANSFER_RECEIVE') {
       result = result.filter(
         (r) => r.action === 'TRANSFER_INIT' || r.action === 'TRANSFER_RECEIVE'
       );
     } else {
-      result = result.filter((r) => r.action === targetAction);
+      result = result.filter((r) => (r.action || '').toUpperCase() === targetAction);
     }
   }
 

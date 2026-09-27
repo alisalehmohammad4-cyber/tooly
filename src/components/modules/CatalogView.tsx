@@ -24,6 +24,7 @@ import {
   Plus,
 } from 'lucide-react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import type { CatalogDataPayload } from '@/app/actions/assets';
 import { useAuth } from '@/context/AuthContext';
 import AppLayout from '@/components/layout/AppLayout';
@@ -68,11 +69,17 @@ function getCategoryIcon(iconName: string | null, className: string = 'w-6 h-6')
 type StatusFilter = 'all' | 'available' | 'checked_out';
 
 export default function CatalogView({ initialData }: CatalogViewProps) {
+  const router = useRouter();
   const { role } = useAuth();
+  const [assets, setAssets] = useState(initialData.assets);
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>(
     initialData.selectedWarehouseId || 'all'
   );
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setAssets(initialData.assets);
+  }, [initialData.assets]);
 
   // Rapid debounced search input (100ms debounce)
   const [rawSearchQuery, setRawSearchQuery] = useState<string>('');
@@ -111,15 +118,15 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
   // 1. Filter assets by selected warehouse
   const warehouseFilteredAssets = useMemo(() => {
     if (!selectedWarehouseId || selectedWarehouseId === 'all') {
-      return initialData.assets;
+      return assets;
     }
-    return initialData.assets.filter(
+    return assets.filter(
       (a) =>
         a.warehouseId === selectedWarehouseId ||
         a.currentWarehouseId === selectedWarehouseId ||
         a.current_warehouse_id === selectedWarehouseId
     );
-  }, [initialData.assets, selectedWarehouseId]);
+  }, [assets, selectedWarehouseId]);
 
   // Status counts for the pills within current warehouse selection
   const totalWarehouseToolsCount = warehouseFilteredAssets.length;
@@ -493,6 +500,7 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
                   const isAvailable = asset.status === 'available';
                   const isCheckedOut = asset.status === 'checked_out';
                   const isMaintenance = asset.status === 'maintenance';
+                  const isInTransit = asset.status === 'in_transit';
 
                   return (
                     <div
@@ -533,6 +541,12 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
                             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black bg-red-50 text-red-700 border border-red-300">
                               <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
                               בתיקון / בדיקה
+                            </span>
+                          )}
+                          {isInTransit && (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black bg-purple-50 text-purple-700 border border-purple-300">
+                              <Building2 className="w-3.5 h-3.5 text-purple-600" />
+                              בשינוע / מעבר
                             </span>
                           )}
                         </div>
@@ -719,9 +733,32 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
         onClose={() => {
           setIsModalOpen(false);
           setSelectedAsset(null);
+          router.refresh();
         }}
         onActionComplete={(_msg, updatedAsset) => {
-          setSelectedAsset(updatedAsset);
+          if (updatedAsset) {
+            setSelectedAsset(updatedAsset);
+            setAssets((prev) =>
+              prev.map((a) =>
+                a.id === updatedAsset.id
+                  ? {
+                      ...a,
+                      status: updatedAsset.status,
+                      currentWarehouseId: updatedAsset.currentWarehouseId,
+                      current_warehouse_id: updatedAsset.currentWarehouseId,
+                      warehouseId: updatedAsset.currentWarehouseId,
+                      warehouseName: updatedAsset.warehouseName,
+                      warehouse_name: updatedAsset.warehouseName,
+                      warehouseCode: updatedAsset.warehouseCode,
+                      warehouse_code: updatedAsset.warehouseCode,
+                      currentAssignedWorker: updatedAsset.currentAssignedWorker,
+                      current_assigned_worker: updatedAsset.currentAssignedWorker,
+                    }
+                  : a
+              )
+            );
+          }
+          router.refresh();
         }}
       />
 
@@ -732,9 +769,32 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
         onClose={() => {
           setIsPassportOpen(false);
           setPassportAsset(null);
+          router.refresh();
         }}
         onAssetUpdated={(updated) => {
           setPassportAsset(updated);
+          if (updated) {
+            setAssets((prev) =>
+              prev.map((a) =>
+                a.id === updated.id
+                  ? {
+                      ...a,
+                      status: updated.status,
+                      currentWarehouseId: updated.currentWarehouseId,
+                      current_warehouse_id: updated.currentWarehouseId,
+                      warehouseId: updated.currentWarehouseId,
+                      warehouseName: updated.warehouseName,
+                      warehouse_name: updated.warehouseName,
+                      warehouseCode: updated.warehouseCode,
+                      warehouse_code: updated.warehouseCode,
+                      currentAssignedWorker: updated.currentAssignedWorker,
+                      current_assigned_worker: updated.currentAssignedWorker,
+                    }
+                  : a
+              )
+            );
+          }
+          router.refresh();
         }}
       />
     </AppLayout>
