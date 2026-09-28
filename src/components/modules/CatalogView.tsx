@@ -36,6 +36,8 @@ import StatusSwitcher from '@/components/modules/StatusSwitcher';
 import type { ScannedAssetDetails } from '@/app/actions/custody';
 import { matchesToolSearch } from '@/lib/search/toolDictionary';
 
+const BuildingOfficeIcon = Building2;
+
 const PAGE_SIZE = 32;
 
 interface CatalogViewProps {
@@ -749,10 +751,10 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
                           </span>
                         </div>
 
-                        <div className="flex items-center gap-1.5 text-slate-500">
-                          <Building2 className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                          <span className="truncate max-w-[180px]">{asset.warehouseName}</span>
-                        </div>
+                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
+                          <BuildingOfficeIcon className="w-3.5 h-3.5" />
+                          {asset.warehouseName || asset.current_warehouse?.name || 'מתקן'}
+                        </span>
                       </div>
 
                       {/* PO Number and Supply Location badge if present */}
@@ -811,7 +813,7 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
                               condition: asset.condition,
                               currentAssignedWorker: asset.currentAssignedWorker,
                               currentWarehouseId: asset.warehouseId,
-                              warehouseName: asset.warehouseName,
+                              warehouseName: asset.current_warehouse?.name || asset.warehouseName || asset.warehouse || 'מתקן',
                               warehouseCode: 'WH',
                               toolName: asset.toolName,
                               brand: asset.brand,
@@ -856,7 +858,7 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
                               condition: asset.condition,
                               currentAssignedWorker: asset.currentAssignedWorker,
                               currentWarehouseId: asset.warehouseId,
-                              warehouseName: asset.warehouseName,
+                              warehouseName: asset.current_warehouse?.name || asset.warehouseName || asset.warehouse || 'מתקן',
                               warehouseCode: 'WH',
                               toolName: asset.toolName,
                               brand: asset.brand,

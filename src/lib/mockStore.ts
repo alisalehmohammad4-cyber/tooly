@@ -43109,10 +43109,20 @@ export function getMockCatalogData(warehouseId?: string, organizationId?: string
 
   const catalogAssets: CatalogAssetItem[] = filteredAssets.map((a) => {
     const whId = a.currentWarehouseId || a.current_warehouse_id || a.warehouseId;
+    const wh = warehousesStore.find((w) => w.id === whId);
     const catName = a.category || a.categoryName || a.category_name || '';
     const worker = a.currentAssignedWorker || a.current_assigned_worker || null;
     const qr = a.qrCode || a.qr_code || '';
     const orderNum = a.orderNumber || a.order_number || null;
+    const resolvedWh = (a as any).current_warehouse || (wh ? { id: wh.id, name: wh.name, code: wh.code } : null);
+    const whName =
+      (a as any).current_warehouse?.name ||
+      (a as any).warehouses?.name ||
+      (a as any).warehouse ||
+      wh?.name ||
+      a.warehouseName ||
+      a.warehouse_name ||
+      'מחסן ראשי';
 
     return {
       id: a.id,
@@ -43125,10 +43135,12 @@ export function getMockCatalogData(warehouseId?: string, organizationId?: string
       warehouseId: whId,
       currentWarehouseId: whId,
       current_warehouse_id: whId,
-      warehouseName: a.warehouseName || a.warehouse_name || 'מחסן ראשי',
-      warehouse_name: a.warehouseName || a.warehouse_name || 'מחסן ראשי',
-      warehouseCode: a.warehouseCode || a.warehouse_code || 'WH',
-      warehouse_code: a.warehouseCode || a.warehouse_code || 'WH',
+      warehouseName: (a as any).current_warehouse?.name || (a as any).warehouses?.name || (a as any).warehouse || whName,
+      warehouse_name: (a as any).current_warehouse?.name || (a as any).warehouses?.name || (a as any).warehouse || whName,
+      warehouse: (a as any).current_warehouse?.name || (a as any).warehouses?.name || (a as any).warehouse || whName,
+      current_warehouse: resolvedWh,
+      warehouseCode: wh?.code || a.warehouseCode || a.warehouse_code || 'WH',
+      warehouse_code: wh?.code || a.warehouseCode || a.warehouse_code || 'WH',
       categoryId: a.categoryId || a.category_id || '',
       category_id: a.categoryId || a.category_id || '',
       categoryName: catName,

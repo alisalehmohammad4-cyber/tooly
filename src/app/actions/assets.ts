@@ -334,6 +334,8 @@ export interface CatalogAssetItem {
   current_warehouse_id?: string;
   warehouseName: string;
   warehouse_name?: string;
+  warehouse?: string;
+  current_warehouse?: { id: string; name: string; code: string } | null;
   warehouseCode: string;
   warehouse_code?: string;
   categoryId: string;
@@ -418,11 +420,16 @@ export async function getCatalogData(
   let allAssets: CatalogAssetItem[] = [];
 
   try {
-    const whQuery = supabase.from('warehouses').select('id, name, code').eq('is_active', true).eq('organization_id', orgId);
-    const catQuery = supabase.from('categories').select('id, name, slug, icon').eq('organization_id', orgId).order('display_order', { ascending: true });
-    const astQuery = supabase.from('assets').select(
-      'id, qr_code, status, condition, current_assigned_worker, current_warehouse_id, category_name, name, brand, model_number, purchase_date, purchase_cost, order_number, po_number, supply_location'
-    ).eq('organization_id', orgId).limit(10000);
+    const whQuery = supabaseAdmin.from('warehouses').select('id, name, code').eq('is_active', true).eq('organization_id', orgId);
+    const catQuery = supabaseAdmin.from('categories').select('id, name, slug, icon').eq('organization_id', orgId).order('display_order', { ascending: true });
+    const astQuery = supabaseAdmin
+      .from('assets')
+      .select(`
+        *,
+        tool_models (*),
+        current_warehouse:current_warehouse_id (id, name, code)
+      `)
+      .eq('organization_id', orgId);
 
     const [warehousesRes, categoriesRes, firstAssetsRes] = await Promise.all([
       whQuery,
@@ -446,11 +453,13 @@ export async function getCatalogData(
         let page = 1;
         const pageSize = 1000;
         while (true) {
-          const { data, error } = await supabase
+          const { data, error } = await supabaseAdmin
             .from('assets')
-            .select(
-              'id, qr_code, status, condition, current_assigned_worker, current_warehouse_id, category_name, name, brand, model_number, purchase_date, purchase_cost, order_number, po_number, supply_location'
-            )
+            .select(`
+              *,
+              tool_models (*),
+              current_warehouse:current_warehouse_id (id, name, code)
+            `)
             .eq('organization_id', orgId)
             .range(page * pageSize, (page + 1) * pageSize - 1);
           if (error || !data || data.length === 0) break;
@@ -467,31 +476,39 @@ export async function getCatalogData(
       const categoryNameMap = new Map(categoriesList.map((c) => [c.name, c]));
       const mockAssetMap = new Map(getMockAssets(orgId).map((a) => [a.qrCode, a]));
 
-      allAssets = rawAssetsRows.map((row) => {
-        const qr = (row.qr_code || row.qrCode || '') as string;
+      allAssets = rawAssetsRows.map((asset: any) => {
+        const qr = (asset.qr_code || asset.qrCode || '') as string;
         const mockFallback = mockAssetMap.get(qr);
 
-        const whId = (row.current_warehouse_id ||
-          row.warehouse_id ||
-          row.currentWarehouseId ||
+        const currentWh = asset.current_warehouse as { id?: string; name?: string; code?: string } | null | undefined;
+        const whId = (currentWh?.id ||
+          asset.current_warehouse_id ||
+          asset.warehouse_id ||
+          asset.currentWarehouseId ||
           mockFallback?.currentWarehouseId ||
           mockFallback?.warehouseId ||
           '') as string;
-        const wh = warehouseMap.get(whId);
+        const wh = currentWh?.name ? currentWh : warehouseMap.get(whId);
 
-        const catId = (row.category_id || row.categoryId || mockFallback?.categoryId || '') as string;
-        const catName = (row.category_name || row.categoryName || row.category || '') as string;
+        // Explicit resolved warehouse name: Prioritize joined current_warehouse
+        const resolvedWhName =
+          asset.current_warehouse?.name ||
+          wh?.name ||
+          'מתקן כללי';
+
+        const catId = (asset.category_id || asset.categoryId || asset.tool_models?.category_id || mockFallback?.categoryId || '') as string;
+        const catName = (asset.category_name || asset.categoryName || asset.category || '') as string;
         const cat = categoryMap.get(catId) || (catName ? categoryNameMap.get(catName) : undefined);
 
-        const worker = (row.current_assigned_worker ||
-          row.currentAssignedWorker ||
+        const worker = (asset.current_assigned_worker ||
+          asset.currentAssignedWorker ||
           mockFallback?.currentAssignedWorker ||
           null) as string | null;
 
-        const rawToolName = (row.tool_name ||
-          row.toolName ||
-          row.name ||
-          (row.tool_models as { name?: string } | undefined)?.name ||
+        const rawToolName = (asset.tool_name ||
+          asset.toolName ||
+          asset.name ||
+          asset.tool_models?.name ||
           mockFallback?.toolName ||
           '') as string;
 
@@ -503,20 +520,27 @@ export async function getCatalogData(
             ? 'ציוד כללי / כלי עבודה'
             : rawToolName.trim();
 
-        const brand = (row.brand || mockFallback?.brand || 'כללי') as string;
-        const orderNum = (row.order_number ||
-          row.orderNumber ||
+        const brand = (asset.brand || asset.tool_models?.brand || mockFallback?.brand || 'כללי') as string;
+        const modelNumber = (asset.model_number ||
+          asset.modelNumber ||
+          asset.tool_models?.model_number ||
+          mockFallback?.modelNumber ||
+          null) as string | null;
+
+        const orderNum = (asset.order_number ||
+          asset.orderNumber ||
           mockFallback?.orderNumber ||
           null) as string | null;
 
         const resolvedCatName = cat?.name || catName || mockFallback?.categoryName || 'ציוד כללי';
 
         return {
-          id: (row.id || mockFallback?.id || '') as string,
+          ...asset,
+          id: (asset.id || mockFallback?.id || '') as string,
           qrCode: qr,
           qr_code: qr,
-          status: (row.status || mockFallback?.status || 'available') as AssetStatus,
-          condition: (row.condition || mockFallback?.condition || 'good') as
+          status: (asset.status || mockFallback?.status || 'available') as AssetStatus,
+          condition: (asset.condition || mockFallback?.condition || 'good') as
             | 'excellent'
             | 'good'
             | 'needs_repair'
@@ -526,14 +550,14 @@ export async function getCatalogData(
           warehouseId: whId,
           currentWarehouseId: whId,
           current_warehouse_id: whId,
-          warehouseName:
-            wh?.name || mockFallback?.warehouseName || (row.warehouse_name as string) || 'מחסן ראשי',
-          warehouse_name:
-            wh?.name || mockFallback?.warehouseName || (row.warehouse_name as string) || 'מחסן ראשי',
+          warehouseName: asset.current_warehouse?.name || wh?.name || 'מתקן כללי',
+          warehouse_name: asset.current_warehouse?.name || wh?.name || 'מתקן כללי',
+          warehouse: asset.current_warehouse?.name || wh?.name || 'מתקן כללי',
+          current_warehouse: asset.current_warehouse || (currentWh ? { id: currentWh.id || whId, name: resolvedWhName, code: currentWh.code || '' } : (wh ? { id: wh.id, name: wh.name, code: wh.code } : null)),
           warehouseCode:
-            wh?.code || mockFallback?.warehouseCode || (row.warehouse_code as string) || 'WH',
+            currentWh?.code || wh?.code || mockFallback?.warehouseCode || (asset.warehouse_code as string) || 'WH',
           warehouse_code:
-            wh?.code || mockFallback?.warehouseCode || (row.warehouse_code as string) || 'WH',
+            currentWh?.code || wh?.code || mockFallback?.warehouseCode || (asset.warehouse_code as string) || 'WH',
           categoryId: cat?.id || catId,
           category_id: cat?.id || catId,
           categoryName: resolvedCatName,
@@ -542,25 +566,19 @@ export async function getCatalogData(
           toolName,
           tool_name: toolName,
           brand,
-          modelNumber: (row.model_number ||
-            row.modelNumber ||
-            mockFallback?.modelNumber ||
-            null) as string | null,
-          model_number: (row.model_number ||
-            row.modelNumber ||
-            mockFallback?.modelNumber ||
-            null) as string | null,
-          purchaseDate: (row.purchase_date ||
-            row.purchaseDate ||
+          modelNumber,
+          model_number: modelNumber,
+          purchaseDate: (asset.purchase_date ||
+            asset.purchaseDate ||
             mockFallback?.purchaseDate) as string | undefined,
           purchaseCost:
-            Number(row.purchase_cost || row.purchaseCost || mockFallback?.purchaseCost) || 2500,
+            Number(asset.purchase_cost || asset.purchaseCost || mockFallback?.purchaseCost) || 2500,
           orderNumber: orderNum,
           order_number: orderNum,
-          poNumber: (row.po_number || row.poNumber || mockFallback?.poNumber || null) as string | null,
-          po_number: (row.po_number || row.poNumber || mockFallback?.po_number || null) as string | null,
-          supplyLocation: (row.supply_location || row.supplyLocation || mockFallback?.supplyLocation || null) as string | null,
-          supply_location: (row.supply_location || row.supplyLocation || mockFallback?.supply_location || null) as string | null,
+          poNumber: (asset.po_number || asset.poNumber || mockFallback?.poNumber || null) as string | null,
+          po_number: (asset.po_number || asset.poNumber || mockFallback?.po_number || null) as string | null,
+          supplyLocation: (asset.supply_location || asset.supplyLocation || mockFallback?.supplyLocation || null) as string | null,
+          supply_location: (asset.supply_location || asset.supplyLocation || mockFallback?.supply_location || null) as string | null,
         };
       });
     }
