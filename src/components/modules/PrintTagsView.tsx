@@ -31,6 +31,164 @@ interface TagItem {
 type PrintMode = 'batch' | 'reprint';
 type LabelFormat = 'tsc' | 'a4';
 
+export function printThermalLabelsDirectly(labelsData: Array<{
+  tagNumber: string;
+  toolName: string;
+  brand: string;
+  qrCodeDataUrl: string;
+  companyName: string;
+}>) {
+  if (typeof window === 'undefined') return;
+
+  const printWindow = window.open('', '_blank', 'width=800,height=600');
+  if (!printWindow) {
+    alert('אנא אשר חלונות קופצים (Pop-ups) כדי להדפיס');
+    return;
+  }
+
+  const labelsHtml = labelsData.map(label => `
+    <div class="label-sheet">
+      <div class="label-content">
+        <div class="qr-col">
+          <img src="${label.qrCodeDataUrl}" alt="QR" class="qr-img" />
+          <span class="qr-tag">${label.tagNumber}</span>
+        </div>
+        <div class="info-col">
+          <div class="company-title">${label.companyName || 'TOOLY'}</div>
+          <div class="tool-name">${label.toolName}</div>
+          <div class="tool-brand">${label.brand || ''}</div>
+          <div class="tag-number">${label.tagNumber}</div>
+        </div>
+      </div>
+    </div>
+  `).join('');
+
+  printWindow.document.write(`
+    <!DOCTYPE html>
+    <html dir="rtl" lang="he">
+    <head>
+      <meta charset="utf-8" />
+      <title>הדפסת תגיות TSC</title>
+      <style>
+        @page {
+          size: 60mm 30mm landscape;
+          margin: 0;
+        }
+        * {
+          box-sizing: border-box;
+          margin: 0;
+          padding: 0;
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+        }
+        html, body {
+          width: 60mm;
+          height: 30mm;
+          margin: 0;
+          padding: 0;
+          background: #fff;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        .label-sheet {
+          width: 60mm;
+          height: 30mm;
+          max-width: 60mm;
+          max-height: 30mm;
+          page-break-after: always;
+          page-break-inside: avoid;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 2mm;
+          overflow: hidden;
+        }
+        .label-content {
+          width: 100%;
+          height: 100%;
+          display: flex;
+          flex-direction: row-reverse;
+          align-items: center;
+          justify-content: space-between;
+          border: 1px dashed #ccc;
+          padding: 1.5mm;
+        }
+        .qr-col {
+          width: 22mm;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+        }
+        .qr-img {
+          width: 19mm;
+          height: 19mm;
+          object-fit: contain;
+        }
+        .qr-tag {
+          font-size: 7px;
+          font-weight: bold;
+          font-family: monospace;
+          margin-top: 1mm;
+        }
+        .info-col {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          padding-left: 2mm;
+          overflow: hidden;
+        }
+        .company-title {
+          font-size: 8px;
+          font-weight: 800;
+          color: #333;
+          text-transform: uppercase;
+        }
+        .tool-name {
+          font-size: 9px;
+          font-weight: bold;
+          color: #000;
+          line-height: 1.1;
+          max-height: 10mm;
+          overflow: hidden;
+          margin: 1mm 0;
+        }
+        .tool-brand {
+          font-size: 8px;
+          color: #555;
+        }
+        .tag-number {
+          font-size: 13px;
+          font-weight: 900;
+          font-family: monospace;
+          color: #000;
+          margin-top: 1mm;
+          letter-spacing: 0.5px;
+        }
+      </style>
+    </head>
+    <body>
+      ${labelsHtml}
+      <script>
+        function triggerPrint() {
+          window.focus();
+          window.print();
+          window.onafterprint = function() { window.close(); };
+        }
+        if (document.readyState === 'complete') {
+          setTimeout(triggerPrint, 200);
+        } else {
+          window.onload = function() {
+            setTimeout(triggerPrint, 200);
+          };
+        }
+      </script>
+    </body>
+    </html>
+  `);
+  printWindow.document.close();
+}
+
 export default function PrintTagsView() {
   const { currentOrganization } = useAuth();
 
@@ -285,7 +443,19 @@ export default function PrintTagsView() {
           // localStorage disabled or private mode
         }
       }
-      window.print();
+
+      if (labelFormat === 'tsc') {
+        const labelsData = tags.map((t) => ({
+          tagNumber: t.serial,
+          toolName: t.toolName || batchModelText || 'כלי עבודה',
+          brand: (activeTab === 'reprint' ? reprintAsset?.brand : undefined) || 'ציוד מקצועי',
+          qrCodeDataUrl: t.qrDataUrl,
+          companyName: effectiveCompanyName || 'TOOLY',
+        }));
+        printThermalLabelsDirectly(labelsData);
+      } else {
+        window.print();
+      }
     }
   };
 
@@ -508,10 +678,10 @@ export default function PrintTagsView() {
                 onClick={handlePrint}
                 disabled={isGenerating || tags.length === 0}
                 className="min-h-[48px] px-6 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-blue-600/30 active:scale-95 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                title="הדפס תגיות עכשיו (פתיחה מיידית של חלון הדפסה)"
+                title="הדפס תגיות עכשיו (פורמט תרמי מבודד 60×30 מ״מ)"
               >
                 <Printer className="w-4 h-4 stroke-[2.5]" />
-                <span>🖨️ הדפס תג עכשיו</span>
+                <span>🖨️ הדפס תגים עכשיו</span>
                 <span className="text-[10px] font-bold opacity-80 font-mono">({tags.length})</span>
               </button>
             </div>
@@ -835,7 +1005,7 @@ export default function PrintTagsView() {
               className="min-h-[44px] px-6 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-md shadow-blue-600/25 active:scale-95 transition-all cursor-pointer"
             >
               <Printer className="w-4 h-4 stroke-[2.5]" />
-              <span>🖨️ הדפס תג עכשיו</span>
+              <span>🖨️ הדפס תגים עכשיו</span>
             </button>
           </div>
         )}
@@ -849,7 +1019,7 @@ export default function PrintTagsView() {
               className="w-full min-h-[56px] rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2.5 shadow-2xl shadow-blue-950/60 active:scale-95 transition-all cursor-pointer border border-blue-400"
             >
               <Printer className="w-5 h-5 stroke-[2.5]" />
-              <span>🖨️ הדפס תג עכשיו ({tags.length})</span>
+              <span>🖨️ הדפס תגים עכשיו ({tags.length})</span>
             </button>
           </div>
         )}
