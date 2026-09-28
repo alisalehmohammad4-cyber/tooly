@@ -2,8 +2,10 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import QRCode from 'qrcode';
+import { jsPDF } from 'jspdf';
 import {
   Printer,
+  FileDown,
   Settings2,
   Wrench,
   Sparkles,
@@ -70,8 +72,8 @@ export function printThermalLabelsDirectly(labelsData: Array<{
       <title>הדפסת תגיות TSC</title>
       <style>
         @page {
-          size: 60mm 30mm landscape;
-          margin: 0;
+          size: 60mm 30mm; /* REMOVED 'landscape' keyword to fix CSS syntax */
+          margin: 0mm;
         }
         * {
           box-sizing: border-box;
@@ -83,23 +85,26 @@ export function printThermalLabelsDirectly(labelsData: Array<{
         html, body {
           width: 60mm;
           height: 30mm;
-          margin: 0;
-          padding: 0;
+          margin: 0mm !important;
+          padding: 0mm !important;
+          overflow: hidden;
           background: #fff;
           font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         }
         .label-sheet {
-          width: 60mm;
-          height: 30mm;
-          max-width: 60mm;
-          max-height: 30mm;
+          width: 60mm !important;
+          height: 30mm !important;
+          max-width: 60mm !important;
+          max-height: 30mm !important;
           page-break-after: always;
           page-break-inside: avoid;
+          box-sizing: border-box;
+          margin: 0 !important;
+          padding: 2mm !important;
+          overflow: hidden;
           display: flex;
           align-items: center;
           justify-content: center;
-          padding: 2mm;
-          overflow: hidden;
         }
         .label-content {
           width: 100%;
@@ -188,6 +193,170 @@ export function printThermalLabelsDirectly(labelsData: Array<{
   printWindow.document.close();
 }
 
+function renderLabelToCanvasDataUrl(label: {
+  tagNumber: string;
+  toolName: string;
+  brand: string;
+  qrCodeDataUrl: string;
+  companyName: string;
+  isReprint?: boolean;
+}): Promise<string> {
+  return new Promise((resolve) => {
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = 709; // 60mm @ 300 DPI
+      canvas.height = 354; // 30mm @ 300 DPI
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve('');
+        return;
+      }
+
+      // Background
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Light dashed border
+      ctx.strokeStyle = '#cccccc';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([8, 6]);
+      ctx.strokeRect(12, 12, canvas.width - 24, canvas.height - 24);
+      ctx.setLineDash([]); // reset dash
+
+      const qrImg = new Image();
+      qrImg.crossOrigin = 'anonymous';
+      qrImg.onload = () => {
+        // Draw QR code on the left side
+        const qrSize = 224;
+        const qrX = 36;
+        const qrY = 32;
+        ctx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
+
+        // QR Tag Number under QR
+        ctx.fillStyle = '#000000';
+        ctx.font = 'bold 20px monospace';
+        ctx.textAlign = 'center';
+        ctx.direction = 'ltr';
+        ctx.fillText(label.tagNumber, qrX + qrSize / 2, qrY + qrSize + 26);
+
+        // Right side info (RTL text)
+        const rightMargin = canvas.width - 36;
+        ctx.direction = 'rtl';
+        ctx.textAlign = 'right';
+
+        // 1. Company Name
+        ctx.fillStyle = '#222222';
+        ctx.font = '800 24px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif';
+        const compName = label.companyName || 'TOOLY';
+        ctx.fillText(compName, rightMargin, 62);
+
+        if (label.isReprint) {
+          ctx.fillStyle = '#fef3c7';
+          ctx.fillRect(qrX + qrSize + 24, 40, 80, 28);
+          ctx.strokeStyle = '#f59e0b';
+          ctx.strokeRect(qrX + qrSize + 24, 40, 80, 28);
+          ctx.fillStyle = '#92400e';
+          ctx.font = 'bold 16px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('חלופית', qrX + qrSize + 24 + 40, 60);
+          ctx.textAlign = 'right';
+        }
+
+        // Divider under company name
+        ctx.strokeStyle = '#e2e8f0';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(qrX + qrSize + 24, 76);
+        ctx.lineTo(rightMargin, 76);
+        ctx.stroke();
+
+        // 2. Tool Name
+        ctx.fillStyle = '#0f172a';
+        ctx.font = 'bold 26px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif';
+        const toolDisplayName = label.toolName || 'ציוד מבוקר';
+        ctx.fillText(toolDisplayName.slice(0, 32), rightMargin, 118);
+
+        // 3. Brand / Model
+        ctx.fillStyle = '#475569';
+        ctx.font = '600 20px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif';
+        const brandText = label.brand || 'ציוד מקצועי';
+        ctx.fillText(brandText.slice(0, 28), rightMargin, 156);
+
+        // 4. Large bold Tag Number (Monospace)
+        ctx.fillStyle = '#020617';
+        ctx.font = '900 48px monospace';
+        ctx.direction = 'ltr';
+        ctx.textAlign = 'right';
+        ctx.fillText(label.tagNumber, rightMargin, 230);
+
+        // Divider above footer
+        ctx.strokeStyle = '#f1f5f9';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(qrX + qrSize + 24, 252);
+        ctx.lineTo(rightMargin, 252);
+        ctx.stroke();
+
+        // 5. Micro Footer subtext
+        ctx.direction = 'rtl';
+        ctx.font = '600 17px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif';
+        ctx.fillStyle = '#64748b';
+        const footerText = label.isReprint
+          ? 'מדבקה חלופית • סרוק לבדיקה'
+          : 'ציוד מבוקר • סרוק לבדיקה';
+        ctx.fillText(footerText, rightMargin, 286);
+
+        resolve(canvas.toDataURL('image/png'));
+      };
+
+      qrImg.onerror = () => {
+        resolve(canvas.toDataURL('image/png'));
+      };
+
+      qrImg.src = label.qrCodeDataUrl;
+    } catch {
+      resolve('');
+    }
+  });
+}
+
+export async function downloadThermalLabelsPdf(labelsData: Array<{
+  tagNumber: string;
+  toolName: string;
+  brand: string;
+  qrCodeDataUrl: string;
+  companyName: string;
+  isReprint?: boolean;
+}>) {
+  if (typeof window === 'undefined' || labelsData.length === 0) return;
+
+  const doc = new jsPDF({
+    orientation: 'landscape',
+    unit: 'mm',
+    format: [60, 30],
+  });
+
+  for (let i = 0; i < labelsData.length; i++) {
+    if (i > 0) {
+      doc.addPage([60, 30], 'landscape');
+    }
+    const label = labelsData[i];
+    const dataUrl = await renderLabelToCanvasDataUrl(label);
+    if (dataUrl) {
+      doc.addImage(dataUrl, 'PNG', 0, 0, 60, 30);
+    }
+  }
+
+  const firstSerial = labelsData[0]?.tagNumber || 'batch';
+  const lastSerial = labelsData[labelsData.length - 1]?.tagNumber || '';
+  const filename =
+    labelsData.length > 1
+      ? `tooly-tsc-labels-${firstSerial}-to-${lastSerial}.pdf`
+      : `tooly-tsc-label-${firstSerial}.pdf`;
+
+  doc.save(filename);
+}
+
 export default function PrintTagsView() {
   const { currentOrganization } = useAuth();
 
@@ -231,6 +400,7 @@ export default function PrintTagsView() {
   // Generated printable tags state
   const [tags, setTags] = useState<TagItem[]>([]);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  const [isExportingPdf, setIsExportingPdf] = useState<boolean>(false);
 
   // Persist company name edits to localStorage
   const handleCompanyNameChange = useCallback(
@@ -451,6 +621,27 @@ export default function PrintTagsView() {
     }
   };
 
+  const handleDownloadPdf = async () => {
+    if (typeof window === 'undefined' || tags.length === 0 || isExportingPdf) return;
+    try {
+      setIsExportingPdf(true);
+      const labelsData = tags.map((t) => ({
+        tagNumber: t.serial,
+        toolName: t.toolName || batchModelText || 'כלי עבודה',
+        brand: (activeTab === 'reprint' ? reprintAsset?.brand : undefined) || 'ציוד מקצועי',
+        qrCodeDataUrl: t.qrDataUrl,
+        companyName: effectiveCompanyName || 'TOOLY',
+        isReprint: t.isReprint,
+      }));
+      await downloadThermalLabelsPdf(labelsData);
+    } catch (err) {
+      console.error('Error generating PDF:', err);
+      alert('אירעה שגיאה בעת יצירת קובץ ה-PDF');
+    } finally {
+      setIsExportingPdf(false);
+    }
+  };
+
   return (
     <AppLayout
       title="Tooly - הדפסת תגיות ברקוד ל-TSC"
@@ -460,12 +651,12 @@ export default function PrintTagsView() {
       {/* Global Print-specific CSS for TSC Thermal 60x30 mm */}
       <style jsx global>{`
         @page {
-          size: 60mm 30mm landscape;
+          size: 60mm 30mm;
           margin: 0;
         }
         @media print {
           @page {
-            size: 60mm 30mm landscape; /* Strictly 60mm Width by 30mm Height */
+            size: 60mm 30mm; /* Strictly 60mm Width by 30mm Height */
             margin: 0;
           }
           html,
@@ -568,17 +759,30 @@ export default function PrintTagsView() {
                 </h2>
               </div>
 
-              <button
-                type="button"
-                onClick={handlePrint}
-                disabled={isGenerating || tags.length === 0}
-                className="min-h-[48px] px-6 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-blue-600/30 active:scale-95 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                title="הדפס תגיות ל-TSC (גליל תרמי 60×30 מ״מ)"
-              >
-                <Printer className="w-4 h-4 stroke-[2.5]" />
-                <span>🖨️ הדפס תגיות ל-TSC (60×30 מ״מ)</span>
-                <span className="text-[10px] font-bold opacity-80 font-mono">({tags.length})</span>
-              </button>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={handleDownloadPdf}
+                  disabled={isGenerating || tags.length === 0 || isExportingPdf}
+                  className="min-h-[48px] px-5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-md active:scale-95 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="הורד קובץ PDF למדבקות (60×30 מ״מ)"
+                >
+                  <FileDown className="w-4 h-4 stroke-[2.5]" />
+                  <span>{isExportingPdf ? 'מייצר PDF...' : '📄 הורד קובץ PDF למדבקות (60×30 מ״מ)'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handlePrint}
+                  disabled={isGenerating || tags.length === 0}
+                  className="min-h-[48px] px-6 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-blue-600/30 active:scale-95 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="הדפס תגיות ל-TSC (גליל תרמי 60×30 מ״מ)"
+                >
+                  <Printer className="w-4 h-4 stroke-[2.5]" />
+                  <span>🖨️ הדפס תגיות ל-TSC (60×30 מ״מ)</span>
+                  <span className="text-[10px] font-bold opacity-80 font-mono">({tags.length})</span>
+                </button>
+              </div>
             </div>
 
             {/* Smart sequential start number badge */}
@@ -760,17 +964,30 @@ export default function PrintTagsView() {
               </div>
 
               {reprintAsset && (
-                <button
-                  type="button"
-                  onClick={handlePrint}
-                  disabled={isGenerating || tags.length === 0}
-                  className="min-h-[48px] px-6 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-amber-600/30 active:scale-95 transition-all cursor-pointer"
-                  title="הדפס תגיות עכשיו (פתיחה מיידית של חלון הדפסה)"
-                >
-                  <Printer className="w-4 h-4 stroke-[2.5]" />
-                  <span>🖨️ הדפס תג ל-TSC (60×30 מ״מ)</span>
-                  <span className="text-[10px] font-bold opacity-80 font-mono">({reprintQuantity})</span>
-                </button>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={handleDownloadPdf}
+                    disabled={isGenerating || tags.length === 0 || isExportingPdf}
+                    className="min-h-[48px] px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-md active:scale-95 transition-all cursor-pointer disabled:opacity-50"
+                    title="הורד קובץ PDF למדבקה (60×30 מ״מ)"
+                  >
+                    <FileDown className="w-4 h-4 stroke-[2.5]" />
+                    <span>{isExportingPdf ? 'מייצר PDF...' : '📄 הורד PDF (60×30 מ״מ)'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handlePrint}
+                    disabled={isGenerating || tags.length === 0}
+                    className="min-h-[48px] px-6 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-amber-600/30 active:scale-95 transition-all cursor-pointer"
+                    title="הדפס תגיות עכשיו (פתיחה מיידית של חלון הדפסה)"
+                  >
+                    <Printer className="w-4 h-4 stroke-[2.5]" />
+                    <span>🖨️ הדפס תג ל-TSC (60×30 מ״מ)</span>
+                    <span className="text-[10px] font-bold opacity-80 font-mono">({reprintQuantity})</span>
+                  </button>
+                </div>
               )}
             </div>
 
@@ -863,7 +1080,16 @@ export default function PrintTagsView() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={handleDownloadPdf}
+                    disabled={isExportingPdf}
+                    className="min-h-[44px] px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-black text-xs flex items-center gap-2 shadow-md cursor-pointer active:scale-95 transition-all"
+                  >
+                    <FileDown className="w-4 h-4" />
+                    <span>{isExportingPdf ? 'מייצר...' : '📄 הורד PDF'}</span>
+                  </button>
                   <button
                     type="button"
                     onClick={handlePrint}
@@ -892,27 +1118,49 @@ export default function PrintTagsView() {
               </span>
             </div>
 
-            <button
-              type="button"
-              onClick={handlePrint}
-              className="min-h-[44px] px-6 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-md shadow-blue-600/25 active:scale-95 transition-all cursor-pointer"
-            >
-              <Printer className="w-4 h-4 stroke-[2.5]" />
-              <span>🖨️ הדפס תגיות ל-TSC (60×30 מ״מ)</span>
-            </button>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={handleDownloadPdf}
+                disabled={isGenerating || tags.length === 0 || isExportingPdf}
+                className="min-h-[44px] px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-sm active:scale-95 transition-all cursor-pointer disabled:opacity-50"
+                title="הורד קובץ PDF למדבקות (60×30 מ״מ)"
+              >
+                <FileDown className="w-4 h-4 stroke-[2.5]" />
+                <span>{isExportingPdf ? 'מייצר PDF...' : '📄 הורד קובץ PDF (60×30 מ״מ)'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handlePrint}
+                className="min-h-[44px] px-6 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-md shadow-blue-600/25 active:scale-95 transition-all cursor-pointer"
+              >
+                <Printer className="w-4 h-4 stroke-[2.5]" />
+                <span>🖨️ הדפס תגיות ל-TSC (60×30 מ״מ)</span>
+              </button>
+            </div>
           </div>
         )}
 
         {/* Mobile Sticky Print Floating Bar */}
         {tags.length > 0 && !isGenerating && (
-          <div className="fixed bottom-3 inset-x-3 sm:hidden z-40 print:hidden animate-in slide-in-from-bottom-3 duration-200">
+          <div className="fixed bottom-3 inset-x-3 sm:hidden z-40 print:hidden animate-in slide-in-from-bottom-3 duration-200 flex gap-2">
+            <button
+              type="button"
+              onClick={handleDownloadPdf}
+              disabled={isExportingPdf}
+              className="flex-1 min-h-[56px] rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-2xl active:scale-95 transition-all cursor-pointer border border-slate-700"
+            >
+              <FileDown className="w-4 h-4 stroke-[2.5]" />
+              <span>{isExportingPdf ? 'מייצר...' : '📄 הורד PDF'}</span>
+            </button>
             <button
               type="button"
               onClick={handlePrint}
-              className="w-full min-h-[56px] rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2.5 shadow-2xl shadow-blue-950/60 active:scale-95 transition-all cursor-pointer border border-blue-400"
+              className="flex-1 min-h-[56px] rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-2xl shadow-blue-950/60 active:scale-95 transition-all cursor-pointer border border-blue-400"
             >
-              <Printer className="w-5 h-5 stroke-[2.5]" />
-              <span>🖨️ הדפס תגיות ל-TSC (60×30 מ״מ) ({tags.length})</span>
+              <Printer className="w-4 h-4 stroke-[2.5]" />
+              <span>🖨️ הדפס ({tags.length})</span>
             </button>
           </div>
         )}
