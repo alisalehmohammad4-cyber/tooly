@@ -29,7 +29,6 @@ interface TagItem {
 }
 
 type PrintMode = 'batch' | 'reprint';
-type LabelFormat = 'tsc' | 'a4';
 
 export function printThermalLabelsDirectly(labelsData: Array<{
   tagNumber: string;
@@ -197,9 +196,6 @@ export default function PrintTagsView() {
 
   // Mode selection: Tab A (Batch) vs Tab B (Reprint)
   const [activeTab, setActiveTab] = useState<PrintMode>('batch');
-
-  // Label format: TSC thermal roll 60x30 mm [Default] vs A4 office sheet
-  const [labelFormat, setLabelFormat] = useState<LabelFormat>('tsc');
 
   // Tab A: Batch Config State (Default prefix from currentOrganization)
   const [prefix, setPrefix] = useState<string>(() => currentOrganization?.serialPrefix || 'ZR-');
@@ -444,194 +440,93 @@ export default function PrintTagsView() {
         }
       }
 
-      if (labelFormat === 'tsc') {
-        const labelsData = tags.map((t) => ({
-          tagNumber: t.serial,
-          toolName: t.toolName || batchModelText || 'כלי עבודה',
-          brand: (activeTab === 'reprint' ? reprintAsset?.brand : undefined) || 'ציוד מקצועי',
-          qrCodeDataUrl: t.qrDataUrl,
-          companyName: effectiveCompanyName || 'TOOLY',
-        }));
-        printThermalLabelsDirectly(labelsData);
-      } else {
-        window.print();
-      }
+      const labelsData = tags.map((t) => ({
+        tagNumber: t.serial,
+        toolName: t.toolName || batchModelText || 'כלי עבודה',
+        brand: (activeTab === 'reprint' ? reprintAsset?.brand : undefined) || 'ציוד מקצועי',
+        qrCodeDataUrl: t.qrDataUrl,
+        companyName: effectiveCompanyName || 'TOOLY',
+      }));
+      printThermalLabelsDirectly(labelsData);
     }
   };
 
   return (
     <AppLayout
-      title="Tooly - הדפסת תגיות ברקוד"
-      subtitle={
-        labelFormat === 'tsc'
-          ? 'גליל מדבקות תרמי TSC (60×30 מ״מ)'
-          : 'דף מדבקות משרדי A4 ורצף סידורי'
-      }
+      title="Tooly - הדפסת תגיות ברקוד ל-TSC"
+      subtitle="גליל מדבקות תרמי תעשייתי TSC (60×30 מ״מ)"
       requiredRole="any_elevated"
     >
-      {/* Global Print-specific CSS */}
-      {labelFormat === 'tsc' ? (
-        <style jsx global>{`
+      {/* Global Print-specific CSS for TSC Thermal 60x30 mm */}
+      <style jsx global>{`
+        @page {
+          size: 60mm 30mm landscape;
+          margin: 0;
+        }
+        @media print {
           @page {
-            size: 60mm 30mm landscape;
+            size: 60mm 30mm landscape; /* Strictly 60mm Width by 30mm Height */
             margin: 0;
           }
-          @media print {
-            @page {
-              size: 60mm 30mm landscape; /* Strictly 60mm Width by 30mm Height */
-              margin: 0;
-            }
-            html,
-            body {
-              margin: 0 !important;
-              padding: 0 !important;
-              background: #ffffff !important;
-              -webkit-print-color-adjust: exact !important;
-              print-color-adjust: exact !important;
-            }
-            .tsc-container {
-              display: block !important;
-              width: 60mm !important;
-              margin: 0 !important;
-              padding: 0 !important;
-            }
-            .print-label-page,
-            .tsc-label {
-              width: 60mm !important;
-              height: 30mm !important;
-              max-width: 60mm !important;
-              max-height: 30mm !important;
-              box-sizing: border-box !important;
-              page-break-after: always !important;
-              break-after: page !important;
-              page-break-inside: avoid !important;
-              break-inside: avoid !important;
-              overflow: hidden !important;
-              display: flex !important;
-              flex-direction: row !important;
-              align-items: center !important;
-              justify-content: space-between !important;
-              padding: 1.5mm 2.5mm !important;
-              border: none !important;
-              border-radius: 0 !important;
-              box-shadow: none !important;
-              margin: 0 !important;
-              background: #ffffff !important;
-              -webkit-print-color-adjust: exact !important;
-              print-color-adjust: exact !important;
-            }
-            .tsc-qr-img {
-              width: 22mm !important;
-              height: 22mm !important;
-              max-width: 22mm !important;
-              max-height: 22mm !important;
-              object-fit: contain !important;
-              image-rendering: -webkit-optimize-contrast !important;
-              image-rendering: crisp-edges !important;
-            }
-            .tsc-serial {
-              font-size: 13pt !important;
-              line-height: 1.1 !important;
-              font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
-              font-weight: 900 !important;
-            }
+          html,
+          body {
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
-        `}</style>
-      ) : (
-        <style jsx global>{`
-          @page {
-            size: A4 portrait;
-            margin: 8mm;
+          .tsc-container {
+            display: block !important;
+            width: 60mm !important;
+            margin: 0 !important;
+            padding: 0 !important;
           }
-          @media print {
-            body {
-              background-color: #ffffff !important;
-              color: #000000 !important;
-              -webkit-print-color-adjust: exact !important;
-              print-color-adjust: exact !important;
-            }
-            .industrial-tag {
-              break-inside: avoid !important;
-              page-break-inside: avoid !important;
-            }
+          .print-label-page,
+          .tsc-label {
+            width: 60mm !important;
+            height: 30mm !important;
+            max-width: 60mm !important;
+            max-height: 30mm !important;
+            box-sizing: border-box !important;
+            page-break-after: always !important;
+            break-after: page !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+            overflow: hidden !important;
+            display: flex !important;
+            flex-direction: row !important;
+            align-items: center !important;
+            justify-content: space-between !important;
+            padding: 1.5mm 2.5mm !important;
+            border: none !important;
+            border-radius: 0 !important;
+            box-shadow: none !important;
+            margin: 0 !important;
+            background: #ffffff !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
-        `}</style>
-      )}
+          .tsc-qr-img {
+            width: 22mm !important;
+            height: 22mm !important;
+            max-width: 22mm !important;
+            max-height: 22mm !important;
+            object-fit: contain !important;
+            image-rendering: -webkit-optimize-contrast !important;
+            image-rendering: crisp-edges !important;
+          }
+          .tsc-serial {
+            font-size: 13pt !important;
+            line-height: 1.1 !important;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+            font-weight: 900 !important;
+          }
+        }
+      `}</style>
 
       {/* 1. CONFIGURATION DRAWER (Screen-only) */}
       <div className="print:hidden max-w-4xl mx-auto px-4 py-4 space-y-4">
-        {/* Label Format Selector (TSC Thermal 60x30 mm vs A4 Office Sheet) */}
-        <div className="bg-white rounded-2xl border-2 border-slate-200 p-3.5 shadow-sm shadow-slate-950/5 space-y-2.5">
-          <div className="flex items-center justify-between px-1">
-            <span className="text-xs font-black text-slate-800 flex items-center gap-1.5">
-              <Printer className="w-4 h-4 text-blue-600" />
-              פורמט מדפסת ותוויות:
-            </span>
-            <span className="text-[11px] font-bold text-slate-500">
-              {labelFormat === 'tsc'
-                ? 'גליל תרמי TSC רציף (60×30 מ״מ)'
-                : 'דף מדבקות משרדי (A4)'}
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {/* Option 1: TSC 60x30 mm [Default] */}
-            <button
-              type="button"
-              onClick={() => setLabelFormat('tsc')}
-              className={`min-h-[52px] p-3 rounded-xl text-xs font-black flex items-center justify-between transition-all cursor-pointer border ${
-                labelFormat === 'tsc'
-                  ? 'bg-blue-50/90 text-blue-950 border-blue-500 ring-2 ring-blue-500/20 shadow-sm'
-                  : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100 hover:text-slate-900'
-              }`}
-            >
-              <div className="flex items-center gap-2.5 text-right">
-                <span className="text-xl">🏷️</span>
-                <div>
-                  <div className="font-black text-xs text-blue-950">
-                    גליל מדבקות תרמי TSC (60×30 מ״מ)
-                  </div>
-                  <div className="text-[10px] font-medium text-slate-500">
-                    מדפסת תרמית תעשייתית רציפה (מדבקה אחר מדבקה)
-                  </div>
-                </div>
-              </div>
-              {labelFormat === 'tsc' && (
-                <span className="text-[10px] font-black bg-blue-600 text-white px-2 py-0.5 rounded-md shrink-0">
-                  ברירת מחדל
-                </span>
-              )}
-            </button>
-
-            {/* Option 2: A4 Office Sheet */}
-            <button
-              type="button"
-              onClick={() => setLabelFormat('a4')}
-              className={`min-h-[52px] p-3 rounded-xl text-xs font-black flex items-center justify-between transition-all cursor-pointer border ${
-                labelFormat === 'a4'
-                  ? 'bg-blue-50/90 text-blue-950 border-blue-500 ring-2 ring-blue-500/20 shadow-sm'
-                  : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100 hover:text-slate-900'
-              }`}
-            >
-              <div className="flex items-center gap-2.5 text-right">
-                <span className="text-xl">📄</span>
-                <div>
-                  <div className="font-black text-xs text-blue-950">
-                    דף מדבקות משרדי A4
-                  </div>
-                  <div className="text-[10px] font-medium text-slate-500">
-                    מדפסת משרדית רגילה (לייזר / הזרקת דיו)
-                  </div>
-                </div>
-              </div>
-              {labelFormat === 'a4' && (
-                <span className="text-[10px] font-black bg-blue-600 text-white px-2 py-0.5 rounded-md shrink-0">
-                  נבחר
-                </span>
-              )}
-            </button>
-          </div>
-        </div>
 
         {/* Mode Selector Tabs */}
         <div className="flex overflow-x-auto no-scrollbar py-1 gap-2 border-b border-slate-200 sm:border sm:border-slate-200 sm:bg-slate-100/80 sm:p-1.5 sm:rounded-2xl">
@@ -678,10 +573,10 @@ export default function PrintTagsView() {
                 onClick={handlePrint}
                 disabled={isGenerating || tags.length === 0}
                 className="min-h-[48px] px-6 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-blue-600/30 active:scale-95 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                title="הדפס תגיות עכשיו (פורמט תרמי מבודד 60×30 מ״מ)"
+                title="הדפס תגיות ל-TSC (גליל תרמי 60×30 מ״מ)"
               >
                 <Printer className="w-4 h-4 stroke-[2.5]" />
-                <span>🖨️ הדפס תגים עכשיו</span>
+                <span>🖨️ הדפס תגיות ל-TSC (60×30 מ״מ)</span>
                 <span className="text-[10px] font-bold opacity-80 font-mono">({tags.length})</span>
               </button>
             </div>
@@ -847,9 +742,7 @@ export default function PrintTagsView() {
               <div className="text-slate-400">
                 סה&quot;כ:{' '}
                 <strong className="text-blue-900 font-bold">{tags.length} תגיות</strong>{' '}
-                {labelFormat === 'tsc'
-                  ? '(גליל מדבקות תרמי TSC 60×30 מ״מ)'
-                  : '(גיליון מדבקות משרדי A4)'}
+                (גליל מדבקות תרמי TSC 60×30 מ״מ)
               </div>
             </div>
           </div>
@@ -875,7 +768,7 @@ export default function PrintTagsView() {
                   title="הדפס תגיות עכשיו (פתיחה מיידית של חלון הדפסה)"
                 >
                   <Printer className="w-4 h-4 stroke-[2.5]" />
-                  <span>🖨️ הדפס תג עכשיו</span>
+                  <span>🖨️ הדפס תג ל-TSC (60×30 מ״מ)</span>
                   <span className="text-[10px] font-bold opacity-80 font-mono">({reprintQuantity})</span>
                 </button>
               )}
@@ -977,7 +870,7 @@ export default function PrintTagsView() {
                     className="min-h-[44px] px-5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-xs flex items-center gap-2 shadow-md cursor-pointer active:scale-95 transition-all"
                   >
                     <Printer className="w-4 h-4" />
-                    <span>🖨️ הדפס תג עכשיו</span>
+                    <span>🖨️ הדפס תג ל-TSC (60×30 מ״מ)</span>
                   </button>
                 </div>
               </div>
@@ -986,7 +879,7 @@ export default function PrintTagsView() {
         )}
       </div>
 
-      {/* 2. PRINTABLE INDUSTRIAL TAGS (TSC 60x30 mm Roll or A4 Sheets) */}
+      {/* 2. PRINTABLE INDUSTRIAL TAGS (TSC 60x30 mm Roll) */}
       <div className="max-w-4xl mx-auto px-4 pb-12 print:p-0 print:m-0 print:max-w-none">
         {/* Preview Header Bar with Live Direct Print Button */}
         {tags.length > 0 && !isGenerating && (
@@ -995,7 +888,7 @@ export default function PrintTagsView() {
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
               <span>תצוגה מקדימה: <strong>{tags.length} תגיות מוכנות</strong></span>
               <span className="text-[11px] text-slate-400">
-                ({labelFormat === 'tsc' ? 'גליל תרמי 60×30 מ״מ' : 'דף A4 משרדי'})
+                (גליל תרמי TSC 60×30 מ״מ)
               </span>
             </div>
 
@@ -1005,7 +898,7 @@ export default function PrintTagsView() {
               className="min-h-[44px] px-6 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-md shadow-blue-600/25 active:scale-95 transition-all cursor-pointer"
             >
               <Printer className="w-4 h-4 stroke-[2.5]" />
-              <span>🖨️ הדפס תגים עכשיו</span>
+              <span>🖨️ הדפס תגיות ל-TSC (60×30 מ״מ)</span>
             </button>
           </div>
         )}
@@ -1019,7 +912,7 @@ export default function PrintTagsView() {
               className="w-full min-h-[56px] rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2.5 shadow-2xl shadow-blue-950/60 active:scale-95 transition-all cursor-pointer border border-blue-400"
             >
               <Printer className="w-5 h-5 stroke-[2.5]" />
-              <span>🖨️ הדפס תגים עכשיו ({tags.length})</span>
+              <span>🖨️ הדפס תגיות ל-TSC (60×30 מ״מ) ({tags.length})</span>
             </button>
           </div>
         )}
@@ -1035,12 +928,10 @@ export default function PrintTagsView() {
             <p className="text-xs text-slate-500">
               {activeTab === 'reprint'
                 ? 'חפש כלי קיים לפי ברקוד או סיומת כדי להפיק מדבקה חלופית.'
-                : labelFormat === 'tsc'
-                ? 'הגדר את המספור והכמות למעלה כדי להפיק גליל מדבקות תרמי (60×30 מ״מ).'
-                : 'הגדר את המספור והכמות למעלה כדי להפיק גיליון מדבקות A4.'}
+                : 'הגדר את המספור והכמות למעלה כדי להפיק גליל מדבקות תרמי ל-TSC (60×30 מ״מ).'}
             </p>
           </div>
-        ) : labelFormat === 'tsc' ? (
+        ) : (
           /* TSC THERMAL LABEL 60x30 mm ROLL (Exact 2:1 Landscape) */
           <div className="tsc-container grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 print:block print:w-[60mm] print:m-0 print:p-0">
             {tags.map((tag, idx) => (
@@ -1110,74 +1001,6 @@ export default function PrintTagsView() {
                       ? `${tag.facilityName} • סרוק לשיוך`
                       : 'ציוד מבוקר • סרוק לבדיקה'}
                   </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          /* A4 SHEET OFFICE GRID */
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 print:grid-cols-3 gap-3 print:gap-2">
-            {tags.map((tag, idx) => (
-              <div
-                key={`${tag.serial}-${idx}`}
-                className="industrial-tag bg-white border-2 border-slate-900 rounded-xl p-3 flex flex-col items-center justify-between text-center shadow-sm print:shadow-none print:border-slate-800 print:rounded-lg print:p-2 min-h-[165px]"
-              >
-                {/* Tag Header */}
-                <div className="w-full flex items-center justify-between border-b-2 border-slate-900 pb-1 mb-1.5 print:border-slate-800 overflow-hidden">
-                  <div className="flex items-center gap-1 font-black text-slate-950 min-w-0 flex-1 text-right">
-                    <Wrench className="w-3.5 h-3.5 text-blue-600 print:text-black shrink-0" />
-                    <span
-                      className={`truncate leading-none ${
-                        effectiveCompanyName.length > 18
-                          ? 'text-[9.5px] print:text-[8.5px]'
-                          : effectiveCompanyName.length > 12
-                          ? 'text-[11px] print:text-[9.5px]'
-                          : 'text-xs print:text-[11px] tracking-wider'
-                      }`}
-                      title={effectiveCompanyName}
-                    >
-                      {effectiveCompanyName}
-                    </span>
-                  </div>
-                  <span
-                    className={`shrink-0 text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded border ${
-                      tag.isReprint
-                        ? 'bg-amber-100 text-amber-900 border-amber-300 print:border-black'
-                        : 'bg-slate-100 text-slate-800 border-slate-300 print:border-black'
-                    }`}
-                  >
-                    {tag.isReprint ? 'מדבקה חלופית' : 'ציוד מבוקר'}
-                  </span>
-                </div>
-
-                {/* QR Code Canvas/Image */}
-                <div className="my-1 p-1 bg-white rounded flex items-center justify-center">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={tag.qrDataUrl}
-                    alt={`QR Code for ${tag.serial}`}
-                    className="w-24 h-24 print:w-20 print:h-20 object-contain"
-                  />
-                </div>
-
-                {/* High-Contrast Monospace Serial Code */}
-                <div className="w-full mt-1 pt-1 border-t border-slate-200 print:border-slate-400 text-center">
-                  <div className="text-xs font-mono font-black text-slate-950 tracking-wider select-all" dir="ltr">
-                    {tag.serial}
-                  </div>
-                  {tag.toolName ? (
-                    <div className="text-[10px] font-bold text-slate-800 truncate mt-0.5">
-                      {tag.toolName}
-                    </div>
-                  ) : null}
-                  <div className="text-[9px] font-bold text-slate-600 truncate mt-0.5">
-                    {tag.facilityName || facilityText}
-                  </div>
-                </div>
-
-                {/* Micro Security Notice */}
-                <div className="w-full text-[8px] font-semibold text-slate-400 mt-1 print:text-black flex items-center justify-center gap-1">
-                  <span>סרוק לבדיקה וניפוק • אין להסיר</span>
                 </div>
               </div>
             ))}
