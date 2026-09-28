@@ -1447,6 +1447,7 @@ export async function transferAssetAction(
 
       try {
         await clearDashboardCaches();
+        revalidatePath('/history');
         revalidatePath('/catalog');
         revalidatePath('/dashboard/warehouse');
         revalidatePath('/dashboard/manager');
@@ -1526,6 +1527,7 @@ export async function transferAssetAction(
 
   try {
     await clearDashboardCaches();
+    revalidatePath('/history');
     revalidatePath('/catalog');
     revalidatePath('/dashboard/warehouse');
     revalidatePath('/dashboard/manager');

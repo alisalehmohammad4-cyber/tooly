@@ -49,6 +49,8 @@ import AssetActionModal from '@/components/modules/AssetActionModal';
 import { getAssetDetailsByQr, type ScannedAssetDetails } from '@/app/actions/custody';
 import { useRouter } from 'next/navigation';
 
+const BuildingOfficeIcon = Building2;
+
 interface HistoryViewProps {
   initialData: AuditHistoryPayload;
 }
@@ -1342,11 +1344,34 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
 
                 {/* Footer: Location, GPS Pin Link & Interactive Performed By */}
                 <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs font-bold text-slate-500">
-                  <div className="flex items-center gap-2">
-                    <div className="flex items-center gap-1.5">
-                      <Building2 className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                      <span className="truncate max-w-[180px]">{item.warehouseName}</span>
-                    </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span
+                      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200 shadow-2xs"
+                      title="מיקום נוכחי של הכלי (Live Location)"
+                    >
+                      <BuildingOfficeIcon className="w-3.5 h-3.5 shrink-0" />
+                      <span className="truncate max-w-[180px]">
+                        {item.assets?.current_warehouse?.name || item.warehouses?.name || item.currentWarehouseName || item.warehouseName || 'מתקן'}
+                      </span>
+                    </span>
+
+                    {/* Explicit Transfer Route for Transfer Events */}
+                    {(item.action === 'TRANSFER_INIT' ||
+                      item.action === 'TRANSFER_RECEIVE' ||
+                      item.notes?.includes('שינוע') ||
+                      item.notes?.includes('העברה')) && (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-900 border border-amber-200 shadow-2xs">
+                        <Truck className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                        <span className="text-amber-700 font-medium">מסלול שינוע:</span>
+                        <span className="font-bold">
+                          {item.source_warehouse?.name || item.sourceWarehouseName || item.warehouses?.name || item.warehouseName || 'מקור'}
+                        </span>
+                        <span className="text-amber-500 font-black">➔</span>
+                        <span className="font-bold">
+                          {item.target_warehouse?.name || item.targetWarehouseName || item.assets?.current_warehouse?.name || item.currentWarehouseName || 'יעד'}
+                        </span>
+                      </span>
+                    )}
 
                     {item.gps && (
                       <a
@@ -1551,7 +1576,19 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
                             </div>
                           )}
                         </td>
-                        <td className="p-2.5 text-slate-600">{rec.warehouseName}</td>
+                        <td className="p-2.5 text-slate-700">
+                          <div className="flex items-center gap-1.5 font-bold">
+                            <BuildingOfficeIcon className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                            <span>{rec.assets?.current_warehouse?.name || rec.warehouses?.name || rec.currentWarehouseName || rec.warehouseName}</span>
+                          </div>
+                          {(rec.action === 'TRANSFER_INIT' || rec.action === 'TRANSFER_RECEIVE') && (
+                            <div className="text-[10px] text-amber-800 font-bold flex items-center gap-1 mt-0.5">
+                              <span>{rec.source_warehouse?.name || rec.sourceWarehouseName || rec.warehouseName}</span>
+                              <span className="text-amber-500">➔</span>
+                              <span>{rec.target_warehouse?.name || rec.targetWarehouseName || rec.assets?.current_warehouse?.name || 'יעד'}</span>
+                            </div>
+                          )}
+                        </td>
                         <td className="p-2.5 text-slate-600">{rec.performedBy}</td>
                         <td className="p-2.5 text-slate-700 italic max-w-[200px] truncate" title={rec.notes || ''}>
                           {rec.notes ? `"${rec.notes}"` : '—'}

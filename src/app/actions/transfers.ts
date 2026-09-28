@@ -478,12 +478,13 @@ export async function decideTransferRequestAction(
   }
 
   if (decision === 'APPROVED') {
-    // 1. Update asset status to 'in_transit' in Supabase
+    // 1. Update asset status to 'in_transit' and current_warehouse_id in Supabase
     if (isSupabaseConfigured()) {
       try {
         const { error: assetUpdateErr } = await supabaseAdmin
           .from('assets')
           .update({
+            current_warehouse_id: targetRecord.target_warehouse_id,
             status: 'in_transit',
             updated_at: now,
           })
@@ -500,6 +501,7 @@ export async function decideTransferRequestAction(
           action: 'TRANSFER_INIT',
           performed_by: decidedBy,
           organization_id: orgId,
+          warehouse_id: targetRecord.target_warehouse_id,
           notes: `אושרה בקשת העברה בין אתרים (${requestId})`,
           created_at: now,
         });
@@ -509,15 +511,33 @@ export async function decideTransferRequestAction(
     }
 
     // In-memory mock asset update
+    const targetWhMeta = getMockWarehouses(true, orgId).find((w) => w.id === targetRecord.target_warehouse_id);
     mutateMockAsset(
       targetRecord.asset_id,
-      { status: 'in_transit' },
+      {
+        status: 'in_transit',
+        warehouseId: targetRecord.target_warehouse_id,
+        currentWarehouseId: targetRecord.target_warehouse_id,
+        warehouseName: targetWhMeta?.name || 'מחסן יעד',
+        warehouseCode: targetWhMeta?.code || '',
+      },
       {
         action: 'TRANSFER_INIT',
         performedBy: decidedBy,
         notes: `אושרה העברה בין אתרים`,
       }
     );
+
+    try {
+      await clearDashboardCaches();
+      revalidatePath('/history');
+      revalidatePath('/catalog');
+      revalidatePath('/dashboard/warehouse');
+      revalidatePath('/dashboard/manager');
+      revalidatePath('/dashboard/chief');
+    } catch (e) {
+      console.warn('[decideTransferRequestAction] revalidatePath warning:', e);
+    }
   }
 
   // Update transfer_requests record
@@ -658,8 +678,11 @@ export async function completeTransferReceptionAction(
 
   try {
     await clearDashboardCaches();
+    revalidatePath('/history');
+    revalidatePath('/catalog');
     revalidatePath('/dashboard/warehouse');
     revalidatePath('/dashboard/manager');
+    revalidatePath('/dashboard/chief');
   } catch (e) {
     console.warn('[completeTransferReceptionAction] revalidatePath warning:', e);
   }
@@ -1055,6 +1078,8 @@ export async function directStorekeeperTransferAction(data: {
 
   try {
     await clearDashboardCaches();
+    revalidatePath('/history');
+    revalidatePath('/catalog');
     revalidatePath('/dashboard/warehouse');
     revalidatePath('/dashboard/manager');
     revalidatePath('/dashboard/chief');

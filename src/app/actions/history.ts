@@ -60,9 +60,16 @@ export async function getAuditHistory(
         notes,
         created_at,
         organization_id,
+        warehouse_id,
+        warehouses:warehouse_id (
+          id,
+          name,
+          code
+        ),
         assets:asset_id (
           id,
           qr_code,
+          tag_number,
           condition,
           current_warehouse_id,
           organization_id,
@@ -71,7 +78,7 @@ export async function getAuditHistory(
             brand,
             model_number
           ),
-          warehouses:current_warehouse_id (
+          current_warehouse:current_warehouse_id (
             id,
             name,
             code
@@ -111,6 +118,34 @@ export async function getAuditHistory(
       };
     }
 
+    // Prefetch transfer route records for transfer actions if available
+    const transferRouteMap: Record<string, { sourceName: string; targetName: string }> = {};
+    try {
+      const { data: trData } = await supabase
+        .from('transfer_requests')
+        .select(`
+          asset_id,
+          source_warehouse:source_warehouse_id(name),
+          target_warehouse:target_warehouse_id(name)
+        `)
+        .eq('organization_id', orgId);
+
+      if (trData && Array.isArray(trData)) {
+        (trData as unknown as Array<{ asset_id?: string; source_warehouse?: any; target_warehouse?: any }>).forEach((tr) => {
+          if (tr.asset_id) {
+            const srcName = Array.isArray(tr.source_warehouse) ? tr.source_warehouse[0]?.name : tr.source_warehouse?.name;
+            const tgtName = Array.isArray(tr.target_warehouse) ? tr.target_warehouse[0]?.name : tr.target_warehouse?.name;
+            transferRouteMap[tr.asset_id] = {
+              sourceName: srcName || '',
+              targetName: tgtName || '',
+            };
+          }
+        });
+      }
+    } catch {
+      // Non-blocking
+    }
+
     interface RawLedgerRow {
       id: string;
       action: string;
@@ -129,9 +164,16 @@ export async function getAuditHistory(
       notes: string | null;
       created_at: string;
       organization_id?: string | null;
+      warehouse_id?: string | null;
+      warehouses?: {
+        id: string;
+        name: string;
+        code: string;
+      } | null;
       assets: {
         id: string;
         qr_code: string;
+        tag_number?: string | null;
         condition: AuditHistoryRecord['condition'];
         current_warehouse_id: string;
         organization_id?: string | null;
@@ -140,7 +182,12 @@ export async function getAuditHistory(
           brand: string;
           model_number: string | null;
         } | null;
-        warehouses: {
+        current_warehouse?: {
+          id: string;
+          name: string;
+          code: string;
+        } | null;
+        warehouses?: {
           id: string;
           name: string;
           code: string;
@@ -160,6 +207,28 @@ export async function getAuditHistory(
         else if (raw === 'ONBOARD') normalizedAction = 'ONBOARD';
         else if (raw === 'LOCK_STATUS') normalizedAction = 'LOCK_STATUS';
         else if (raw === 'SAFETY_INSPECTION') normalizedAction = 'SAFETY_INSPECTION';
+        else if (raw === 'RETIRE') normalizedAction = 'RETIRE';
+
+        const liveWh = row.assets?.current_warehouse || row.assets?.warehouses;
+        const liveWhName = liveWh?.name || row.warehouses?.name || 'מתקן';
+        const liveWhId = row.assets?.current_warehouse_id || row.warehouse_id || null;
+        const liveWhCode = liveWh?.code || row.warehouses?.code || 'FAC';
+
+        // Resolve transfer route
+        let sourceWhName = row.warehouses?.name || 'מחסן מקור';
+        let targetWhName = liveWhName;
+
+        const matchedRoute = row.assets?.id ? transferRouteMap[row.assets.id] : null;
+        if (matchedRoute?.sourceName) sourceWhName = matchedRoute.sourceName;
+        if (matchedRoute?.targetName) targetWhName = matchedRoute.targetName;
+
+        if (row.notes) {
+          const targetMatch = row.notes.match(/(?:שינוע למחסן|העברת כלי למחסן:|לאתר יעד[:\s]*|אל\s+)([\u0590-\u05FF\w\s\-"]+)/);
+          if (targetMatch && targetMatch[1]) targetWhName = targetMatch[1].trim();
+
+          const sourceMatch = row.notes.match(/(?:מאתר|ממחסן|מאזור)\s+([\u0590-\u05FF\w\s\-"]+)/);
+          if (sourceMatch && sourceMatch[1]) sourceWhName = sourceMatch[1].trim();
+        }
 
         return {
           id: row.id,
@@ -173,9 +242,36 @@ export async function getAuditHistory(
           targetWorker: row.target_worker || (normalizedAction === 'CHECKOUT' ? row.performed_by : null),
           workerPhone: row.worker_phone || null,
           condition: row.assets?.condition || 'good',
-          warehouseId: row.assets?.current_warehouse_id || null,
-          warehouseName: row.assets?.warehouses?.name || 'Central Facility',
-          warehouseCode: row.assets?.warehouses?.code || 'FAC',
+          warehouseId: liveWhId,
+          warehouseName: liveWhName,
+          warehouseCode: liveWhCode,
+          currentWarehouseId: liveWhId,
+          currentWarehouseName: liveWhName,
+          currentWarehouseCode: liveWhCode,
+          sourceWarehouseName: sourceWhName,
+          targetWarehouseName: targetWhName,
+          assets: row.assets
+            ? {
+                id: row.assets.id,
+                qr_code: row.assets.qr_code,
+                tag_number: row.assets.tag_number || null,
+                current_warehouse_id: row.assets.current_warehouse_id,
+                current_warehouse: liveWh
+                  ? {
+                      id: liveWh.id,
+                      name: liveWh.name,
+                      code: liveWh.code,
+                    }
+                  : null,
+              }
+            : null,
+          warehouses: row.warehouses || (liveWh ? { id: liveWh.id, name: liveWh.name, code: liveWh.code } : null),
+          source_warehouse: {
+            name: sourceWhName,
+          },
+          target_warehouse: {
+            name: targetWhName,
+          },
           notes: row.notes,
           createdAt: row.created_at,
           organizationId: (row.organization_id as string) || orgId,

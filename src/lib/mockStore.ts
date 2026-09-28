@@ -43183,7 +43183,60 @@ export function getMockAuditHistory(filters?: AuditHistoryFilters, organizationI
     ? historyStore.filter((item) => item.organizationId === organizationId)
     : [];
 
-  const filtered = filterAuditHistoryRecords(items, filters);
+  const enhancedItems = items.map((rec) => {
+    const liveAsset = assetsStore.find((a) => a.id === rec.assetId || a.qrCode === rec.qrCode);
+    const liveWhName = liveAsset?.warehouseName || rec.warehouseName || 'מתקן';
+    const liveWhId = liveAsset?.currentWarehouseId || liveAsset?.warehouseId || rec.warehouseId || '';
+    const liveWhCode = liveAsset?.warehouseCode || rec.warehouseCode || 'WH';
+
+    let sourceWhName = rec.warehouseName;
+    let targetWhName = liveWhName;
+
+    if (rec.notes) {
+      const targetMatch = rec.notes.match(/(?:שינוע למחסן|העברת כלי למחסן:|לאתר יעד[:\s]*|אל\s+)([\u0590-\u05FF\w\s\-"]+)/);
+      if (targetMatch && targetMatch[1]) targetWhName = targetMatch[1].trim();
+
+      const sourceMatch = rec.notes.match(/(?:מאתר|ממחסן|מאזור)\s+([\u0590-\u05FF\w\s\-"]+)/);
+      if (sourceMatch && sourceMatch[1]) sourceWhName = sourceMatch[1].trim();
+
+      if (rec.notes.includes('הבונים')) sourceWhName = 'אתר הבונים';
+      if (rec.notes.includes('בז"ן') || rec.notes.includes('בזן')) targetWhName = 'אתר בז"ן';
+    }
+
+    return {
+      ...rec,
+      warehouseName: liveWhName,
+      currentWarehouseName: liveWhName,
+      currentWarehouseId: liveWhId,
+      currentWarehouseCode: liveWhCode,
+      sourceWarehouseName: sourceWhName,
+      targetWarehouseName: targetWhName,
+      assets: {
+        id: rec.assetId,
+        qr_code: rec.qrCode,
+        tag_number: liveAsset?.tagNumber || null,
+        current_warehouse_id: liveWhId,
+        current_warehouse: {
+          id: liveWhId,
+          name: liveWhName,
+          code: liveWhCode,
+        },
+      },
+      warehouses: {
+        id: liveWhId,
+        name: liveWhName,
+        code: liveWhCode,
+      },
+      source_warehouse: {
+        name: sourceWhName,
+      },
+      target_warehouse: {
+        name: targetWhName,
+      },
+    };
+  });
+
+  const filtered = filterAuditHistoryRecords(enhancedItems, filters);
 
   return {
     records: filtered,

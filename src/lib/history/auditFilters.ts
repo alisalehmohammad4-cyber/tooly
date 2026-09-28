@@ -40,6 +40,38 @@ export interface AuditHistoryRecord {
   } | null;
   gps?: GpsCoordinates | null;
   damageReport?: DamageReport | null;
+  // Live current location & related entities
+  currentWarehouseId?: string | null;
+  currentWarehouseName?: string | null;
+  currentWarehouseCode?: string | null;
+  sourceWarehouseName?: string | null;
+  targetWarehouseName?: string | null;
+  assets?: {
+    id: string;
+    qr_code: string;
+    tag_number?: string | null;
+    current_warehouse_id?: string | null;
+    current_warehouse?: {
+      id: string;
+      name: string;
+      code?: string;
+    } | null;
+  } | null;
+  warehouses?: {
+    id: string;
+    name: string;
+    code?: string;
+  } | null;
+  source_warehouse?: {
+    id?: string;
+    name: string;
+    code?: string;
+  } | null;
+  target_warehouse?: {
+    id?: string;
+    name: string;
+    code?: string;
+  } | null;
 }
 
 export type AuditDateRange = 'today' | 'yesterday' | 'week' | 'month' | 'custom' | 'all';
