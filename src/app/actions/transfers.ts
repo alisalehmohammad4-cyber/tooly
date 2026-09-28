@@ -970,6 +970,7 @@ export async function directStorekeeperTransferAction(data: {
       const { error: updateErr } = await supabaseAdmin
         .from('assets')
         .update({
+          current_warehouse_id: targetWarehouseId,
           status: 'in_transit',
           updated_at: now,
         })
@@ -977,7 +978,8 @@ export async function directStorekeeperTransferAction(data: {
         .eq('organization_id', orgId);
 
       if (updateErr) {
-        return { success: false, error: `שגיאה בעדכון סטטוס כלי: ${updateErr.message}` };
+        console.error("Transfer DB Error:", updateErr);
+        return { success: false, error: `שגיאה בעדכון כלי ומחסן: ${updateErr.message}` };
       }
 
       const { error: ledgerErr } = await supabaseAdmin.from('custody_ledger').insert({
@@ -1039,7 +1041,11 @@ export async function directStorekeeperTransferAction(data: {
 
   mutateMockAsset(
     assetId,
-    { status: 'in_transit' },
+    {
+      status: 'in_transit',
+      warehouseId: targetWarehouseId,
+      currentWarehouseId: targetWarehouseId,
+    },
     {
       action: 'TRANSFER_INIT',
       performedBy,

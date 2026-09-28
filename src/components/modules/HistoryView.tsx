@@ -45,6 +45,9 @@ import {
 } from '@/lib/history/auditFilters';
 import AppLayout from '@/components/layout/AppLayout';
 import ToolPassportModal from '@/components/modules/ToolPassportModal';
+import AssetActionModal from '@/components/modules/AssetActionModal';
+import { getAssetDetailsByQr, type ScannedAssetDetails } from '@/app/actions/custody';
+import { useRouter } from 'next/navigation';
 
 interface HistoryViewProps {
   initialData: AuditHistoryPayload;
@@ -238,9 +241,65 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
   const [hasSignatureOnly, setHasSignatureOnly] = useState<boolean>(false);
 
   // Modals
+  const router = useRouter();
   const [selectedReceiptRecord, setSelectedReceiptRecord] = useState<AuditHistoryRecord | null>(null);
   const [isPdfExportModalOpen, setIsPdfExportModalOpen] = useState<boolean>(false);
   const [selectedPassportTag, setSelectedPassportTag] = useState<string | null>(null);
+
+  // Direct Tool Action Modal State
+  const [actionModalAsset, setActionModalAsset] = useState<ScannedAssetDetails | null>(null);
+  const [isActionModalOpen, setIsActionModalOpen] = useState<boolean>(false);
+  const [loadingActionQr, setLoadingActionQr] = useState<string | null>(null);
+
+  const handleOpenToolActions = async (record: AuditHistoryRecord) => {
+    setLoadingActionQr(record.qrCode);
+    try {
+      const asset = await getAssetDetailsByQr(record.qrCode);
+      if (asset) {
+        setActionModalAsset(asset);
+        setIsActionModalOpen(true);
+      } else {
+        const fallbackAsset: ScannedAssetDetails = {
+          id: record.assetId,
+          qrCode: record.qrCode,
+          toolName: record.toolName,
+          brand: record.brand,
+          modelNumber: record.modelNumber,
+          status: (record.action === 'CHECKOUT' ? 'checked_out' : record.action === 'MAINTENANCE_FLAG' ? 'maintenance' : 'available') as any,
+          condition: (record.condition || 'good') as any,
+          warehouseName: record.warehouseName,
+          warehouseCode: record.warehouseCode,
+          currentWarehouseId: record.warehouseId || initialData.warehouses[0]?.id || '',
+          currentAssignedWorker: record.targetWorker,
+          organizationId: record.organizationId,
+          version: 1,
+        };
+        setActionModalAsset(fallbackAsset);
+        setIsActionModalOpen(true);
+      }
+    } catch (err) {
+      console.error('Failed to load asset details for actions:', err);
+      const fallbackAsset: ScannedAssetDetails = {
+        id: record.assetId,
+        qrCode: record.qrCode,
+        toolName: record.toolName,
+        brand: record.brand,
+        modelNumber: record.modelNumber,
+        status: (record.action === 'CHECKOUT' ? 'checked_out' : record.action === 'MAINTENANCE_FLAG' ? 'maintenance' : 'available') as any,
+        condition: (record.condition || 'good') as any,
+        warehouseName: record.warehouseName,
+        warehouseCode: record.warehouseCode,
+        currentWarehouseId: record.warehouseId || initialData.warehouses[0]?.id || '',
+        currentAssignedWorker: record.targetWorker,
+        organizationId: record.organizationId,
+        version: 1,
+      };
+      setActionModalAsset(fallbackAsset);
+      setIsActionModalOpen(true);
+    } finally {
+      setLoadingActionQr(null);
+    }
+  };
 
   // 300ms Debounce Handler with Loading Indicator
   useEffect(() => {
@@ -1318,6 +1377,34 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
                     </button>
                   </div>
                 </div>
+
+                {/* TOOL ACTIONS BAR (TRANSFER, CHECKIN, CHECKOUT, MAINTENANCE) */}
+                <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleOpenToolActions(item)}
+                    disabled={loadingActionQr === item.qrCode}
+                    className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black flex items-center gap-1.5 shadow-sm shadow-blue-600/20 active:scale-95 transition-all cursor-pointer disabled:opacity-50"
+                    title={`פתח תפריט פעולות כלי (שינוע, החזרה, ניפוק, תיקון) עבור ${item.toolName}`}
+                  >
+                    {loadingActionQr === item.qrCode ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
+                    ) : (
+                      <Zap className="w-3.5 h-3.5 text-amber-300 fill-amber-300" />
+                    )}
+                    <span>⚡ פעולות כלי</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPassportTag(item.qrCode)}
+                    className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-800 border border-slate-200 text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer active:scale-95"
+                    title="צפה בדרכון הכלי"
+                  >
+                    <FileText className="w-3.5 h-3.5 text-blue-600" />
+                    <span>דרכון כלי</span>
+                  </button>
+                </div>
               </div>
             ))}
             </div>
@@ -1668,6 +1755,20 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
         isOpen={Boolean(selectedPassportTag)}
         assetTag={selectedPassportTag}
         onClose={() => setSelectedPassportTag(null)}
+      />
+
+      {/* ASSET ACTION MODAL (TRANSFER, CHECKIN, CHECKOUT, MAINTENANCE) */}
+      <AssetActionModal
+        isOpen={isActionModalOpen}
+        asset={actionModalAsset}
+        warehouses={initialData.warehouses}
+        onClose={() => {
+          setIsActionModalOpen(false);
+          setActionModalAsset(null);
+        }}
+        onActionComplete={(_msg, _updated) => {
+          router.refresh();
+        }}
       />
     </AppLayout>
   );

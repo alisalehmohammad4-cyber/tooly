@@ -56,6 +56,10 @@ export interface ScannedAssetDetails {
   reservation?: AssetReservation | null;
   orderNumber?: string | null;
   order_number?: string | null;
+  poNumber?: string | null;
+  po_number?: string | null;
+  supplyLocation?: string | null;
+  supply_location?: string | null;
   category?: string;
   categoryName?: string;
   category_name?: string;
@@ -172,6 +176,8 @@ interface JoinedAssetData {
   is_locked?: boolean;
   lock_reason?: string;
   reservation?: AssetReservation | null;
+  po_number?: string | null;
+  supply_location?: string | null;
   tool_models: {
     id: string;
     name: string;
@@ -207,6 +213,10 @@ function mapJoinedRowToScannedAsset(row: JoinedAssetData): ScannedAssetDetails {
     isLocked: row.is_locked,
     lockReason: row.lock_reason,
     reservation: row.reservation,
+    poNumber: row.po_number,
+    po_number: row.po_number,
+    supplyLocation: row.supply_location,
+    supply_location: row.supply_location,
   };
 }
 
@@ -288,6 +298,8 @@ export async function getAssetDetailsByQr(
           is_locked,
           lock_reason,
           reservation,
+          po_number,
+          supply_location,
           tool_models:tool_model_id (
             id,
             name,
@@ -336,6 +348,8 @@ export async function getAssetDetailsByQr(
           is_locked,
           lock_reason,
           reservation,
+          po_number,
+          supply_location,
           tool_models:tool_model_id (
             id,
             name,
@@ -1289,7 +1303,7 @@ export async function transferAssetAction(
 
   if (isSupabaseConfigured()) {
     try {
-      const { data: dbWh } = await supabase
+      const { data: dbWh } = await supabaseAdmin
         .from('warehouses')
         .select('id, organization_id')
         .eq('id', targetWarehouseId)
@@ -1332,13 +1346,17 @@ export async function transferAssetAction(
     }
   }
 
+  const targetWhMeta = getWarehouseMeta(targetWarehouseId);
+  const sessionUser = await getServerSessionUser();
+  const performedBy = sessionUser?.fullName || 'מחסנאי שטח';
+
   if (isSupabaseConfigured()) {
     try {
-      const { data: currentAsset, error: fetchErr } = await supabase
+      const { data: currentAsset, error: fetchErr } = await supabaseAdmin
         .from('assets')
-        .select('id, version, organization_id')
+        .select('id, version, organization_id, qr_code, nfc_uid, condition, current_assigned_worker, current_warehouse_id, tool_models(name, brand, model_number)')
         .eq('id', assetId)
-        .single();
+        .maybeSingle();
 
       if (fetchErr) {
         return { success: false, error: fetchErr.message };
@@ -1362,34 +1380,85 @@ export async function transferAssetAction(
 
       const nextVersion = (currentAsset.version || 1) + 1;
 
-      const { error: updateErr } = await supabase
+      const { error: updateErr } = await supabaseAdmin
         .from('assets')
         .update({
-          status: 'in_transit',
           current_warehouse_id: targetWarehouseId,
+          status: 'in_transit',
           version: nextVersion,
+          updated_at: new Date().toISOString(),
         })
         .eq('id', assetId)
         .eq('organization_id', orgId);
 
       if (updateErr) {
+        console.error("Transfer DB Error:", updateErr);
         return { success: false, error: `Failed to transfer asset: ${updateErr.message}` };
       }
 
       // Record audit in custody_ledger
-      const { error: ledgerErr } = await supabase.from('custody_ledger').insert({
+      const { error: ledgerErr } = await supabaseAdmin.from('custody_ledger').insert({
         asset_id: assetId,
         action: 'TRANSFER_INIT',
-        performed_by: 'Field Agent',
+        performed_by: performedBy,
         organization_id: orgId,
+        warehouse_id: targetWarehouseId,
         gps_lat: gps?.lat ?? null,
         gps_lng: gps?.lng ?? null,
-        notes: notes || `Transferred to warehouse ${targetWarehouseId}`,
+        notes: notes || `שינוע למחסן ${targetWhMeta.name}`,
+        created_at: new Date().toISOString(),
       });
 
       if (ledgerErr) {
-        return { success: false, error: ledgerErr.message };
+        console.warn('Custody ledger log error on transfer:', ledgerErr);
       }
+
+      const tm = (currentAsset as unknown as { tool_models?: { name?: string; brand?: string; model_number?: string | null } }).tool_models;
+      const dbUpdatedAsset: ScannedAssetDetails = {
+        id: currentAsset.id,
+        qrCode: currentAsset.qr_code,
+        nfcUid: currentAsset.nfc_uid || undefined,
+        status: 'in_transit',
+        condition: (currentAsset.condition as 'excellent' | 'good' | 'needs_repair' | 'retired') || 'good',
+        currentAssignedWorker: null,
+        currentWarehouseId: targetWarehouseId,
+        warehouseName: targetWhMeta.name,
+        warehouseCode: targetWhMeta.code,
+        toolName: tm?.name || 'כלי עבודה',
+        brand: tm?.brand || 'Standard',
+        modelNumber: tm?.model_number || null,
+        version: nextVersion,
+      };
+
+      mutateMockAsset(
+        currentAsset.qr_code,
+        {
+          warehouseId: targetWarehouseId,
+          warehouseName: targetWhMeta.name,
+          warehouseCode: targetWhMeta.code,
+          status: 'in_transit',
+        },
+        {
+          action: 'TRANSFER_INIT',
+          performedBy,
+          notes: notes || `שינוע למחסן ${targetWhMeta.name}`,
+        }
+      );
+
+      try {
+        await clearDashboardCaches();
+        revalidatePath('/catalog');
+        revalidatePath('/dashboard/warehouse');
+        revalidatePath('/dashboard/manager');
+      } catch (e) {
+        console.warn('[transferAssetAction] revalidatePath warning:', e);
+      }
+
+      return {
+        success: true,
+        message: `מיקום הכלי עודכן לשינוע אל ${targetWhMeta.name}`,
+        asset: dbUpdatedAsset,
+      };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Database error';
       return { success: false, error: msg };
@@ -1400,8 +1469,6 @@ export async function transferAssetAction(
       error: 'לא ניתן להעביר ציוד למתקן שאינו שייך לארגון זה',
     };
   }
-
-  const targetWhMeta = getWarehouseMeta(targetWarehouseId);
 
   // Update fallback in-memory asset if present
   for (const key of Object.keys(FALLBACK_CUSTODY_ASSETS)) {
@@ -1421,8 +1488,8 @@ export async function transferAssetAction(
         },
         {
           action: 'TRANSFER_INIT',
-          performedBy: 'מחסנאי',
-          notes: `העברת כלי למחסן: ${targetWhMeta.name}`,
+          performedBy,
+          notes: notes || `העברת כלי למחסן: ${targetWhMeta.name}`,
         }
       );
       try {
@@ -1442,6 +1509,21 @@ export async function transferAssetAction(
     }
   }
 
+  mutateMockAsset(
+    assetId,
+    {
+      warehouseId: targetWarehouseId,
+      warehouseName: targetWhMeta.name,
+      warehouseCode: targetWhMeta.code,
+      status: 'in_transit',
+    },
+    {
+      action: 'TRANSFER_INIT',
+      performedBy,
+      notes: notes || `העברת כלי למחסן: ${targetWhMeta.name}`,
+    }
+  );
+
   try {
     await clearDashboardCaches();
     revalidatePath('/catalog');
@@ -1456,16 +1538,16 @@ export async function transferAssetAction(
     message: `מיקום הכלי עודכן לשינוע אל ${targetWhMeta.name}`,
     asset: {
       id: assetId,
-      qrCode: 'TOOL-CURRENT',
+      qrCode: mockAsset?.qrCode || 'TOOL-CURRENT',
       status: 'in_transit',
       condition: 'good',
       currentAssignedWorker: null,
       currentWarehouseId: targetWarehouseId,
       warehouseName: targetWhMeta.name,
       warehouseCode: targetWhMeta.code,
-      toolName: 'כלי עבודה',
-      brand: 'Standard',
-      modelNumber: null,
+      toolName: mockAsset?.toolName || 'כלי עבודה',
+      brand: mockAsset?.brand || 'Standard',
+      modelNumber: mockAsset?.modelNumber || null,
       version: 2,
     },
   };
@@ -2149,5 +2231,4 @@ export async function snapOcrTagToAssetAction(
     message: `לא נמצא כלי התואם לתגית "${cleanTag}".`,
   };
 }
-
 

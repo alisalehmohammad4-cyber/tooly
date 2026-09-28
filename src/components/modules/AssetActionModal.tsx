@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   X,
   UserCheck,
@@ -31,9 +32,11 @@ import {
   reportAssetDamageAction,
   retireAssetAction,
 } from '@/app/actions/custody';
+import { updateAssetStatusAction } from '@/app/actions/assets';
 import { getCurrentGpsCoordinates } from '@/lib/geo';
 import { useAuth } from '@/context/AuthContext';
 import ToolPassportModal from '@/components/modules/ToolPassportModal';
+import StatusSwitcher from '@/components/modules/StatusSwitcher';
 import {
   enqueueSyncAction,
   updateCachedAsset,
@@ -51,7 +54,7 @@ interface AssetActionModalProps {
   isInCart?: boolean;
 }
 
-type ModalTab = 'checkout' | 'checkin' | 'transfer' | 'retire';
+type ModalTab = 'checkout' | 'checkin' | 'transfer' | 'maintenance' | 'retire';
 
 export default function AssetActionModal({
   asset,
@@ -62,6 +65,7 @@ export default function AssetActionModal({
   onAddToCart,
   isInCart = false,
 }: AssetActionModalProps) {
+  const router = useRouter();
   const { role, user, openPinModal, currentOrganization } = useAuth();
 
   // Tab Mode: auto-select Check-In if already checked_out, otherwise Check-Out
@@ -81,6 +85,10 @@ export default function AssetActionModal({
     warehouses[0]?.id || ''
   );
   const [notes, setNotes] = useState<string>('');
+
+  // Maintenance form state
+  const [maintenanceReason, setMaintenanceReason] = useState<string>('תקלה מכנית / תיקון');
+  const [maintenanceNotes, setMaintenanceNotes] = useState<string>('');
 
   // Damage report state (Checkin tab when condition is repair/retired)
   const [damageType, setDamageType] = useState<DamageType>('impact_drop');
@@ -357,6 +365,7 @@ export default function AssetActionModal({
       }
       setIsSubmitting(false);
       onActionComplete('נשמר במכשיר במצב לא מקוון ויסונכרן בהתחברות לרשת (העברת כלי)', optimistic);
+      router.refresh();
       onClose();
       return;
     }
@@ -367,13 +376,23 @@ export default function AssetActionModal({
 
       if (!res.success) {
         setActionError(res.error);
+        alert(`שגיאה בשינוע הכלי: ${res.error}`);
         return;
       }
 
+      const updatedAsset: ScannedAssetDetails = res.asset || {
+        ...asset,
+        status: 'in_transit' as const,
+        currentWarehouseId: targetWarehouseId,
+        warehouseName: targetWhMeta?.name || asset.warehouseName,
+        warehouseCode: targetWhMeta?.code || asset.warehouseCode,
+      };
+
       if (res.asset) await cacheAsset(res.asset);
-      onActionComplete(res.message, res.asset);
+      onActionComplete(res.message, updatedAsset);
+      router.refresh();
       onClose();
-    } catch {
+    } catch (err: any) {
       await enqueueSyncAction('transfer', transferPayload);
       const updated = await updateCachedAsset(asset.id, {
         currentWarehouseId: targetWarehouseId,
@@ -382,14 +401,51 @@ export default function AssetActionModal({
         status: 'in_transit',
       });
       setIsSubmitting(false);
-      onActionComplete('נשמר במכשיר במצב לא מקוון ויסונכרן בהתחברות לרשת (העברת כלי)', updated || {
+      const fallbackAsset: ScannedAssetDetails = updated || {
         ...asset,
         status: 'in_transit' as const,
         currentWarehouseId: targetWarehouseId,
         warehouseName: targetWhMeta?.name || asset.warehouseName,
         warehouseCode: targetWhMeta?.code || asset.warehouseCode,
-      });
+      };
+      onActionComplete('נשמר במכשיר במצב לא מקוון ויסונכרן בהתחברות לרשת (העברת כלי)', fallbackAsset);
+      router.refresh();
       onClose();
+    }
+  };
+
+  // Handle Send to Maintenance Action (Supervisor & Admin)
+  const handleSendToMaintenance = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSubmitting(true);
+    setActionError(null);
+
+    const fullReason = `${maintenanceReason}${maintenanceNotes.trim() ? ': ' + maintenanceNotes.trim() : ''}`;
+
+    try {
+      const res = await updateAssetStatusAction(asset.id, 'maintenance', fullReason);
+      setIsSubmitting(false);
+
+      if (!res.success) {
+        setActionError(res.error || 'שגיאה בעדכון סטטוס לתחזוקה');
+        alert(res.error || 'שגיאה בעדכון סטטוס לתחזוקה');
+        return;
+      }
+
+      const updatedAsset: ScannedAssetDetails = {
+        ...asset,
+        status: 'maintenance',
+        condition: 'needs_repair',
+      };
+      await cacheAsset(updatedAsset);
+      onActionComplete(res.message || 'הכלי הועבר בהצלחה לתחזוקה/תיקון', updatedAsset);
+      router.refresh();
+      onClose();
+    } catch (err: any) {
+      setIsSubmitting(false);
+      const msg = err?.message || 'שגיאה בלתי צפויה בהעברה לתיקון';
+      setActionError(msg);
+      alert(msg);
     }
   };
 
@@ -585,31 +641,49 @@ export default function AssetActionModal({
               </div>
             )}
 
-            {/* Current Location & Live Status Pill */}
+            {/* Current Location & Live Status Pill with Switcher */}
             <div className="mt-3 pt-3 border-t border-blue-200/60 flex flex-wrap items-center justify-between gap-2 text-xs">
               <div className="flex items-center gap-1.5 text-slate-600 font-bold">
                 <Building2 className="w-3.5 h-3.5 text-blue-600 shrink-0" />
                 <span className="truncate max-w-[200px]">{asset.warehouseName}</span>
               </div>
 
-              <div>
-                {isAvailable && (
-                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-black bg-emerald-50 text-emerald-700 border border-emerald-300">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                    זמין במלאי
-                  </span>
-                )}
-                {isCheckedOut && (
-                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-black bg-amber-50 text-amber-800 border border-amber-300">
-                    <UserCheck className="w-3.5 h-3.5 text-amber-600" />
-                    בשימוש: {asset.currentAssignedWorker}
-                  </span>
-                )}
-                {isMaintenance && (
-                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-black bg-red-50 text-red-700 border border-red-300">
-                    <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
-                    בתיקון / בדיקה
-                  </span>
+              <div className="flex items-center gap-2">
+                {role === 'worker' ? (
+                  <div>
+                    {isAvailable && (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-black bg-emerald-50 text-emerald-700 border border-emerald-300">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                        זמין במלאי
+                      </span>
+                    )}
+                    {isCheckedOut && (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-black bg-amber-50 text-amber-800 border border-amber-300">
+                        <UserCheck className="w-3.5 h-3.5 text-amber-600" />
+                        בשימוש: {asset.currentAssignedWorker}
+                      </span>
+                    )}
+                    {isMaintenance && (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-black bg-red-50 text-red-700 border border-red-300">
+                        <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
+                        בתיקון / בדיקה
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <StatusSwitcher
+                    assetId={asset.id}
+                    currentStatus={asset.status}
+                    variant="dropdown"
+                    onStatusChanged={(newSt) => {
+                      const updated: ScannedAssetDetails = {
+                        ...asset,
+                        status: newSt as ScannedAssetDetails['status'],
+                      };
+                      onActionComplete(`סטטוס הכלי עודכן בהצלחה ל-${newSt}`, updated);
+                      router.refresh();
+                    }}
+                  />
                 )}
               </div>
             </div>
@@ -758,7 +832,23 @@ export default function AssetActionModal({
                   }`}
                 >
                   <Truck className="w-3.5 h-3.5" />
-                  <span>העברה</span>
+                  <span>שינוע</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('maintenance');
+                    setActionError(null);
+                  }}
+                  className={`shrink-0 whitespace-nowrap min-w-[70px] flex-1 min-h-[46px] px-3 rounded-xl flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                    activeTab === 'maintenance'
+                      ? 'bg-amber-600 text-white shadow-md font-black'
+                      : 'text-slate-600 hover:text-amber-700'
+                  }`}
+                >
+                  <Wrench className="w-3.5 h-3.5" />
+                  <span>הוצאה לתיקון</span>
                 </button>
 
                 {role === 'admin' && (
@@ -1174,7 +1264,69 @@ export default function AssetActionModal({
                   </form>
                 )}
 
-                {/* TAB D: RETIRE ASSET (ADMIN ONLY) */}
+                {/* TAB D: MAINTENANCE / REPAIR */}
+                {activeTab === 'maintenance' && (
+                  <form onSubmit={handleSendToMaintenance} className="space-y-4">
+                    <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-2xl text-amber-900 text-xs space-y-1">
+                      <div className="font-extrabold flex items-center gap-1.5 text-amber-800">
+                        <Wrench className="w-4 h-4 text-amber-600" />
+                        <span>הוצאת כלי לתיקון / אחזקה</span>
+                      </div>
+                      <p>
+                        פעולה זו תשנה את סטטוס הכלי ל-<strong>בתיקון / אחזקה (maintenance)</strong>, תחסום ניפוק לעובדים עד לסיום התיקון, ותתעד את הפעולה ביומן המלאי.
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs uppercase font-extrabold text-slate-800 tracking-wider mb-1">
+                        סיבת ההוצאה לתיקון <span className="text-amber-600">*</span>
+                      </label>
+                      <select
+                        value={maintenanceReason}
+                        onChange={(e) => setMaintenanceReason(e.target.value)}
+                        className="w-full min-h-[50px] bg-white text-slate-900 font-bold text-sm px-3 rounded-xl border-2 border-slate-200 focus:border-amber-600 focus:outline-none"
+                      >
+                        <option value="תקלה מכנית / תיקון">תקלה מכנית / מנוע</option>
+                        <option value="שבר פיזי / פגיעה במעטפת">שבר פיזי / מעטפת</option>
+                        <option value="כבל חשמל / סוללה פגומה">כבל חשמל / סוללה</option>
+                        <option value="בדיקת בטיחות תקופתית (כיול/בדיקה)">בדיקת בטיחות תקופתית (כיול/בדיקה)</option>
+                        <option value="טיפול מונע תקופתי">טיפול מונע תקופתי</option>
+                        <option value="אחר">אחר (מפורט בהערות)</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs uppercase font-extrabold text-slate-800 tracking-wider mb-1">
+                        פירוט התקלה ומעבדה / ספק מטפל
+                      </label>
+                      <textarea
+                        rows={3}
+                        value={maintenanceNotes}
+                        onChange={(e) => setMaintenanceNotes(e.target.value)}
+                        placeholder="פרט את מהות התיקון, שם הספק/המעבדה, והערכת זמן משוערת..."
+                        className="w-full bg-white text-slate-900 text-sm p-3 rounded-xl border-2 border-slate-200 font-medium focus:border-amber-600 focus:outline-none"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={isSubmitting}
+                      className="w-full min-h-[56px] rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-base uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl shadow-amber-600/25 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-60"
+                    >
+                      {isSubmitting ? (
+                        <Loader2 className="w-6 h-6 animate-spin text-white" />
+                      ) : (
+                        <>
+                          <Wrench className="w-5 h-5 stroke-[2.5]" />
+                          <span>אשר הוצאה לתיקון</span>
+                          <ArrowLeft className="w-5 h-5 stroke-[2.5]" />
+                        </>
+                      )}
+                    </button>
+                  </form>
+                )}
+
+                {/* TAB E: RETIRE ASSET (ADMIN ONLY) */}
                 {activeTab === 'retire' && role === 'admin' && (
                   <form onSubmit={handleRetireAsset} className="space-y-4">
                     <div className="p-3.5 bg-red-50 border border-red-200 rounded-2xl text-red-900 text-xs space-y-1">

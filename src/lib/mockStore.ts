@@ -693,6 +693,10 @@ export interface UnifiedAssetItem {
   tag_number?: string | null;
   organizationId?: string;
   organization_id?: string;
+  poNumber?: string | null;
+  po_number?: string | null;
+  supplyLocation?: string | null;
+  supply_location?: string | null;
 }
 
 // 3. Authoritative Unified Assets (Empty for Production Operation)
@@ -42528,9 +42532,12 @@ function toScannedAssetDetails(asset: UnifiedAssetItem): ScannedAssetDetails {
     isLocked: asset.isLocked,
     lockReason: asset.lockReason,
     expectedReturnDate: asset.expectedReturnDate,
-    accessories: asset.accessories,
     orderNumber: asset.orderNumber || asset.order_number || null,
     order_number: asset.orderNumber || asset.order_number || null,
+    poNumber: asset.poNumber || asset.po_number || null,
+    po_number: asset.poNumber || asset.po_number || null,
+    supplyLocation: asset.supplyLocation || asset.supply_location || null,
+    supply_location: asset.supplyLocation || asset.supply_location || null,
     categoryName: catName,
     category_name: catName,
     category: catName,
@@ -42678,6 +42685,8 @@ export function addMockAsset(newAsset: {
   condition: AssetCondition;
   performedBy?: string;
   organizationId?: string;
+  poNumber?: string;
+  supplyLocation?: string;
 }): ScannedAssetDetails {
   const wh =
     warehousesStore.find((w) => w.id === newAsset.warehouseId || w.code === newAsset.warehouseId) ||
@@ -42713,6 +42722,10 @@ export function addMockAsset(newAsset: {
     warrantyUntil: daysFromNow(730).split('T')[0],
     safetyInspectionDue: daysFromNow(365).split('T')[0],
     isLocked: false,
+    poNumber: newAsset.poNumber?.trim() || null,
+    po_number: newAsset.poNumber?.trim() || null,
+    supplyLocation: newAsset.supplyLocation?.trim() || null,
+    supply_location: newAsset.supplyLocation?.trim() || null,
   };
 
   assetsStore.push(asset);

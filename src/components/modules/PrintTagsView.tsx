@@ -303,14 +303,15 @@ export default function PrintTagsView() {
       {labelFormat === 'tsc' ? (
         <style jsx global>{`
           @page {
-            size: 60mm 30mm;
+            size: 60mm 30mm landscape;
             margin: 0;
           }
           @media print {
             @page {
-              size: 60mm 30mm; /* Strictly 60mm Width by 30mm Height */
+              size: 60mm 30mm landscape; /* Strictly 60mm Width by 30mm Height */
               margin: 0;
             }
+            html,
             body {
               margin: 0 !important;
               padding: 0 !important;
@@ -506,14 +507,12 @@ export default function PrintTagsView() {
                 type="button"
                 onClick={handlePrint}
                 disabled={isGenerating || tags.length === 0}
-                className="min-h-[44px] px-5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-md shadow-blue-600/25 active:scale-95 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                className="min-h-[48px] px-6 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-blue-600/30 active:scale-95 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                title="הדפס תגיות עכשיו (פתיחה מיידית של חלון הדפסה)"
               >
                 <Printer className="w-4 h-4 stroke-[2.5]" />
-                <span>
-                  {labelFormat === 'tsc'
-                    ? 'הדפס גליל תרמי TSC (60×30)'
-                    : 'הדפס גיליון מדבקות (A4)'}
-                </span>
+                <span>🖨️ הדפס תג עכשיו</span>
+                <span className="text-[10px] font-bold opacity-80 font-mono">({tags.length})</span>
               </button>
             </div>
 
@@ -702,14 +701,12 @@ export default function PrintTagsView() {
                   type="button"
                   onClick={handlePrint}
                   disabled={isGenerating || tags.length === 0}
-                  className="min-h-[44px] px-5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-md shadow-amber-600/25 active:scale-95 transition-all cursor-pointer"
+                  className="min-h-[48px] px-6 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-amber-600/30 active:scale-95 transition-all cursor-pointer"
+                  title="הדפס תגיות עכשיו (פתיחה מיידית של חלון הדפסה)"
                 >
                   <Printer className="w-4 h-4 stroke-[2.5]" />
-                  <span>
-                    {labelFormat === 'tsc'
-                      ? `הדפס מדבקה תרמית (${reprintQuantity})`
-                      : `הדפס מדבקה חלופית (${reprintQuantity})`}
-                  </span>
+                  <span>🖨️ הדפס תג עכשיו</span>
+                  <span className="text-[10px] font-bold opacity-80 font-mono">({reprintQuantity})</span>
                 </button>
               )}
             </div>
@@ -807,14 +804,10 @@ export default function PrintTagsView() {
                   <button
                     type="button"
                     onClick={handlePrint}
-                    className="min-h-[42px] px-4 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-xs flex items-center gap-1.5 shadow-sm cursor-pointer"
+                    className="min-h-[44px] px-5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-xs flex items-center gap-2 shadow-md cursor-pointer active:scale-95 transition-all"
                   >
                     <Printer className="w-4 h-4" />
-                    <span>
-                      {labelFormat === 'tsc'
-                        ? 'הדפס מדבקה תרמית'
-                        : 'הדפס מדבקה חלופית'}
-                    </span>
+                    <span>🖨️ הדפס תג עכשיו</span>
                   </button>
                 </div>
               </div>
@@ -825,6 +818,42 @@ export default function PrintTagsView() {
 
       {/* 2. PRINTABLE INDUSTRIAL TAGS (TSC 60x30 mm Roll or A4 Sheets) */}
       <div className="max-w-4xl mx-auto px-4 pb-12 print:p-0 print:m-0 print:max-w-none">
+        {/* Preview Header Bar with Live Direct Print Button */}
+        {tags.length > 0 && !isGenerating && (
+          <div className="print:hidden mb-4 p-3 bg-white rounded-2xl border-2 border-slate-200 flex flex-wrap items-center justify-between gap-3 shadow-xs">
+            <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span>תצוגה מקדימה: <strong>{tags.length} תגיות מוכנות</strong></span>
+              <span className="text-[11px] text-slate-400">
+                ({labelFormat === 'tsc' ? 'גליל תרמי 60×30 מ״מ' : 'דף A4 משרדי'})
+              </span>
+            </div>
+
+            <button
+              type="button"
+              onClick={handlePrint}
+              className="min-h-[44px] px-6 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-md shadow-blue-600/25 active:scale-95 transition-all cursor-pointer"
+            >
+              <Printer className="w-4 h-4 stroke-[2.5]" />
+              <span>🖨️ הדפס תג עכשיו</span>
+            </button>
+          </div>
+        )}
+
+        {/* Mobile Sticky Print Floating Bar */}
+        {tags.length > 0 && !isGenerating && (
+          <div className="fixed bottom-3 inset-x-3 sm:hidden z-40 print:hidden animate-in slide-in-from-bottom-3 duration-200">
+            <button
+              type="button"
+              onClick={handlePrint}
+              className="w-full min-h-[56px] rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2.5 shadow-2xl shadow-blue-950/60 active:scale-95 transition-all cursor-pointer border border-blue-400"
+            >
+              <Printer className="w-5 h-5 stroke-[2.5]" />
+              <span>🖨️ הדפס תג עכשיו ({tags.length})</span>
+            </button>
+          </div>
+        )}
+
         {isGenerating ? (
           <div className="p-12 text-center text-slate-400 font-bold text-sm">
             מייצר תגיות QR באיכות גבוהה...

@@ -8,7 +8,8 @@ export type AuditActionType =
   | 'MAINTENANCE_FLAG'
   | 'ONBOARD'
   | 'LOCK_STATUS'
-  | 'SAFETY_INSPECTION';
+  | 'SAFETY_INSPECTION'
+  | 'RETIRE';
 
 export interface AuditHistoryRecord {
   id: string;

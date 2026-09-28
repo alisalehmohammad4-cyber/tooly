@@ -157,6 +157,8 @@ export default function QuickOnboardView({
   const [brand, setBrand] = useState<string>('DeWalt');
   const [modelNumber, setModelNumber] = useState<string>('');
   const [condition, setCondition] = useState<AssetCondition>('good');
+  const [poNumber, setPoNumber] = useState<string>('');
+  const [supplyLocation, setSupplyLocation] = useState<string>('');
 
   // Status & Continuous Loop Feedback
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -743,6 +745,10 @@ export default function QuickOnboardView({
           brand: brand.trim(),
           modelNumber: modelNumber.trim() || undefined,
           condition,
+          poNumber: poNumber.trim() || undefined,
+          po_number: poNumber.trim() || undefined,
+          supplyLocation: supplyLocation.trim() || undefined,
+          supply_location: supplyLocation.trim() || undefined,
           gps,
         },
         currentOrganization?.id
@@ -764,6 +770,8 @@ export default function QuickOnboardView({
       // Reset tool-specific fields, retaining warehouse and category
       setToolName('');
       setModelNumber('');
+      setPoNumber('');
+      setSupplyLocation('');
       setQrCode('');
       setNfcUid('');
       setNfcFormNotice(null);
@@ -1643,6 +1651,36 @@ export default function QuickOnboardView({
                 placeholder="לדוגמה: DCH273B או 2804-20"
                 className="w-full min-h-[56px] bg-white text-blue-950 font-bold text-base px-4 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none transition-colors placeholder:text-slate-400 shadow-sm"
               />
+            </div>
+
+            {/* PO / ORDER NUMBER & SUPPLY LOCATION */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
+                  מספר הזמנה (PO / Order Number) <span className="text-slate-400 font-normal">(אופציונלי)</span>
+                </label>
+                <input
+                  type="text"
+                  value={poNumber}
+                  onChange={(e) => setPoNumber(e.target.value)}
+                  placeholder="לדוגמה: PO-36977"
+                  className="w-full min-h-[56px] bg-white text-blue-950 font-bold text-base px-4 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none transition-colors placeholder:text-slate-400 shadow-sm"
+                  dir="ltr"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs uppercase font-extrabold text-blue-900 tracking-wider mb-1">
+                  מיקום הסיפוק (Delivery / Supply Location) <span className="text-slate-400 font-normal">(אופציונלי)</span>
+                </label>
+                <input
+                  type="text"
+                  value={supplyLocation}
+                  onChange={(e) => setSupplyLocation(e.target.value)}
+                  placeholder='לדוגמה: מחסן מרכזי / אתר בז"ן'
+                  className="w-full min-h-[56px] bg-white text-blue-950 font-bold text-base px-4 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none transition-colors placeholder:text-slate-400 shadow-sm"
+                />
+              </div>
             </div>
 
             {/* CONDITION SELECTOR */}

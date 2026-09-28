@@ -9,6 +9,10 @@ export const QuickOnboardSchema = z.object({
   brand: z.string().trim().min(1, 'Brand is required'),
   modelNumber: z.string().trim().optional().or(z.literal('')),
   condition: z.enum(['excellent', 'good', 'needs_repair', 'retired']),
+  poNumber: z.string().trim().optional().or(z.literal('')),
+  po_number: z.string().trim().optional().or(z.literal('')),
+  supplyLocation: z.string().trim().optional().or(z.literal('')),
+  supply_location: z.string().trim().optional().or(z.literal('')),
   gps: z
     .object({
       lat: z.number(),

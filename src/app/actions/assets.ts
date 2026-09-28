@@ -1,15 +1,18 @@
 'use server';
 
+import { revalidatePath } from 'next/cache';
 import { supabase, supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase';
 import { QuickOnboardSchema, type QuickOnboardInput } from '@/core/assets/onboard.schema';
 import type { AssetReservation, AssetStatus } from '@/types/domain';
 import { appendAuditHistoryEntry } from '@/app/actions/history';
-import { getServerSessionOrgId } from '@/lib/auth/session';
+import { getServerSessionOrgId, getServerSessionUser } from '@/lib/auth/session';
+import { clearDashboardCaches } from '@/app/actions/dashboard';
 import {
   getMockWarehouses,
   getMockCategories,
   getMockAssetByQr,
   addMockAsset,
+  mutateMockAsset,
   getMockAssets,
   getMockCatalogData,
   getNextAvailableMockTagNumber,
@@ -164,6 +167,8 @@ export async function onboardAsset(
       modelNumber: input.modelNumber || undefined,
       condition: input.condition,
       organizationId: orgId ?? undefined,
+      poNumber: input.poNumber || input.po_number || undefined,
+      supplyLocation: input.supplyLocation || input.supply_location || undefined,
     });
 
     await invalidateCatalogCache();
@@ -186,7 +191,7 @@ export async function onboardAsset(
 
     // 3. Find or create tool model
     let toolModelId: string;
-    const { data: existingModel, error: findModelError } = await supabase
+    const { data: existingModel, error: findModelError } = await supabaseAdmin
       .from('tool_models')
       .select('id')
       .eq('category_id', input.categoryId)
@@ -205,7 +210,7 @@ export async function onboardAsset(
     if (existingModel) {
       toolModelId = existingModel.id;
     } else {
-      const { data: newModel, error: createModelError } = await supabase
+      const { data: newModel, error: createModelError } = await supabaseAdmin
         .from('tool_models')
         .insert({
           category_id: input.categoryId,
@@ -227,8 +232,11 @@ export async function onboardAsset(
       toolModelId = newModel.id;
     }
 
+    const effectivePo = input.poNumber || input.po_number || null;
+    const effectiveSupplyLoc = input.supplyLocation || input.supply_location || null;
+
     // 4. Insert new asset
-    const { data: newAsset, error: assetError } = await supabase
+    const { data: newAsset, error: assetError } = await supabaseAdmin
       .from('assets')
       .insert({
         tool_model_id: toolModelId,
@@ -239,6 +247,8 @@ export async function onboardAsset(
         condition: input.condition,
         version: 1,
         organization_id: orgId,
+        po_number: effectivePo,
+        supply_location: effectiveSupplyLoc,
       })
       .select('id')
       .single();
@@ -251,13 +261,13 @@ export async function onboardAsset(
     }
 
     // 5. Insert audit entry into custody_ledger
-    const { error: ledgerError } = await supabase
+    const { error: ledgerError } = await supabaseAdmin
       .from('custody_ledger')
       .insert({
         asset_id: newAsset.id,
         action: 'CHECKIN',
         performed_by: 'Field Agent',
-        notes: 'Initial field enrollment via Quick Onboard',
+        notes: effectivePo ? `Initial field enrollment (PO: ${effectivePo})` : 'Initial field enrollment via Quick Onboard',
         gps_lat: input.gps?.lat ?? null,
         gps_lng: input.gps?.lng ?? null,
         organization_id: orgId,
@@ -346,6 +356,10 @@ export interface CatalogAssetItem {
   reservation?: AssetReservation | null;
   orderNumber?: string | null;
   order_number?: string | null;
+  poNumber?: string | null;
+  po_number?: string | null;
+  supplyLocation?: string | null;
+  supply_location?: string | null;
 }
 
 export interface CatalogDataPayload {
@@ -407,7 +421,7 @@ export async function getCatalogData(
     const whQuery = supabase.from('warehouses').select('id, name, code').eq('is_active', true).eq('organization_id', orgId);
     const catQuery = supabase.from('categories').select('id, name, slug, icon').eq('organization_id', orgId).order('display_order', { ascending: true });
     const astQuery = supabase.from('assets').select(
-      'id, qr_code, status, condition, current_assigned_worker, current_warehouse_id, category_name, name, brand, model_number, purchase_date, purchase_cost, order_number'
+      'id, qr_code, status, condition, current_assigned_worker, current_warehouse_id, category_name, name, brand, model_number, purchase_date, purchase_cost, order_number, po_number, supply_location'
     ).eq('organization_id', orgId).limit(10000);
 
     const [warehousesRes, categoriesRes, firstAssetsRes] = await Promise.all([
@@ -435,7 +449,7 @@ export async function getCatalogData(
           const { data, error } = await supabase
             .from('assets')
             .select(
-              'id, qr_code, status, condition, current_assigned_worker, current_warehouse_id, category_name, name, brand, model_number, purchase_date, purchase_cost, order_number'
+              'id, qr_code, status, condition, current_assigned_worker, current_warehouse_id, category_name, name, brand, model_number, purchase_date, purchase_cost, order_number, po_number, supply_location'
             )
             .eq('organization_id', orgId)
             .range(page * pageSize, (page + 1) * pageSize - 1);
@@ -543,6 +557,10 @@ export async function getCatalogData(
             Number(row.purchase_cost || row.purchaseCost || mockFallback?.purchaseCost) || 2500,
           orderNumber: orderNum,
           order_number: orderNum,
+          poNumber: (row.po_number || row.poNumber || mockFallback?.poNumber || null) as string | null,
+          po_number: (row.po_number || row.poNumber || mockFallback?.po_number || null) as string | null,
+          supplyLocation: (row.supply_location || row.supplyLocation || mockFallback?.supplyLocation || null) as string | null,
+          supply_location: (row.supply_location || row.supplyLocation || mockFallback?.supply_location || null) as string | null,
         };
       });
     }
@@ -685,6 +703,132 @@ export async function getNextAvailableTagNumberAction(customOrgId?: string): Pro
 
   const nextNum = await calculateNextTagNumber(orgId, prefix);
   return `${prefix}${String(nextNum).padStart(4, '0')}`;
+}
+
+/**
+ * Direct Tool Status Switcher Action:
+ * Allows storekeepers & managers to quickly toggle asset status:
+ * - available (זמין במלאי)
+ * - checked_out (בשימוש עובד)
+ * - maintenance (בתיקון / אחזקה)
+ * - retired (מושבת / גריטה)
+ * Updates public.assets and writes audit entry to public.custody_ledger.
+ */
+export async function updateAssetStatusAction(
+  assetId: string,
+  newStatus: string,
+  reason?: string
+): Promise<{ success: boolean; error?: string; message?: string; newStatus?: string }> {
+  if (!assetId) {
+    return { success: false, error: 'מזהה כלי חסר' };
+  }
+
+  const validStatuses = ['available', 'checked_out', 'maintenance', 'retired', 'in_transit'];
+  if (!validStatuses.includes(newStatus)) {
+    return { success: false, error: `סטטוס לא חוקי: ${newStatus}` };
+  }
+
+  const orgId = await resolveActiveOrganizationId();
+  const sessionUser = await getServerSessionUser();
+  const performedBy = sessionUser?.fullName || 'מחסנאי / מנהל';
+  const now = new Date().toISOString();
+
+  const updateData: Record<string, unknown> = {
+    status: newStatus,
+    updated_at: now,
+  };
+
+  if (newStatus === 'available') {
+    updateData.current_assigned_worker = null;
+  }
+  if (newStatus === 'retired') {
+    updateData.condition = 'retired';
+  } else if (newStatus === 'maintenance') {
+    updateData.condition = 'needs_repair';
+  }
+
+  if (isSupabaseConfigured() && orgId) {
+    try {
+      const { error: updateErr } = await supabaseAdmin
+        .from('assets')
+        .update(updateData)
+        .eq('id', assetId)
+        .eq('organization_id', orgId);
+
+      if (updateErr) {
+        console.error('Update Asset Status DB Error:', updateErr);
+        return { success: false, error: `שגיאה בעדכון סטטוס כלי: ${updateErr.message}` };
+      }
+
+      const actionType =
+        newStatus === 'retired'
+          ? 'RETIRE'
+          : newStatus === 'maintenance'
+          ? 'MAINTENANCE_FLAG'
+          : newStatus === 'available'
+          ? 'CHECKIN'
+          : 'STATUS_CHANGE';
+
+      const { error: ledgerErr } = await supabaseAdmin.from('custody_ledger').insert({
+        asset_id: assetId,
+        organization_id: orgId,
+        action: actionType,
+        performed_by: performedBy,
+        notes: reason || `שינוי סטטוס כלי ישיר ל-${newStatus}`,
+        created_at: now,
+      });
+
+      if (ledgerErr) {
+        console.warn('Custody ledger log warning:', ledgerErr);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Database error';
+      return { success: false, error: msg };
+    }
+  }
+
+  // Synchronize mock store
+  mutateMockAsset(
+    assetId,
+    {
+      status: newStatus as AssetStatus,
+      ...(newStatus === 'available' ? { currentAssignedWorker: null } : {}),
+      ...(newStatus === 'retired' ? { condition: 'retired' } : {}),
+      ...(newStatus === 'maintenance' ? { condition: 'needs_repair' } : {}),
+    },
+    {
+      action: newStatus === 'retired' ? 'RETIRE' : newStatus === 'maintenance' ? 'MAINTENANCE_FLAG' : 'CHECKIN',
+      performedBy,
+      notes: reason || `שינוי סטטוס כלי ישיר ל-${newStatus}`,
+    }
+  );
+
+  try {
+    await clearDashboardCaches();
+    revalidatePath('/catalog');
+    revalidatePath('/dashboard/warehouse');
+    revalidatePath('/dashboard/manager');
+    revalidatePath('/history');
+  } catch (e) {
+    console.warn('[updateAssetStatusAction] revalidatePath warning:', e);
+  }
+
+  const statusLabel =
+    newStatus === 'available'
+      ? 'זמין במלאי'
+      : newStatus === 'checked_out'
+      ? 'בשימוש עובד'
+      : newStatus === 'maintenance'
+      ? 'בתיקון / אחזקה'
+      : newStatus === 'retired'
+      ? 'מושבת / גריטה'
+      : newStatus;
+
+  return {
+    success: true,
+    message: `סטטוס הכלי עודכן בהצלחה ל-${statusLabel}`,
+    newStatus,
+  };
 }
 
 

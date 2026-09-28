@@ -47,6 +47,7 @@ import {
 } from '@/app/actions/history';
 import { useAuth } from '@/context/AuthContext';
 import { useWebNfc } from '@/lib/nfc/useWebNfc';
+import StatusSwitcher from '@/components/modules/StatusSwitcher';
 
 interface ToolPassportModalProps {
   asset?: ScannedAssetDetails | null;
@@ -431,25 +432,45 @@ export default function ToolPassportModal({
               תיק כלי מלא &bull; דרכון דיגיטלי והיסטוריית חיים
             </span>
 
-            {currentAsset?.status === 'available' && (
-              <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
-                זמין במחסן
-              </span>
-            )}
-            {currentAsset?.status === 'checked_out' && (
-              <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-400/30 animate-pulse">
-                מנופק לעובד בשטח
-              </span>
-            )}
-            {currentAsset?.status === 'in_transit' && (
-              <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-400/30">
-                🚚 בשינוע בין אתרים
-              </span>
-            )}
-            {currentAsset?.status === 'maintenance' && (
-              <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-400/30">
-                🔧 במעבדה / תיקון
-              </span>
+            {isSupervisorOrAdmin && currentAsset ? (
+              <StatusSwitcher
+                assetId={currentAsset.id}
+                currentStatus={currentAsset.status}
+                variant="dropdown"
+                onStatusChanged={(newSt) => {
+                  const updated = { ...currentAsset, status: newSt };
+                  setUpdatedAsset(updated);
+                  if (onAssetUpdated) onAssetUpdated(updated);
+                }}
+              />
+            ) : (
+              <>
+                {currentAsset?.status === 'available' && (
+                  <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
+                    זמין במחסן
+                  </span>
+                )}
+                {currentAsset?.status === 'checked_out' && (
+                  <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-400/30 animate-pulse">
+                    מנופק לעובד בשטח
+                  </span>
+                )}
+                {currentAsset?.status === 'in_transit' && (
+                  <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-400/30">
+                    🚚 בשינוע בין אתרים
+                  </span>
+                )}
+                {currentAsset?.status === 'maintenance' && (
+                  <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-400/30">
+                    🔧 במעבדה / תיקון
+                  </span>
+                )}
+                {currentAsset?.status === 'retired' && (
+                  <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-slate-500/20 text-slate-300 border border-slate-400/30">
+                    🗑️ מושבת / גריטה
+                  </span>
+                )}
+              </>
             )}
             {currentAsset?.isLocked && (
               <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-red-600 text-white border border-red-400">
@@ -770,6 +791,30 @@ export default function ToolPassportModal({
                   <span>{nfcWriteStatus}</span>
                 </div>
               )}
+
+              {/* PROCUREMENT, ORDER & SUPPLY LOCATION */}
+              <div className="p-3.5 rounded-2xl bg-blue-50/70 border border-blue-200 space-y-3">
+                <div className="flex items-center gap-2 text-blue-950 font-black text-xs uppercase tracking-wider">
+                  <FileText className="w-4 h-4 text-blue-600" />
+                  <span>נתוני רכש ואספקה (מספר הזמנה ומיקום)</span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div className="p-2.5 rounded-xl bg-white border border-blue-200 shadow-2xs">
+                    <span className="text-slate-500 font-bold block mb-0.5">מספר הזמנה (PO):</span>
+                    <span className="text-sm font-mono font-black text-blue-950" dir="ltr">
+                      {currentAsset?.poNumber || (currentAsset as any)?.po_number || 'לא צוין'}
+                    </span>
+                  </div>
+
+                  <div className="p-2.5 rounded-xl bg-white border border-blue-200 shadow-2xs">
+                    <span className="text-slate-500 font-bold block mb-0.5">מיקום הסיפוק:</span>
+                    <span className="text-sm font-bold text-slate-900">
+                      {currentAsset?.supplyLocation || (currentAsset as any)?.supply_location || 'לא צוין'}
+                    </span>
+                  </div>
+                </div>
+              </div>
 
               {/* FINANCIAL & WARRANTY */}
               <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">

@@ -32,6 +32,7 @@ import { useAuth } from '@/context/AuthContext';
 import AppLayout from '@/components/layout/AppLayout';
 import AssetActionModal from '@/components/modules/AssetActionModal';
 import ToolPassportModal from '@/components/modules/ToolPassportModal';
+import StatusSwitcher from '@/components/modules/StatusSwitcher';
 import type { ScannedAssetDetails } from '@/app/actions/custody';
 import { matchesToolSearch } from '@/lib/search/toolDictionary';
 
@@ -686,31 +687,47 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
                           )}
                         </div>
 
-                        {/* Status Pill */}
+                        {/* Status Pill or Direct Switcher */}
                         <div className="shrink-0">
-                          {isAvailable && (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black bg-emerald-50 text-emerald-700 border border-emerald-300">
-                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                              זמין במלאי
-                            </span>
-                          )}
-                          {isCheckedOut && (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black bg-amber-50 text-amber-800 border border-amber-300">
-                              <UserCheck className="w-3.5 h-3.5 text-amber-600" />
-                              בשימוש
-                            </span>
-                          )}
-                          {isMaintenance && (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black bg-red-50 text-red-700 border border-red-300">
-                              <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
-                              בתיקון / בדיקה
-                            </span>
-                          )}
-                          {isInTransit && (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black bg-purple-50 text-purple-700 border border-purple-300">
-                              <Building2 className="w-3.5 h-3.5 text-purple-600" />
-                              בשינוע / מעבר
-                            </span>
+                          {role === 'worker' ? (
+                            <>
+                              {isAvailable && (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black bg-emerald-50 text-emerald-700 border border-emerald-300">
+                                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                  זמין במלאי
+                                </span>
+                              )}
+                              {isCheckedOut && (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black bg-amber-50 text-amber-800 border border-amber-300">
+                                  <UserCheck className="w-3.5 h-3.5 text-amber-600" />
+                                  בשימוש
+                                </span>
+                              )}
+                              {isMaintenance && (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black bg-red-50 text-red-700 border border-red-300">
+                                  <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
+                                  בתיקון / בדיקה
+                                </span>
+                              )}
+                              {isInTransit && (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black bg-purple-50 text-purple-700 border border-purple-300">
+                                  <Building2 className="w-3.5 h-3.5 text-purple-600" />
+                                  בשינוע / מעבר
+                                </span>
+                              )}
+                            </>
+                          ) : (
+                            <StatusSwitcher
+                              assetId={asset.id}
+                              currentStatus={asset.status}
+                              variant="dropdown"
+                              onStatusChanged={(newSt) => {
+                                setAssets((prev) =>
+                                  prev.map((a) => (a.id === asset.id ? { ...a, status: newSt } : a))
+                                );
+                                router.refresh();
+                              }}
+                            />
                           )}
                         </div>
                       </div>
@@ -737,6 +754,22 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
                           <span className="truncate max-w-[180px]">{asset.warehouseName}</span>
                         </div>
                       </div>
+
+                      {/* PO Number and Supply Location badge if present */}
+                      {((asset as any).po_number || asset.poNumber || (asset as any).supply_location || asset.supplyLocation) && (
+                        <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-600 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200">
+                          {((asset as any).po_number || asset.poNumber) && (
+                            <span className="font-mono font-bold text-blue-950" dir="ltr">
+                              מספר הזמנה: <strong>{(asset as any).po_number || asset.poNumber}</strong>
+                            </span>
+                          )}
+                          {((asset as any).supply_location || asset.supplyLocation) && (
+                            <span className="text-slate-800 font-medium">
+                              מיקום סיפוק: <strong>{(asset as any).supply_location || asset.supplyLocation}</strong>
+                            </span>
+                          )}
+                        </div>
+                      )}
 
                       {/* Lockout, Safety Overdue & Reservation Badges */}
                       {(asset.isLocked ||

@@ -43,6 +43,7 @@ export type AssetStatus =
   | 'checked_out'
   | 'in_transit'
   | 'maintenance'
+  | 'retired'
   | 'lost'
   | 'needs_repair';
 
@@ -105,6 +106,10 @@ export interface Asset {
   isLocked?: boolean;
   lockReason?: string;
   reservation?: AssetReservation | null;
+  poNumber?: string;
+  po_number?: string;
+  supplyLocation?: string;
+  supply_location?: string;
 }
 
 export type UserRole =
@@ -141,11 +146,13 @@ export interface AuditHistoryRecord {
   action:
     | 'CHECKOUT'
     | 'CHECKIN'
+    | 'TRANSFER_INIT'
     | 'TRANSFER_RECEIVE'
     | 'MAINTENANCE_FLAG'
     | 'ONBOARD'
     | 'LOCK_STATUS'
-    | 'SAFETY_INSPECTION';
+    | 'SAFETY_INSPECTION'
+    | 'RETIRE';
   performedBy: string;
   targetWorker: string | null;
   workerPhone: string | null;
