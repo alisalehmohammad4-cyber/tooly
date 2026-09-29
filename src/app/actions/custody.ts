@@ -1349,12 +1349,18 @@ export async function transferAssetAction(
   const targetWhMeta = getWarehouseMeta(targetWarehouseId);
   const sessionUser = await getServerSessionUser();
   const performedBy = sessionUser?.fullName || 'מחסנאי שטח';
+  const isDirect = Boolean(
+    parsed.data.isDirectTransfer ||
+    sessionUser?.role === 'chief_operations' ||
+    sessionUser?.role === 'general_manager' ||
+    sessionUser?.role === 'admin'
+  );
 
   if (isSupabaseConfigured()) {
     try {
       const { data: currentAsset, error: fetchErr } = await supabaseAdmin
         .from('assets')
-        .select('id, version, organization_id, qr_code, nfc_uid, condition, current_assigned_worker, current_warehouse_id, tool_models(name, brand, model_number)')
+        .select('id, version, organization_id, qr_code, nfc_uid, condition, current_assigned_worker, current_warehouse_id, status, tool_models(name, brand, model_number)')
         .eq('id', assetId)
         .maybeSingle();
 
@@ -1379,12 +1385,15 @@ export async function transferAssetAction(
       }
 
       const nextVersion = (currentAsset.version || 1) + 1;
+      const targetStatus = isDirect
+        ? (currentAsset.status === 'in_transit' ? 'available' : (currentAsset.status || 'available'))
+        : 'in_transit';
 
       const { error: updateErr } = await supabaseAdmin
         .from('assets')
         .update({
           current_warehouse_id: targetWarehouseId,
-          status: 'in_transit',
+          status: targetStatus,
           version: nextVersion,
           updated_at: new Date().toISOString(),
         })
@@ -1399,13 +1408,13 @@ export async function transferAssetAction(
       // Record audit in custody_ledger
       const { error: ledgerErr } = await supabaseAdmin.from('custody_ledger').insert({
         asset_id: assetId,
-        action: 'TRANSFER_INIT',
+        action: isDirect ? 'DIRECT_TRANSFER' : 'TRANSFER_INIT',
         performed_by: performedBy,
         organization_id: orgId,
         warehouse_id: targetWarehouseId,
         gps_lat: gps?.lat ?? null,
         gps_lng: gps?.lng ?? null,
-        notes: notes || `שינוע למחסן ${targetWhMeta.name}`,
+        notes: notes || (isDirect ? `העברה ישירה למחסן ${targetWhMeta.name}` : `שינוע למחסן ${targetWhMeta.name}`),
         created_at: new Date().toISOString(),
       });
 
@@ -1418,9 +1427,9 @@ export async function transferAssetAction(
         id: currentAsset.id,
         qrCode: currentAsset.qr_code,
         nfcUid: currentAsset.nfc_uid || undefined,
-        status: 'in_transit',
+        status: targetStatus as ScannedAssetDetails['status'],
         condition: (currentAsset.condition as 'excellent' | 'good' | 'needs_repair' | 'retired') || 'good',
-        currentAssignedWorker: null,
+        currentAssignedWorker: currentAsset.current_assigned_worker || null,
         currentWarehouseId: targetWarehouseId,
         warehouseName: targetWhMeta.name,
         warehouseCode: targetWhMeta.code,
@@ -1436,12 +1445,12 @@ export async function transferAssetAction(
           warehouseId: targetWarehouseId,
           warehouseName: targetWhMeta.name,
           warehouseCode: targetWhMeta.code,
-          status: 'in_transit',
+          status: targetStatus as ScannedAssetDetails['status'],
         },
         {
-          action: 'TRANSFER_INIT',
+          action: isDirect ? 'DIRECT_TRANSFER' : 'TRANSFER_INIT',
           performedBy,
-          notes: notes || `שינוע למחסן ${targetWhMeta.name}`,
+          notes: notes || (isDirect ? `העברה ישירה למחסן: ${targetWhMeta.name}` : `שינוע למחסן ${targetWhMeta.name}`),
         }
       );
 
@@ -1451,13 +1460,16 @@ export async function transferAssetAction(
         revalidatePath('/catalog');
         revalidatePath('/dashboard/warehouse');
         revalidatePath('/dashboard/manager');
+        revalidatePath('/dashboard/chief');
       } catch (e) {
         console.warn('[transferAssetAction] revalidatePath warning:', e);
       }
 
       return {
         success: true,
-        message: `מיקום הכלי עודכן לשינוע אל ${targetWhMeta.name}`,
+        message: isDirect
+          ? `הכלי הועבר ישירות אל ${targetWhMeta.name}`
+          : `מיקום הכלי עודכן לשינוע אל ${targetWhMeta.name}`,
         asset: dbUpdatedAsset,
       };
     } catch (err: unknown) {
@@ -1477,7 +1489,7 @@ export async function transferAssetAction(
       FALLBACK_CUSTODY_ASSETS[key].currentWarehouseId = targetWarehouseId;
       FALLBACK_CUSTODY_ASSETS[key].warehouseName = targetWhMeta.name;
       FALLBACK_CUSTODY_ASSETS[key].warehouseCode = targetWhMeta.code;
-      FALLBACK_CUSTODY_ASSETS[key].status = 'in_transit';
+      FALLBACK_CUSTODY_ASSETS[key].status = isDirect ? 'available' : 'in_transit';
       FALLBACK_CUSTODY_ASSETS[key].version += 1;
       mutateMockAsset(
         FALLBACK_CUSTODY_ASSETS[key].qrCode,
@@ -1485,12 +1497,12 @@ export async function transferAssetAction(
           warehouseId: targetWarehouseId,
           warehouseName: targetWhMeta.name,
           warehouseCode: targetWhMeta.code,
-          status: 'in_transit',
+          status: isDirect ? 'available' : 'in_transit',
         },
         {
-          action: 'TRANSFER_INIT',
+          action: isDirect ? 'DIRECT_TRANSFER' : 'TRANSFER_INIT',
           performedBy,
-          notes: notes || `העברת כלי למחסן: ${targetWhMeta.name}`,
+          notes: notes || (isDirect ? `העברה ישירה למחסן: ${targetWhMeta.name}` : `העברת כלי למחסן: ${targetWhMeta.name}`),
         }
       );
       try {
@@ -1498,13 +1510,16 @@ export async function transferAssetAction(
         revalidatePath('/catalog');
         revalidatePath('/dashboard/warehouse');
         revalidatePath('/dashboard/manager');
+        revalidatePath('/dashboard/chief');
       } catch (e) {
         console.warn('[transferAssetAction] revalidatePath warning:', e);
       }
 
       return {
         success: true,
-        message: `מיקום הכלי עודכן לשינוע אל ${targetWhMeta.name}`,
+        message: isDirect
+          ? `הכלי הועבר ישירות אל ${targetWhMeta.name}`
+          : `מיקום הכלי עודכן לשינוע אל ${targetWhMeta.name}`,
         asset: { ...FALLBACK_CUSTODY_ASSETS[key] },
       };
     }
@@ -1516,12 +1531,12 @@ export async function transferAssetAction(
       warehouseId: targetWarehouseId,
       warehouseName: targetWhMeta.name,
       warehouseCode: targetWhMeta.code,
-      status: 'in_transit',
+      status: isDirect ? 'available' : 'in_transit',
     },
     {
-      action: 'TRANSFER_INIT',
+      action: isDirect ? 'DIRECT_TRANSFER' : 'TRANSFER_INIT',
       performedBy,
-      notes: notes || `העברת כלי למחסן: ${targetWhMeta.name}`,
+      notes: notes || (isDirect ? `העברה ישירה למחסן: ${targetWhMeta.name}` : `העברת כלי למחסן: ${targetWhMeta.name}`),
     }
   );
 
@@ -1531,17 +1546,20 @@ export async function transferAssetAction(
     revalidatePath('/catalog');
     revalidatePath('/dashboard/warehouse');
     revalidatePath('/dashboard/manager');
+    revalidatePath('/dashboard/chief');
   } catch (e) {
     console.warn('[transferAssetAction] revalidatePath warning:', e);
   }
 
   return {
     success: true,
-    message: `מיקום הכלי עודכן לשינוע אל ${targetWhMeta.name}`,
+    message: isDirect
+      ? `הכלי הועבר ישירות אל ${targetWhMeta.name}`
+      : `מיקום הכלי עודכן לשינוע אל ${targetWhMeta.name}`,
     asset: {
       id: assetId,
       qrCode: mockAsset?.qrCode || 'TOOL-CURRENT',
-      status: 'in_transit',
+      status: isDirect ? 'available' : 'in_transit',
       condition: 'good',
       currentAssignedWorker: null,
       currentWarehouseId: targetWarehouseId,
@@ -1550,7 +1568,7 @@ export async function transferAssetAction(
       toolName: mockAsset?.toolName || 'כלי עבודה',
       brand: mockAsset?.brand || 'Standard',
       modelNumber: mockAsset?.modelNumber || null,
-      version: 2,
+      version: (mockAsset?.version || 1) + 1,
     },
   };
 }

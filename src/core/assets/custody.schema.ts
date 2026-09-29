@@ -68,6 +68,7 @@ export const TransferSchema = z.object({
   targetWarehouseId: z.string().trim().min(1, 'Target warehouse is required'),
   gps: GpsCoordinatesSchema.nullable().optional(),
   notes: z.string().trim().optional(),
+  isDirectTransfer: z.boolean().optional(),
 });
 
 export type TransferInput = z.infer<typeof TransferSchema>;

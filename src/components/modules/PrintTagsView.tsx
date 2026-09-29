@@ -49,17 +49,15 @@ export function printThermalLabelsDirectly(labelsData: Array<{
 
   const labelsHtml = labelsData.map(label => `
     <div class="label-sheet">
-      <div class="label-content">
-        <div class="qr-col">
-          <img src="${label.qrCodeDataUrl}" alt="QR" class="qr-img" />
-          <span class="qr-tag">${label.tagNumber}</span>
-        </div>
-        <div class="info-col">
-          <div class="company-title">${label.companyName || 'TOOLY'}</div>
-          <div class="tool-name">${label.toolName}</div>
-          <div class="tool-brand">${label.brand || ''}</div>
-          <div class="tag-number">${label.tagNumber}</div>
-        </div>
+      <div class="qr-col">
+        <img src="${label.qrCodeDataUrl}" alt="QR" class="qr-img" />
+        <span class="qr-tag">${label.tagNumber}</span>
+      </div>
+      <div class="info-col">
+        <div class="company-title">${label.companyName || 'TOOLY'}</div>
+        <div class="tool-name">${label.toolName}</div>
+        <div class="tool-brand">${label.brand || ''}</div>
+        <div class="tag-number">${label.tagNumber}</div>
       </div>
     </div>
   `).join('');
@@ -72,8 +70,8 @@ export function printThermalLabelsDirectly(labelsData: Array<{
       <title>הדפסת תגיות TSC</title>
       <style>
         @page {
-          size: 60mm 30mm; /* REMOVED 'landscape' keyword to fix CSS syntax */
-          margin: 0mm;
+          size: 60mm 30mm landscape; /* Some drivers prefer explicit landscape */
+          margin: 0mm !important;
         }
         * {
           box-sizing: border-box;
@@ -83,49 +81,39 @@ export function printThermalLabelsDirectly(labelsData: Array<{
           print-color-adjust: exact;
         }
         html, body {
-          width: 60mm;
-          height: 30mm;
-          margin: 0mm !important;
-          padding: 0mm !important;
-          overflow: hidden;
+          width: 60mm !important;
+          height: 28mm !important; /* 28mm safety height to prevent overflowing to next sticker */
+          margin: 0 !important;
+          padding: 0 !important;
+          overflow: hidden !important;
           background: #fff;
           font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         }
         .label-sheet {
-          width: 60mm !important;
-          height: 30mm !important;
-          max-width: 60mm !important;
-          max-height: 30mm !important;
+          width: 58mm !important;
+          height: 28mm !important;
+          max-width: 58mm !important;
+          max-height: 28mm !important;
           page-break-after: always;
           page-break-inside: avoid;
-          box-sizing: border-box;
-          margin: 0 !important;
-          padding: 2mm !important;
-          overflow: hidden;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-        .label-content {
-          width: 100%;
-          height: 100%;
-          display: flex;
-          flex-direction: row-reverse;
-          align-items: center;
-          justify-content: space-between;
-          border: 1px dashed #ccc;
-          padding: 1.5mm;
+          display: flex !important;
+          flex-direction: row-reverse !important; /* QR on one side, Text on the other */
+          align-items: center !important;
+          justify-content: space-between !important;
+          padding: 1.5mm !important;
+          box-sizing: border-box !important;
+          overflow: hidden !important;
         }
         .qr-col {
-          width: 22mm;
+          width: 20mm !important;
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: center;
         }
         .qr-img {
-          width: 19mm;
-          height: 19mm;
+          width: 17mm !important;
+          height: 17mm !important;
           object-fit: contain;
         }
         .qr-tag {
@@ -133,13 +121,14 @@ export function printThermalLabelsDirectly(labelsData: Array<{
           font-weight: bold;
           font-family: monospace;
           margin-top: 1mm;
+          line-height: 1;
         }
         .info-col {
-          flex: 1;
+          width: 35mm !important;
           display: flex;
           flex-direction: column;
           justify-content: center;
-          padding-left: 2mm;
+          text-align: right;
           overflow: hidden;
         }
         .company-title {
@@ -147,6 +136,7 @@ export function printThermalLabelsDirectly(labelsData: Array<{
           font-weight: 800;
           color: #333;
           text-transform: uppercase;
+          line-height: 1.1;
         }
         .tool-name {
           font-size: 9px;
@@ -155,19 +145,21 @@ export function printThermalLabelsDirectly(labelsData: Array<{
           line-height: 1.1;
           max-height: 10mm;
           overflow: hidden;
-          margin: 1mm 0;
+          margin: 0.5mm 0;
         }
         .tool-brand {
           font-size: 8px;
           color: #555;
+          line-height: 1.1;
         }
         .tag-number {
           font-size: 13px;
           font-weight: 900;
           font-family: monospace;
           color: #000;
-          margin-top: 1mm;
+          margin-top: 0.5mm;
           letter-spacing: 0.5px;
+          line-height: 1.1;
         }
       </style>
     </head>
@@ -651,18 +643,21 @@ export default function PrintTagsView() {
       {/* Global Print-specific CSS for TSC Thermal 60x30 mm */}
       <style jsx global>{`
         @page {
-          size: 60mm 30mm;
-          margin: 0;
+          size: 60mm 30mm landscape;
+          margin: 0mm !important;
         }
         @media print {
           @page {
-            size: 60mm 30mm; /* Strictly 60mm Width by 30mm Height */
-            margin: 0;
+            size: 60mm 30mm landscape; /* Strictly 60mm Width by 30mm Height */
+            margin: 0mm !important;
           }
           html,
           body {
+            width: 60mm !important;
+            height: 28mm !important;
             margin: 0 !important;
             padding: 0 !important;
+            overflow: hidden !important;
             background: #ffffff !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
@@ -675,10 +670,10 @@ export default function PrintTagsView() {
           }
           .print-label-page,
           .tsc-label {
-            width: 60mm !important;
-            height: 30mm !important;
-            max-width: 60mm !important;
-            max-height: 30mm !important;
+            width: 58mm !important;
+            height: 28mm !important;
+            max-width: 58mm !important;
+            max-height: 28mm !important;
             box-sizing: border-box !important;
             page-break-after: always !important;
             break-after: page !important;

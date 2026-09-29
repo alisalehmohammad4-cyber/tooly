@@ -5,6 +5,7 @@ export type AuditActionType =
   | 'CHECKIN'
   | 'TRANSFER_INIT'
   | 'TRANSFER_RECEIVE'
+  | 'DIRECT_TRANSFER'
   | 'MAINTENANCE_FLAG'
   | 'ONBOARD'
   | 'LOCK_STATUS'

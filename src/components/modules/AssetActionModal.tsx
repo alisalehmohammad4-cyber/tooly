@@ -66,7 +66,23 @@ export default function AssetActionModal({
   isInCart = false,
 }: AssetActionModalProps) {
   const router = useRouter();
-  const { role, user, openPinModal, currentOrganization } = useAuth();
+  const {
+    role,
+    user,
+    openPinModal,
+    currentOrganization,
+    isChiefOperations,
+    isGeneralManager,
+    isAdmin,
+  } = useAuth();
+
+  const isManagerOrAdmin =
+    isChiefOperations ||
+    isGeneralManager ||
+    isAdmin ||
+    role === 'chief_operations' ||
+    role === 'general_manager' ||
+    role === 'admin';
 
   // Tab Mode: auto-select Check-In if already checked_out, otherwise Check-Out
   const initialTab: ModalTab =
@@ -136,7 +152,7 @@ export default function AssetActionModal({
   );
 
   // Warehouse scoping check (Storekeeper cannot dispatch tools from other warehouses)
-  const isStorekeeper = role === 'storekeeper' || role === 'supervisor';
+  const isStorekeeper = (role === 'storekeeper' || role === 'supervisor') && !isManagerOrAdmin;
   const isForeignWarehouse =
     isStorekeeper &&
     Boolean(user?.assignedWarehouseId) &&
@@ -330,20 +346,30 @@ export default function AssetActionModal({
       return;
     }
 
+    if (targetWarehouseId === asset.currentWarehouseId) {
+      setActionError('הכלי כבר משויך למחסן יעד זה.');
+      return;
+    }
+
     setIsSubmitting(true);
     setActionError(null);
 
     const gps = await getCurrentGpsCoordinates();
     const targetWhMeta = warehouses.find((w) => w.id === targetWarehouseId);
+    const isDirect = isManagerOrAdmin;
 
     const transferPayload = {
       assetId: asset.id,
       targetWarehouseId,
       notes: notes.trim() || undefined,
       gps,
+      isDirectTransfer: isDirect,
     };
 
     const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+    const newStatus = isDirect
+      ? (asset.status === 'in_transit' ? 'available' : asset.status)
+      : 'in_transit';
 
     if (isOffline) {
       await enqueueSyncAction('transfer', transferPayload);
@@ -351,11 +377,11 @@ export default function AssetActionModal({
         currentWarehouseId: targetWarehouseId,
         warehouseName: targetWhMeta?.name || asset.warehouseName,
         warehouseCode: targetWhMeta?.code || asset.warehouseCode,
-        status: 'in_transit',
+        status: newStatus,
       });
       const optimistic = updated || {
         ...asset,
-        status: 'in_transit' as const,
+        status: newStatus as ScannedAssetDetails['status'],
         currentWarehouseId: targetWarehouseId,
         warehouseName: targetWhMeta?.name || asset.warehouseName,
         warehouseCode: targetWhMeta?.code || asset.warehouseCode,
@@ -364,7 +390,12 @@ export default function AssetActionModal({
         try { navigator.vibrate([100, 50, 100]); } catch {}
       }
       setIsSubmitting(false);
-      onActionComplete('נשמר במכשיר במצב לא מקוון ויסונכרן בהתחברות לרשת (העברת כלי)', optimistic);
+      onActionComplete(
+        isDirect
+          ? `הכלי הועבר ישירות למחסן ${targetWhMeta?.name || 'היעד'}`
+          : 'נשמר במכשיר במצב לא מקוון ויסונכרן בהתחברות לרשת (העברת כלי)',
+        optimistic
+      );
       router.refresh();
       onClose();
       return;
@@ -382,7 +413,7 @@ export default function AssetActionModal({
 
       const updatedAsset: ScannedAssetDetails = res.asset || {
         ...asset,
-        status: 'in_transit' as const,
+        status: newStatus as ScannedAssetDetails['status'],
         currentWarehouseId: targetWarehouseId,
         warehouseName: targetWhMeta?.name || asset.warehouseName,
         warehouseCode: targetWhMeta?.code || asset.warehouseCode,
@@ -398,17 +429,22 @@ export default function AssetActionModal({
         currentWarehouseId: targetWarehouseId,
         warehouseName: targetWhMeta?.name || asset.warehouseName,
         warehouseCode: targetWhMeta?.code || asset.warehouseCode,
-        status: 'in_transit',
+        status: newStatus,
       });
       setIsSubmitting(false);
       const fallbackAsset: ScannedAssetDetails = updated || {
         ...asset,
-        status: 'in_transit' as const,
+        status: newStatus as ScannedAssetDetails['status'],
         currentWarehouseId: targetWarehouseId,
         warehouseName: targetWhMeta?.name || asset.warehouseName,
         warehouseCode: targetWhMeta?.code || asset.warehouseCode,
       };
-      onActionComplete('נשמר במכשיר במצב לא מקוון ויסונכרן בהתחברות לרשת (העברת כלי)', fallbackAsset);
+      onActionComplete(
+        isDirect
+          ? `הכלי הועבר ישירות למחסן ${targetWhMeta?.name || 'היעד'}`
+          : 'נשמר במכשיר במצב לא מקוון ויסונכרן בהתחברות לרשת (העברת כלי)',
+        fallbackAsset
+      );
       router.refresh();
       onClose();
     }
@@ -1196,6 +1232,19 @@ export default function AssetActionModal({
                 {/* TAB C: SITE TRANSFER FORM */}
                 {activeTab === 'transfer' && (
                   <form onSubmit={handleTransfer} className="space-y-4">
+                    {/* Operations Manager / Admin Direct Transfer Notice */}
+                    {isManagerOrAdmin && (
+                      <div className="p-3 bg-sky-50 border border-sky-200 rounded-2xl text-sky-950 text-xs space-y-1">
+                        <div className="font-extrabold flex items-center gap-1.5 text-sky-800">
+                          <Truck className="w-4 h-4 text-sky-600" />
+                          <span>העברה ישירה מיידית (מנהל תפעול / מנכ&quot;ל)</span>
+                        </div>
+                        <p>
+                          העברת הכלי תתבצע מידית מול מסד הנתונים, תעדכן את שיוך המחסן ישירות, ותתועד ביומן המלאי.
+                        </p>
+                      </div>
+                    )}
+
                     {/* Scoped Warehouse Restriction Banner */}
                     {isForeignWarehouse && (
                       <div className="p-3 bg-amber-500/10 border-2 border-amber-500/30 rounded-2xl text-amber-950 text-xs space-y-1">
@@ -1256,7 +1305,7 @@ export default function AssetActionModal({
                       ) : (
                         <>
                           <Truck className="w-6 h-6 stroke-[2.5]" />
-                          <span>אשר העברה לאתר היעד</span>
+                          <span>{isManagerOrAdmin ? 'אשר העברה ישירה למחסן היעד' : 'אשר העברה לאתר היעד'}</span>
                           <ArrowLeft className="w-5 h-5 stroke-[2.5]" />
                         </>
                       )}

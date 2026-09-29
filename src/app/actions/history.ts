@@ -92,8 +92,8 @@ export async function getAuditHistory(
 
     const rawAction = (filters?.actionType || filters?.action || '').toUpperCase();
     if (rawAction && rawAction !== 'ALL') {
-      if (rawAction === 'TRANSFERS' || rawAction === 'TRANSFER_INIT' || rawAction === 'TRANSFER_RECEIVE') {
-        query = query.in('action', ['TRANSFER_INIT', 'TRANSFER_RECEIVE']);
+      if (rawAction === 'TRANSFERS' || rawAction === 'TRANSFER_INIT' || rawAction === 'TRANSFER_RECEIVE' || rawAction === 'DIRECT_TRANSFER') {
+        query = query.in('action', ['TRANSFER_INIT', 'TRANSFER_RECEIVE', 'DIRECT_TRANSFER']);
       } else {
         query = query.eq('action', rawAction);
       }
@@ -203,6 +203,7 @@ export async function getAuditHistory(
         else if (raw === 'CHECKIN') normalizedAction = 'CHECKIN';
         else if (raw === 'TRANSFER_INIT') normalizedAction = 'TRANSFER_INIT';
         else if (raw === 'TRANSFER_RECEIVE') normalizedAction = 'TRANSFER_RECEIVE';
+        else if (raw === 'DIRECT_TRANSFER') normalizedAction = 'DIRECT_TRANSFER';
         else if (raw === 'MAINTENANCE_FLAG') normalizedAction = 'MAINTENANCE_FLAG';
         else if (raw === 'ONBOARD') normalizedAction = 'ONBOARD';
         else if (raw === 'LOCK_STATUS') normalizedAction = 'LOCK_STATUS';

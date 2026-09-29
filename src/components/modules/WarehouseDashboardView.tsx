@@ -1130,6 +1130,7 @@ export default function WarehouseDashboardView({
         assetId: asset.id,
         targetWarehouseId: transferTargetWhId,
         notes: transferNotes || `העברה יזומה ע"י אחראי תפעול ראשי`,
+        isDirectTransfer: true,
       });
       if (res.success) {
         // Force Next.js to re-fetch Server Components and update all tables/metrics:
@@ -2000,77 +2001,42 @@ export default function WarehouseDashboardView({
           </div>
         )}
 
-            {/* DIRECT OUTBOUND EQUIPMENT TRANSFER (העברה ישירה ע"י מחסנאי ללא צורך באישור מנהל) */}
-        <div className="p-4 rounded-2xl bg-gradient-to-r from-sky-950 via-blue-900 to-indigo-950 text-white shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-sky-500/40">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-sky-500/30 text-sky-200 flex items-center justify-center border border-sky-400/30 shrink-0">
-              <Truck className="w-5 h-5" />
+        {/* INTER-SITE EQUIPMENT TRANSFER REQUEST (Strictly Site Storekeepers Only) */}
+        {isStorekeeper && !isChiefOperations && !isGeneralManager && (
+          <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-blue-700/40">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-600/50 text-blue-200 flex items-center justify-center border border-blue-400/30 shrink-0">
+                <ArrowLeftRight className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-white flex items-center gap-2">
+                  <span>בקשת העברת ציוד בין אתרים</span>
+                  <span className="text-[10px] font-bold bg-blue-500/30 text-blue-200 px-2 py-0.5 rounded-full border border-blue-400/30">
+                    נוהל מבוקר &bull; אישור מנהל תפעול
+                  </span>
+                </h3>
+                <p className="text-xs text-blue-200 mt-0.5">
+                  חסר כלי עבודה באתר? בחר כלי זמין ממתקן אחר והגש בקשה מנומקת לאישור אחראי תפעול ראשי
+                </p>
+              </div>
             </div>
-            <div>
-              <h3 className="text-sm font-black text-white flex items-center gap-2">
-                <span>העברה ישירה לאתר אחר</span>
-                <span className="text-[10px] font-bold bg-sky-500/30 text-sky-200 px-2 py-0.5 rounded-full border border-sky-400/30">
-                  שילוח מיידי &bull; ללא אישור מנהל
-                </span>
-              </h3>
-              <p className="text-xs text-sky-200 mt-0.5">
-                שילוח ישיר של כלי עבודה זמין ממחסן זה ישירות לאתר בנייה או מחסן אחר בארגון
-              </p>
-            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setTransferRequestFeedback(null);
+                setSelectedAssetToTransfer(null);
+                setTransferRequestReason('');
+                setAssetSearchQuery('');
+                setIsTransferRequestModalOpen(true);
+              }}
+              className="py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-black flex items-center justify-center gap-2 shadow-md shadow-blue-500/20 active:scale-95 transition-all cursor-pointer shrink-0"
+            >
+              <Plus className="w-4 h-4" />
+              <span>בקשת העברת ציוד בין אתרים</span>
+            </button>
           </div>
-
-          <button
-            type="button"
-            onClick={() => {
-              setDirectTransferFeedback(null);
-              setSelectedDirectAsset(null);
-              setTransporterNotes('');
-              setDirectSearchQuery('');
-              const otherWh = warehouses.find((w) => w.id !== 'all' && w.id !== selectedWarehouseId);
-              setDirectTargetWarehouseId(otherWh ? otherWh.id : '');
-              setIsDirectTransferModalOpen(true);
-            }}
-            className="py-2.5 px-4 rounded-xl bg-sky-500 hover:bg-sky-600 text-white text-xs sm:text-sm font-black flex items-center justify-center gap-2 shadow-md shadow-sky-500/20 active:scale-95 transition-all cursor-pointer shrink-0"
-          >
-            <Truck className="w-4 h-4" />
-            <span>העברה ישירה לאתר אחר</span>
-          </button>
-        </div>
-
-            {/* INTER-SITE EQUIPMENT TRANSFER REQUEST (Storekeeper -> Operations Manager) */}
-        <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-blue-700/40">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-600/50 text-blue-200 flex items-center justify-center border border-blue-400/30 shrink-0">
-              <ArrowLeftRight className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="text-sm font-black text-white flex items-center gap-2">
-                <span>בקשת העברת ציוד בין אתרים</span>
-                <span className="text-[10px] font-bold bg-blue-500/30 text-blue-200 px-2 py-0.5 rounded-full border border-blue-400/30">
-                  נוהל מבוקר &bull; אישור מנהל תפעול
-                </span>
-              </h3>
-              <p className="text-xs text-blue-200 mt-0.5">
-                חסר כלי עבודה באתר? בחר כלי זמין ממתקן אחר והגש בקשה מנומקת לאישור אחראי תפעול ראשי
-              </p>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => {
-              setTransferRequestFeedback(null);
-              setSelectedAssetToTransfer(null);
-              setTransferRequestReason('');
-              setAssetSearchQuery('');
-              setIsTransferRequestModalOpen(true);
-            }}
-            className="py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-black flex items-center justify-center gap-2 shadow-md shadow-blue-500/20 active:scale-95 transition-all cursor-pointer shrink-0"
-          >
-            <Plus className="w-4 h-4" />
-            <span>בקשת העברת ציוד בין אתרים</span>
-          </button>
-        </div>
+        )}
 
             {/* SITE EQUIPMENT DISPATCH WITH TAG VERIFICATION & DIGITAL SIGNATURE */}
         <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-900 via-teal-900 to-slate-900 text-white shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-emerald-700/40">

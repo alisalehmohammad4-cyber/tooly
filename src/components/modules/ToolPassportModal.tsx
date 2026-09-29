@@ -104,6 +104,13 @@ function renderTimelineActionBadge(action: AuditActionType) {
           <span>קליטה משינוע</span>
         </span>
       );
+    case 'DIRECT_TRANSFER':
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-black bg-sky-50 text-sky-900 border border-sky-300">
+          <Truck className="w-3.5 h-3.5 text-sky-600" />
+          <span>העברה ישירה (מנהל תפעול)</span>
+        </span>
+      );
     case 'MAINTENANCE_FLAG':
       return (
         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-black bg-rose-50 text-rose-900 border border-rose-300">
