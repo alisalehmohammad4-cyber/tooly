@@ -141,7 +141,7 @@ export default function ToolPassportModal({
   onClose,
   onAssetUpdated,
 }: ToolPassportModalProps) {
-  const { role, user, openPinModal, currentOrganization } = useAuth();
+  const { role, user, openPinModal, currentOrganization, isAdmin } = useAuth();
   const { isWriting: isNfcWriting, writeNfcTag } = useWebNfc();
   const [nfcWriteStatus, setNfcWriteStatus] = useState<string | null>(null);
 
@@ -591,7 +591,7 @@ export default function ToolPassportModal({
         </div>
 
         {/* TABS HEADER */}
-        <div className="flex overflow-x-auto no-scrollbar py-1 gap-2 border-b border-slate-200 bg-white px-4 shrink-0">
+        <div className="flex flex-nowrap overflow-x-auto no-scrollbar py-1 gap-2 border-b border-slate-200 bg-white px-4 shrink-0">
           <button
             type="button"
             onClick={() => setActiveTab('timeline')}
@@ -831,14 +831,16 @@ export default function ToolPassportModal({
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 text-xs">
-                  <div className="p-2.5 rounded-xl bg-white border border-slate-200">
-                    <span className="text-slate-500 font-bold block mb-0.5">עלות רכישה:</span>
-                    <span className="text-base font-black text-slate-900">
-                      {currentAsset?.purchaseCost ? `₪${currentAsset.purchaseCost.toLocaleString()}` : 'לא תועד'}
-                    </span>
-                  </div>
+                  {isAdmin && (currentAsset?.purchase_cost || currentAsset?.purchaseCost) ? (
+                    <div className="bg-slate-900 border border-slate-800 rounded-xl p-3">
+                      <span className="text-xs text-slate-400">עלות רכישה</span>
+                      <div className="text-base font-bold text-slate-100">
+                        ₪ {Number(currentAsset.purchase_cost || currentAsset.purchaseCost).toLocaleString()}
+                      </div>
+                    </div>
+                  ) : null}
 
-                  <div className="p-2.5 rounded-xl bg-white border border-slate-200">
+                  <div className={`p-2.5 rounded-xl bg-white border border-slate-200 ${!isAdmin || !(currentAsset?.purchase_cost || currentAsset?.purchaseCost) ? 'col-span-2' : ''}`}>
                     <span className="text-slate-500 font-bold block mb-0.5">תאריך רכישה:</span>
                     <span className="text-sm font-bold text-slate-900">
                       {currentAsset?.purchaseDate

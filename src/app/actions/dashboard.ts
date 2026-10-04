@@ -126,6 +126,20 @@ export interface WarehouseOption {
   is_active?: boolean | null;
 }
 
+export interface StorekeeperActiveLoan {
+  assetId: string;
+  toolName: string;
+  brand: string;
+  modelNumber: string | null;
+  qrCode: string;
+  workerName: string;
+  workerPhone: string | null;
+  checkedOutAt?: string;
+  expectedReturnDate?: string | null;
+  checkoutNote?: string | null;
+  daysActive?: number;
+}
+
 export interface StorekeeperOperationsPayload {
   warehouse: { id: string; name: string; code?: string | null };
   warehouses: WarehouseOption[];
@@ -136,6 +150,7 @@ export interface StorekeeperOperationsPayload {
   quarantinedCount: number;
   availableCount: number;
   checkedOutCount: number;
+  activeLoans?: StorekeeperActiveLoan[];
 }
 
 
@@ -206,6 +221,7 @@ const EMPTY_STOREKEEPER_PAYLOAD: StorekeeperOperationsPayload = {
   quarantinedCount: 0,
   availableCount: 0,
   checkedOutCount: 0,
+  activeLoans: [],
 };
 
 /**
@@ -594,6 +610,7 @@ export async function getStorekeeperOperations(
 
     const returnsDueToday: StorekeeperReturnDue[] = [];
     const overdueAssets: StorekeeperOverdueAsset[] = [];
+    const activeLoans: StorekeeperActiveLoan[] = [];
     let availableCount = 0;
     let checkedOutCount = 0;
     let quarantinedCount = 0;
@@ -634,35 +651,50 @@ export async function getStorekeeperOperations(
       const assetIdStr = row.id as string;
       const checkoutNote = checkoutNotesMap.get(assetIdStr) || (row.checkout_note as string) || (row.notes as string) || null;
 
-      if (row.status === 'checked_out' && row.expected_return_date) {
-        const rTime = new Date(row.expected_return_date as string).getTime();
-        if (rTime < now) {
-          const days = Math.max(1, Math.floor((now - rTime) / (1000 * 60 * 60 * 24)));
-          overdueAssets.push({
-            assetId: assetIdStr,
-            toolName: (row.name as string) || (model.name as string) || 'כלי עבודה',
-            brand: (row.brand as string) || (model.brand as string) || 'Standard',
-            modelNumber: (row.model_number as string) || (model.model_number as string) || null,
-            qrCode: row.qr_code as string,
-            workerName: (row.current_assigned_worker as string) || 'עובד שטח',
-            workerPhone: (row.worker_phone as string) || null,
-            warehouseName: currentWh.name,
-            expectedReturnDate: row.expected_return_date as string,
-            daysOverdue: days,
-            checkoutNote,
-          });
-        } else if (rTime >= startOfToday.getTime() && rTime <= endOfToday.getTime()) {
-          returnsDueToday.push({
-            assetId: assetIdStr,
-            toolName: (row.name as string) || (model.name as string) || 'כלי עבודה',
-            brand: (row.brand as string) || (model.brand as string) || 'Standard',
-            modelNumber: (row.model_number as string) || (model.model_number as string) || null,
-            qrCode: row.qr_code as string,
-            workerName: (row.current_assigned_worker as string) || 'עובד שטח',
-            workerPhone: (row.worker_phone as string) || null,
-            expectedReturnDate: row.expected_return_date as string,
-            checkoutNote,
-          });
+      if (row.status === 'checked_out') {
+        activeLoans.push({
+          assetId: assetIdStr,
+          toolName: (row.name as string) || (model.name as string) || 'כלי עבודה',
+          brand: (row.brand as string) || (model.brand as string) || 'Standard',
+          modelNumber: (row.model_number as string) || (model.model_number as string) || null,
+          qrCode: row.qr_code as string,
+          workerName: (row.current_assigned_worker as string) || 'עובד שטח',
+          workerPhone: (row.worker_phone as string) || null,
+          checkedOutAt: (row.updated_at as string) || (row.created_at as string) || new Date().toISOString(),
+          expectedReturnDate: (row.expected_return_date as string) || null,
+          checkoutNote,
+        });
+
+        if (row.expected_return_date) {
+          const rTime = new Date(row.expected_return_date as string).getTime();
+          if (rTime < now) {
+            const days = Math.max(1, Math.floor((now - rTime) / (1000 * 60 * 60 * 24)));
+            overdueAssets.push({
+              assetId: assetIdStr,
+              toolName: (row.name as string) || (model.name as string) || 'כלי עבודה',
+              brand: (row.brand as string) || (model.brand as string) || 'Standard',
+              modelNumber: (row.model_number as string) || (model.model_number as string) || null,
+              qrCode: row.qr_code as string,
+              workerName: (row.current_assigned_worker as string) || 'עובד שטח',
+              workerPhone: (row.worker_phone as string) || null,
+              warehouseName: currentWh.name,
+              expectedReturnDate: row.expected_return_date as string,
+              daysOverdue: days,
+              checkoutNote,
+            });
+          } else if (rTime >= startOfToday.getTime() && rTime <= endOfToday.getTime()) {
+            returnsDueToday.push({
+              assetId: assetIdStr,
+              toolName: (row.name as string) || (model.name as string) || 'כלי עבודה',
+              brand: (row.brand as string) || (model.brand as string) || 'Standard',
+              modelNumber: (row.model_number as string) || (model.model_number as string) || null,
+              qrCode: row.qr_code as string,
+              workerName: (row.current_assigned_worker as string) || 'עובד שטח',
+              workerPhone: (row.worker_phone as string) || null,
+              expectedReturnDate: row.expected_return_date as string,
+              checkoutNote,
+            });
+          }
         }
       }
     });
@@ -677,6 +709,7 @@ export async function getStorekeeperOperations(
       quarantinedCount,
       availableCount,
       checkedOutCount,
+      activeLoans,
     };
     storekeeperOpsCache.set(cacheKey, { data: opsPayload, expiresAt: Date.now() + 30000 });
     return opsPayload;

@@ -353,7 +353,7 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
           </div>
 
           {/* 3 Instant Status Toggle Pills */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+          <div className="flex flex-nowrap items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
             <button
               type="button"
               onClick={() => setStatusFilter('all')}
@@ -753,7 +753,7 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
 
                         <span className="inline-flex items-center gap-1 text-xs font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
                           <BuildingOfficeIcon className="w-3.5 h-3.5" />
-                          {asset.warehouseName || asset.current_warehouse?.name || 'מתקן'}
+                          {asset.current_warehouse?.name || asset.warehouseName || 'מתקן כללי'}
                         </span>
                       </div>
 
@@ -813,7 +813,7 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
                               condition: asset.condition,
                               currentAssignedWorker: asset.currentAssignedWorker,
                               currentWarehouseId: asset.warehouseId,
-                              warehouseName: asset.current_warehouse?.name || asset.warehouseName || asset.warehouse || 'מתקן',
+                              warehouseName: asset.current_warehouse?.name || asset.warehouseName || 'מתקן כללי',
                               warehouseCode: 'WH',
                               toolName: asset.toolName,
                               brand: asset.brand,
@@ -858,7 +858,7 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
                               condition: asset.condition,
                               currentAssignedWorker: asset.currentAssignedWorker,
                               currentWarehouseId: asset.warehouseId,
-                              warehouseName: asset.current_warehouse?.name || asset.warehouseName || asset.warehouse || 'מתקן',
+                              warehouseName: asset.current_warehouse?.name || asset.warehouseName || 'מתקן כללי',
                               warehouseCode: 'WH',
                               toolName: asset.toolName,
                               brand: asset.brand,

@@ -8,6 +8,7 @@ import {
   getMockWarehouses,
   getMockAssets,
   mutateMockAsset,
+  DEFAULT_ORGANIZATION,
 } from '@/lib/mockStore';
 
 export interface PendingTransferItem {
@@ -481,18 +482,30 @@ export async function decideTransferRequestAction(
     // 1. Update asset status to 'in_transit' and current_warehouse_id in Supabase
     if (isSupabaseConfigured()) {
       try {
-        const { error: assetUpdateErr } = await supabaseAdmin
+        const assetUpdateQuery = supabaseAdmin
           .from('assets')
           .update({
             current_warehouse_id: targetRecord.target_warehouse_id,
             status: 'in_transit',
+            organization_id: orgId,
             updated_at: now,
           })
-          .eq('id', targetRecord.asset_id)
-          .eq('organization_id', orgId);
+          .eq('id', targetRecord.asset_id);
+
+        if (orgId && orgId !== DEFAULT_ORGANIZATION.id) {
+          assetUpdateQuery.eq('organization_id', orgId);
+        }
+
+        const { data: updatedAssetRows, error: assetUpdateErr } = await assetUpdateQuery.select();
 
         if (assetUpdateErr) {
-          console.warn('[decideTransferRequestAction] Asset update error:', assetUpdateErr);
+          console.error('[decideTransferRequestAction] Asset update error:', assetUpdateErr);
+          return { success: false, error: `שגיאה בעדכון כלי: ${assetUpdateErr.message}` };
+        }
+
+        if (!updatedAssetRows || updatedAssetRows.length === 0) {
+          console.error('[decideTransferRequestAction] Zero rows updated for asset:', targetRecord.asset_id);
+          return { success: false, error: "העדכון נכשל: הכלי לא נמצא או שנחסם עקב הרשאות (0 שורות עודכנו)." };
         }
 
         // 2. Log TRANSFER_INIT in custody_ledger
@@ -507,6 +520,8 @@ export async function decideTransferRequestAction(
         });
       } catch (err) {
         console.warn('[decideTransferRequestAction] Supabase error during approval:', err);
+        const msg = err instanceof Error ? err.message : 'Database error';
+        return { success: false, error: msg };
       }
     }
 
@@ -543,7 +558,7 @@ export async function decideTransferRequestAction(
   // Update transfer_requests record
   if (isSupabaseConfigured()) {
     try {
-      await supabaseAdmin
+      const reqUpdateQuery = supabaseAdmin
         .from('transfer_requests')
         .update({
           status: decision,
@@ -552,8 +567,18 @@ export async function decideTransferRequestAction(
           decided_at: now,
           updated_at: now,
         })
-        .eq('id', requestId)
-        .eq('organization_id', orgId);
+        .eq('id', requestId);
+
+      if (orgId && orgId !== DEFAULT_ORGANIZATION.id) {
+        reqUpdateQuery.eq('organization_id', orgId);
+      }
+
+      const { data: updatedReqRows, error: reqErr } = await reqUpdateQuery.select();
+
+      if (reqErr) {
+        console.error('[decideTransferRequestAction] Update transfer_requests error:', reqErr);
+        return { success: false, error: `שגיאה בעדכון בקשת העברה: ${reqErr.message}` };
+      }
     } catch (err) {
       console.warn('[decideTransferRequestAction] Update transfer_requests error:', err);
     }
@@ -613,18 +638,30 @@ export async function completeTransferReceptionAction(
   // 2. Update asset in Supabase
   if (isSupabaseConfigured()) {
     try {
-      const { error: assetErr } = await supabaseAdmin
+      const assetUpdateQuery = supabaseAdmin
         .from('assets')
         .update({
           current_warehouse_id: targetWarehouseId,
           status: 'available',
+          current_assigned_worker: null,
+          organization_id: orgId,
           updated_at: now,
         })
-        .eq('id', assetId)
-        .eq('organization_id', orgId);
+        .eq('id', assetId);
+
+      if (orgId && orgId !== DEFAULT_ORGANIZATION.id) {
+        assetUpdateQuery.eq('organization_id', orgId);
+      }
+
+      const { data: updatedAssetRows, error: assetErr } = await assetUpdateQuery.select();
 
       if (assetErr) {
         return { success: false, error: `שגיאה בעדכון כלי: ${assetErr.message}` };
+      }
+
+      if (!updatedAssetRows || updatedAssetRows.length === 0) {
+        console.error("Zero rows updated for asset on reception:", assetId);
+        return { success: false, error: "העדכון נכשל: הכלי לא נמצא או שנחסם עקב הרשאות (0 שורות עודכנו)." };
       }
 
       // Log TRANSFER_RECEIVE
@@ -638,14 +675,19 @@ export async function completeTransferReceptionAction(
       });
 
       // Update transfer_requests status
-      await supabaseAdmin
+      const reqUpdateQuery = supabaseAdmin
         .from('transfer_requests')
         .update({
           status: 'COMPLETED',
           updated_at: now,
         })
-        .eq('id', requestId)
-        .eq('organization_id', orgId);
+        .eq('id', requestId);
+
+      if (orgId && orgId !== DEFAULT_ORGANIZATION.id) {
+        reqUpdateQuery.eq('organization_id', orgId);
+      }
+
+      await reqUpdateQuery.select();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Database error';
       return { success: false, error: msg };
@@ -990,19 +1032,30 @@ export async function directStorekeeperTransferAction(data: {
   // 2. Update asset to in_transit and log TRANSFER_INIT in Supabase
   if (isSupabaseConfigured()) {
     try {
-      const { error: updateErr } = await supabaseAdmin
+      const updateQuery = supabaseAdmin
         .from('assets')
         .update({
           current_warehouse_id: targetWarehouseId,
           status: 'in_transit',
+          organization_id: orgId,
           updated_at: now,
         })
-        .eq('id', assetId)
-        .eq('organization_id', orgId);
+        .eq('id', assetId);
+
+      if (orgId && orgId !== DEFAULT_ORGANIZATION.id) {
+        updateQuery.eq('organization_id', orgId);
+      }
+
+      const { data: updatedRows, error: updateErr } = await updateQuery.select();
 
       if (updateErr) {
         console.error("Transfer DB Error:", updateErr);
         return { success: false, error: `שגיאה בעדכון כלי ומחסן: ${updateErr.message}` };
+      }
+
+      if (!updatedRows || updatedRows.length === 0) {
+        console.error("Zero rows updated for direct transfer asset:", assetId);
+        return { success: false, error: "העדכון נכשל: הכלי לא נמצא או שנחסם עקב הרשאות (0 שורות עודכנו)." };
       }
 
       const { error: ledgerErr } = await supabaseAdmin.from('custody_ledger').insert({

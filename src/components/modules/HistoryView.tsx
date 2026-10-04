@@ -59,7 +59,7 @@ type QuickChipId =
   | 'all'
   | 'CHECKOUT'
   | 'CHECKIN'
-  | 'TRANSFERS'
+  | 'TRANSFER_INIT'
   | 'MAINTENANCE_FLAG'
   | 'ONBOARD'
   | 'signed'
@@ -77,7 +77,7 @@ const ACTION_FILTERS: Array<{
   },
   {
     value: 'CHECKOUT',
-    labelHe: 'ניפוקים בשטח',
+    labelHe: 'הנפקות לעובדים',
     icon: <UserCheck className="w-3.5 h-3.5" />,
   },
   {
@@ -86,8 +86,8 @@ const ACTION_FILTERS: Array<{
     icon: <CheckCircle2 className="w-3.5 h-3.5" />,
   },
   {
-    value: 'TRANSFERS',
-    labelHe: 'העברות בין אתרים',
+    value: 'TRANSFER_INIT',
+    labelHe: 'שינוע בין אתרים',
     icon: <Truck className="w-3.5 h-3.5" />,
   },
   {
@@ -339,7 +339,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
       all: records.length,
       CHECKOUT: records.filter((r) => r.action === 'CHECKOUT').length,
       CHECKIN: records.filter((r) => r.action === 'CHECKIN').length,
-      TRANSFERS: records.filter(
+      TRANSFER_INIT: records.filter(
         (r) => r.action === 'TRANSFER_INIT' || r.action === 'TRANSFER_RECEIVE'
       ).length,
       MAINTENANCE_FLAG: records.filter((r) => r.action === 'MAINTENANCE_FLAG').length,
@@ -379,10 +379,10 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
       activeClass: 'bg-emerald-600 text-white border-emerald-600 shadow-md shadow-emerald-500/20',
     },
     {
-      id: 'TRANSFERS',
+      id: 'TRANSFER_INIT',
       label: '🚚 שינוע בין אתרים',
       icon: <Truck className="w-3.5 h-3.5" />,
-      count: chipCounts.TRANSFERS,
+      count: chipCounts.TRANSFER_INIT,
       activeClass: 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-500/20',
     },
     {
@@ -423,12 +423,12 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
     const effectiveAction =
       selectedAction !== 'all'
         ? selectedAction
-        : ['CHECKOUT', 'CHECKIN', 'TRANSFERS', 'MAINTENANCE_FLAG', 'ONBOARD'].includes(activeChip)
+        : ['CHECKOUT', 'CHECKIN', 'TRANSFER_INIT', 'MAINTENANCE_FLAG', 'ONBOARD'].includes(activeChip)
         ? activeChip
         : 'all';
 
     if (effectiveAction !== 'all') {
-      if (effectiveAction === 'TRANSFERS') {
+      if (effectiveAction === 'TRANSFER_INIT') {
         list = list.filter(
           (r) => r.action === 'TRANSFER_INIT' || r.action === 'TRANSFER_RECEIVE'
         );
@@ -673,7 +673,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
               </span>
             </div>
 
-            <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+            <div className="flex flex-nowrap items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
               {quickChips.map((chip) => {
                 const isSelected = activeChip === chip.id;
                 return (
@@ -682,7 +682,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
                     type="button"
                     onClick={() => {
                       setActiveChip(chip.id);
-                      if (['CHECKOUT', 'CHECKIN', 'TRANSFERS', 'MAINTENANCE_FLAG', 'ONBOARD', 'all'].includes(chip.id)) {
+                      if (['CHECKOUT', 'CHECKIN', 'TRANSFER_INIT', 'MAINTENANCE_FLAG', 'ONBOARD', 'all'].includes(chip.id)) {
                         setSelectedAction(chip.id);
                       } else {
                         setSelectedAction('all');
@@ -815,7 +815,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
             </div>
 
             {/* ACTION SPECIFIC SUB-PILLS */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pt-1 no-scrollbar">
+            <div className="flex flex-nowrap items-center gap-1.5 overflow-x-auto pt-1 no-scrollbar">
               {ACTION_FILTERS.map((f) => {
                 const isSelected = selectedAction === f.value;
                 return (
@@ -824,7 +824,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
                     type="button"
                     onClick={() => {
                       setSelectedAction(f.value);
-                      if (['CHECKOUT', 'CHECKIN', 'TRANSFERS', 'MAINTENANCE_FLAG', 'ONBOARD', 'all'].includes(f.value)) {
+                      if (['CHECKOUT', 'CHECKIN', 'TRANSFER_INIT', 'MAINTENANCE_FLAG', 'ONBOARD', 'all'].includes(f.value)) {
                         setActiveChip(f.value as QuickChipId);
                       }
                     }}
@@ -873,7 +873,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
               {/* Quick Chip Event Type */}
               <div className="space-y-1.5">
                 <label className="text-xs font-black text-slate-700 block">סוג אירוע:</label>
-                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+                <div className="flex flex-nowrap items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
                   {quickChips.map((chip) => {
                     const isSelected = activeChip === chip.id;
                     return (
@@ -882,7 +882,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
                         type="button"
                         onClick={() => {
                           setActiveChip(chip.id);
-                          if (['CHECKOUT', 'CHECKIN', 'TRANSFERS', 'MAINTENANCE_FLAG', 'ONBOARD', 'all'].includes(chip.id)) {
+                          if (['CHECKOUT', 'CHECKIN', 'TRANSFER_INIT', 'MAINTENANCE_FLAG', 'ONBOARD', 'all'].includes(chip.id)) {
                             setSelectedAction(chip.id);
                           } else {
                             setSelectedAction('all');
@@ -1358,7 +1358,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
                     >
                       <BuildingOfficeIcon className="w-3.5 h-3.5 shrink-0" />
                       <span className="truncate max-w-[180px]">
-                        {item.assets?.current_warehouse?.name || item.warehouses?.name || item.currentWarehouseName || item.warehouseName || 'מתקן'}
+                        {item.assets?.current_warehouse?.name || (item as any).current_warehouse?.name || item.currentWarehouseName || item.warehouseName || 'מתקן כללי'}
                       </span>
                     </span>
 

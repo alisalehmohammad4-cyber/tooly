@@ -931,3 +931,51 @@ export async function toggleUserActiveAction(
       : `החשבון של ${user.fullName} הושבת בהצלחה.`,
   };
 }
+
+/**
+ * Resets a user's login PIN securely.
+ */
+export async function resetUserPinAction(
+  userId: string,
+  newPin: string
+): Promise<{ success: boolean; error?: string; message?: string }> {
+  const cleanPin = (newPin || '').trim();
+  if (!cleanPin || cleanPin.length < 4) {
+    return { success: false, error: 'קוד כניסה (PIN) חייב להכיל לפחות 4 ספרות.' };
+  }
+
+  const user = USERS_STORE.find(
+    (u) => u.id === userId || u.username?.toLowerCase() === userId.toLowerCase()
+  );
+  if (user) {
+    user.pinCode = cleanPin;
+  }
+
+  const mockUser = MOCK_USERS.find(
+    (u) => u.id === userId || u.username?.toLowerCase() === userId.toLowerCase()
+  );
+  if (mockUser) {
+    mockUser.pinCode = cleanPin;
+  }
+
+  if (isSupabaseConfigured()) {
+    try {
+      await supabaseAdmin
+        .from('app_users')
+        .update({ pin: cleanPin, pin_code: cleanPin })
+        .or(`id.eq.${userId},username.eq.${userId}`);
+
+      await supabaseAdmin
+        .from('users')
+        .update({ pin: cleanPin, pin_code: cleanPin })
+        .eq('id', userId);
+    } catch (err) {
+      console.warn('Could not mirror PIN reset to Supabase:', err);
+    }
+  }
+
+  return {
+    success: true,
+    message: `קוד ה-PIN עבור ${user?.fullName || 'המשתמש'} עודכן בהצלחה.`,
+  };
+}

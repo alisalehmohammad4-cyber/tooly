@@ -767,15 +767,28 @@ export async function updateAssetStatusAction(
 
   if (isSupabaseConfigured() && orgId) {
     try {
-      const { error: updateErr } = await supabaseAdmin
+      const updateQuery = supabaseAdmin
         .from('assets')
-        .update(updateData)
-        .eq('id', assetId)
-        .eq('organization_id', orgId);
+        .update({
+          ...updateData,
+          organization_id: orgId,
+        })
+        .eq('id', assetId);
+
+      if (orgId && orgId !== DEFAULT_ORGANIZATION.id) {
+        updateQuery.eq('organization_id', orgId);
+      }
+
+      const { data: updatedRows, error: updateErr } = await updateQuery.select();
 
       if (updateErr) {
         console.error('Update Asset Status DB Error:', updateErr);
         return { success: false, error: `שגיאה בעדכון סטטוס כלי: ${updateErr.message}` };
+      }
+
+      if (!updatedRows || updatedRows.length === 0) {
+        console.error("Zero rows updated for asset:", assetId);
+        return { success: false, error: "העדכון נכשל: הכלי לא נמצא או שנחסם עקב הרשאות (0 שורות עודכנו)." };
       }
 
       const actionType =

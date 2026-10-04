@@ -484,19 +484,30 @@ export async function returnFromMaintenanceAction(
 
   if (isSupabaseConfigured()) {
     try {
-      const { error: updateErr } = await supabaseAdmin
+      const updateQuery = supabaseAdmin
         .from('assets')
         .update({
           status: 'available',
           condition,
           current_warehouse_id: receivingWarehouseId,
+          organization_id: orgId,
           updated_at: now,
         })
-        .eq('id', assetId)
-        .eq('organization_id', orgId);
+        .eq('id', assetId);
+
+      if (orgId && orgId !== DEFAULT_ORGANIZATION.id) {
+        updateQuery.eq('organization_id', orgId);
+      }
+
+      const { data: updatedRows, error: updateErr } = await updateQuery.select();
 
       if (updateErr) {
         return { success: false, error: `שגיאה בעדכון כלי: ${updateErr.message}` };
+      }
+
+      if (!updatedRows || updatedRows.length === 0) {
+        console.error("Zero rows updated for asset on return from maintenance:", assetId);
+        return { success: false, error: "העדכון נכשל: הכלי לא נמצא או שנחסם עקב הרשאות (0 שורות עודכנו)." };
       }
 
       await supabaseAdmin.from('custody_ledger').insert({
@@ -559,18 +570,29 @@ export async function scrapAndRetireAssetAction(
 
   if (isSupabaseConfigured()) {
     try {
-      const { error: updateErr } = await supabaseAdmin
+      const updateQuery = supabaseAdmin
         .from('assets')
         .update({
           status: 'maintenance',
           condition: 'retired',
+          organization_id: orgId,
           updated_at: now,
         })
-        .eq('id', assetId)
-        .eq('organization_id', orgId);
+        .eq('id', assetId);
+
+      if (orgId && orgId !== DEFAULT_ORGANIZATION.id) {
+        updateQuery.eq('organization_id', orgId);
+      }
+
+      const { data: updatedRows, error: updateErr } = await updateQuery.select();
 
       if (updateErr) {
         return { success: false, error: `שגיאה בהשבתת כלי: ${updateErr.message}` };
+      }
+
+      if (!updatedRows || updatedRows.length === 0) {
+        console.error("Zero rows updated for asset on scrap and retire:", assetId);
+        return { success: false, error: "העדכון נכשל: הכלי לא נמצא או שנחסם עקב הרשאות (0 שורות עודכנו)." };
       }
 
       await supabaseAdmin.from('custody_ledger').insert({

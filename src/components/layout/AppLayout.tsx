@@ -106,8 +106,8 @@ export function RoleHeader({
 
   return (
     <header className={`print:hidden sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b ${headerBorderClass} shadow-sm`}>
-      {/* 1. Mobile Compact Single-Row Navbar (< 768px, strictly h-14 max) */}
-      <div className="md:hidden flex h-14 items-center justify-between gap-1.5 px-3">
+      {/* 1. Mobile Compact Single-Row Navbar (< 768px, strictly 52px height) */}
+      <div className="md:hidden flex h-[52px] items-center justify-between gap-1.5 px-3">
         {/* Left: Brand Logo + App Name */}
         <div className="flex items-center gap-2 shrink-0">
           <div className={`w-8 h-8 rounded-xl ${brandBgClass} flex items-center justify-center text-white font-black text-sm shadow-sm shrink-0`}>

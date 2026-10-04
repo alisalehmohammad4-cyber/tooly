@@ -48,6 +48,7 @@ export interface ScannedAssetDetails {
   // Phase 13 Fleet Control & Safety Lockout fields:
   purchaseDate?: string;
   purchaseCost?: number; // ILS / ₪
+  purchase_cost?: number; // ILS / ₪
   warrantyUntil?: string;
   photoUrl?: string;
   safetyInspectionDue?: string; // ISO date
@@ -208,6 +209,7 @@ function mapJoinedRowToScannedAsset(row: JoinedAssetData): ScannedAssetDetails {
     version: row.version || 1,
     purchaseDate: row.purchase_date,
     purchaseCost: row.purchase_cost,
+    purchase_cost: row.purchase_cost,
     warrantyUntil: row.warranty_until,
     safetyInspectionDue: row.safety_inspection_due,
     isLocked: row.is_locked,
@@ -621,6 +623,7 @@ export async function bulkCheckoutAssetAction(
       }
 
       // 2. Update each asset and insert audit ledger entries
+      const client = supabaseAdmin || supabase;
       for (const item of currentAssets) {
         const nextVersion = (item.version || 1) + 1;
         const itemAccessories = accessories[item.id] || {
@@ -629,7 +632,7 @@ export async function bulkCheckoutAssetAction(
           hasCase: false,
         };
 
-        const { error: updateErr } = await supabase
+        const updateQuery = client
           .from('assets')
           .update({
             status: 'checked_out',
@@ -637,15 +640,29 @@ export async function bulkCheckoutAssetAction(
             expected_return_date: expectedReturnDate,
             accessories: itemAccessories,
             version: nextVersion,
+            organization_id: orgId,
+            updated_at: new Date().toISOString(),
           })
           .eq('id', item.id);
 
+        if (orgId && orgId !== DEFAULT_ORGANIZATION.id) {
+          updateQuery.eq('organization_id', orgId);
+        }
+
+        const { data: updatedRows, error: updateErr } = await updateQuery.select();
+
         if (updateErr) {
+          console.error("DB Update Failed:", updateErr);
           throw new Error(`Failed to update asset ${item.id}: ${updateErr.message}`);
         }
 
+        if (!updatedRows || updatedRows.length === 0) {
+          console.error("Zero rows updated! Potential RLS or organization_id mismatch for asset:", item.id);
+          throw new Error("העדכון נכשל: הכלי לא נמצא או שנחסם עקב הרשאות (0 שורות עודכנו).");
+        }
+
         // Insert into custody_ledger
-        const { error: ledgerErr } = await supabase.from('custody_ledger').insert({
+        const { error: ledgerErr } = await client.from('custody_ledger').insert({
           asset_id: item.id,
           action: 'CHECKOUT',
           performed_by: workerName,
@@ -663,6 +680,30 @@ export async function bulkCheckoutAssetAction(
         if (ledgerErr) {
           throw new Error(`Failed to log custody ledger: ${ledgerErr.message}`);
         }
+
+        const whRaw = (item as unknown as { warehouses?: unknown }).warehouses;
+        const whObj = (Array.isArray(whRaw) ? whRaw[0] : whRaw) as Record<string, unknown> || {};
+        const tmRaw = (item as unknown as { tool_models?: unknown }).tool_models;
+        const tmObj = (Array.isArray(tmRaw) ? tmRaw[0] : tmRaw) as Record<string, unknown> || {};
+        updatedAssets.push({
+          id: item.id,
+          qrCode: (item as any).qr_code || `TOOL-${item.id.slice(0, 6).toUpperCase()}`,
+          qr_code: (item as any).qr_code || `TOOL-${item.id.slice(0, 6).toUpperCase()}`,
+          status: 'checked_out',
+          condition: ((item as any).condition as 'excellent' | 'good' | 'needs_repair' | 'retired') || 'good',
+          currentAssignedWorker: workerName,
+          current_assigned_worker: workerName,
+          currentWarehouseId: (item as any).current_warehouse_id || 'wh-main-01',
+          current_warehouse_id: (item as any).current_warehouse_id || 'wh-main-01',
+          warehouseName: (whObj.name as string) || "מחסן ראשי",
+          warehouseCode: (whObj.code as string) || 'CDB-01',
+          toolName: ((item as any).name as string) || (tmObj.name as string) || 'כלי שנופק',
+          brand: ((item as any).brand as string) || (tmObj.brand as string) || 'Standard',
+          modelNumber: ((item as any).model_number as string) || (tmObj.model_number as string) || null,
+          version: nextVersion,
+          expectedReturnDate,
+          accessories: itemAccessories,
+        });
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Database bulk checkout error';
@@ -860,9 +901,10 @@ export async function checkinAssetAction(
 
   if (isSupabaseConfigured()) {
     try {
-      const { data: currentAsset, error: fetchErr } = await supabase
+      const client = supabaseAdmin || supabase;
+      const { data: currentAsset, error: fetchErr } = await client
         .from('assets')
-        .select('id, version, organization_id')
+        .select('id, version, organization_id, qr_code, name, brand, model_number, condition, current_warehouse_id, warehouses(name, code)')
         .eq('id', assetId)
         .maybeSingle();
 
@@ -888,22 +930,36 @@ export async function checkinAssetAction(
 
       const nextVersion = (currentAsset.version || 1) + 1;
 
-      const { error: updateErr } = await supabase
+      const updateQuery = client
         .from('assets')
         .update({
           status: newStatus,
           current_assigned_worker: null,
           condition,
           version: nextVersion,
+          organization_id: orgId,
+          updated_at: new Date().toISOString(),
         })
         .eq('id', assetId);
 
+      if (orgId && orgId !== DEFAULT_ORGANIZATION.id) {
+        updateQuery.eq('organization_id', orgId);
+      }
+
+      const { data: updatedRows, error: updateErr } = await updateQuery.select();
+
       if (updateErr) {
+        console.error("DB Update Failed:", updateErr);
         return { success: false, error: `Failed to check in asset: ${updateErr.message}` };
       }
 
+      if (!updatedRows || updatedRows.length === 0) {
+        console.error("Zero rows updated! Potential RLS or organization_id mismatch for asset:", assetId);
+        return { success: false, error: "העדכון נכשל: הכלי לא נמצא או שנחסם עקב הרשאות (0 שורות עודכנו)." };
+      }
+
       // Record audit in custody_ledger
-      const { error: ledgerErr } = await supabase.from('custody_ledger').insert({
+      const { error: ledgerErr } = await client.from('custody_ledger').insert({
         asset_id: assetId,
         action: 'CHECKIN',
         performed_by: 'Field Agent',
@@ -915,8 +971,45 @@ export async function checkinAssetAction(
       });
 
       if (ledgerErr) {
-        return { success: false, error: `Failed to record check-in in ledger: ${ledgerErr.message}` };
+        console.warn('Custody ledger checkin warning:', ledgerErr);
       }
+
+      const whRaw = (currentAsset as unknown as { warehouses?: unknown }).warehouses;
+      const whObj = (Array.isArray(whRaw) ? whRaw[0] : whRaw) as Record<string, unknown> || {};
+      const returnedAsset: ScannedAssetDetails = {
+        id: currentAsset.id,
+        qrCode: (currentAsset as any).qr_code || `TOOL-${currentAsset.id.slice(0, 6).toUpperCase()}`,
+        qr_code: (currentAsset as any).qr_code || `TOOL-${currentAsset.id.slice(0, 6).toUpperCase()}`,
+        status: newStatus,
+        condition: condition as any,
+        currentAssignedWorker: null,
+        current_assigned_worker: null,
+        currentWarehouseId: (currentAsset as any).current_warehouse_id || 'wh-main-01',
+        current_warehouse_id: (currentAsset as any).current_warehouse_id || 'wh-main-01',
+        warehouseName: (whObj.name as string) || "מחסן ראשי",
+        warehouseCode: (whObj.code as string) || 'CDB-01',
+        toolName: (currentAsset as any).name || 'כלי עבודה',
+        brand: (currentAsset as any).brand || '',
+        modelNumber: (currentAsset as any).model_number || null,
+        version: nextVersion,
+      };
+
+      try {
+        await clearDashboardCaches();
+        revalidatePath('/dashboard/warehouse');
+        revalidatePath('/dashboard/manager');
+      } catch (e) {
+        console.warn('[checkinAssetAction] revalidatePath warning:', e);
+      }
+
+      return {
+        success: true,
+        message:
+          newStatus === 'maintenance'
+            ? 'הכלי הוחזר והועבר ישירות לסטטוס בבדיקה / תיקון.'
+            : 'הכלי הוחזר למחסן וסומן כזמין במלאי.',
+        asset: returnedAsset,
+      };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Database error';
       return { success: false, error: msg };
@@ -1389,20 +1482,31 @@ export async function transferAssetAction(
         ? (currentAsset.status === 'in_transit' ? 'available' : (currentAsset.status || 'available'))
         : 'in_transit';
 
-      const { error: updateErr } = await supabaseAdmin
+      const updateQuery = supabaseAdmin
         .from('assets')
         .update({
           current_warehouse_id: targetWarehouseId,
           status: targetStatus,
           version: nextVersion,
+          organization_id: orgId,
           updated_at: new Date().toISOString(),
         })
-        .eq('id', assetId)
-        .eq('organization_id', orgId);
+        .eq('id', assetId);
+
+      if (orgId && orgId !== DEFAULT_ORGANIZATION.id) {
+        updateQuery.eq('organization_id', orgId);
+      }
+
+      const { data: updatedRows, error: updateErr } = await updateQuery.select();
 
       if (updateErr) {
         console.error("Transfer DB Error:", updateErr);
         return { success: false, error: `Failed to transfer asset: ${updateErr.message}` };
+      }
+
+      if (!updatedRows || updatedRows.length === 0) {
+        console.error("Zero rows updated for asset:", assetId);
+        return { success: false, error: "העדכון נכשל: הכלי לא נמצא או שנחסם עקב הרשאות (0 שורות עודכנו)." };
       }
 
       // Record audit in custody_ledger
@@ -1583,22 +1687,73 @@ export async function toggleAssetLockAction(
 ): Promise<CustodyActionResult> {
   if (isSupabaseConfigured()) {
     try {
-      await supabase
+      const client = supabaseAdmin || supabase;
+      const { data: updatedRows, error: updateErr } = await client
         .from('assets')
         .update({
           is_locked: isLocked,
           lock_reason: isLocked ? lockReason || 'נעול מנהלית' : null,
+          updated_at: new Date().toISOString(),
         })
-        .eq('id', assetId);
+        .eq('id', assetId)
+        .select('id, name, brand, model_number, qr_code, status, is_locked, lock_reason, condition, current_warehouse_id, current_assigned_worker, version, warehouses(name, code)');
 
-      await supabase.from('custody_ledger').insert({
+      if (updateErr) {
+        console.error("DB Update Failed:", updateErr);
+        return { success: false, error: updateErr.message };
+      }
+
+      if (!updatedRows || updatedRows.length === 0) {
+        console.error("Zero rows updated for asset:", assetId);
+        return { success: false, error: "העדכון נכשל: הכלי לא נמצא או שנחסם עקב הרשאות (0 שורות עודכנו)." };
+      }
+
+      await client.from('custody_ledger').insert({
         asset_id: assetId,
         action: 'LOCK_STATUS',
         performed_by: 'מנהל מערכת',
         notes: isLocked ? `נעילת כלי: ${lockReason || 'ללא סיבה'}` : 'שחרור נעילת כלי',
       });
+
+      const row = updatedRows[0];
+      const whRaw = (row as any).warehouses;
+      const whObj = (Array.isArray(whRaw) ? whRaw[0] : whRaw) || {};
+      const returnAsset: ScannedAssetDetails = {
+        id: row.id,
+        qrCode: row.qr_code || '',
+        status: row.status,
+        condition: row.condition || 'good',
+        currentAssignedWorker: row.current_assigned_worker || null,
+        currentWarehouseId: row.current_warehouse_id,
+        warehouseName: whObj.name || 'מחסן ראשי',
+        warehouseCode: whObj.code || 'WH',
+        toolName: row.name || 'כלי עבודה',
+        brand: row.brand || '',
+        modelNumber: row.model_number || null,
+        version: row.version || 1,
+        isLocked: row.is_locked,
+        lockReason: row.lock_reason,
+      };
+
+      try {
+        await clearDashboardCaches();
+        revalidatePath('/dashboard/warehouse');
+        revalidatePath('/dashboard/manager');
+      } catch (e) {
+        console.warn('revalidatePath warning:', e);
+      }
+
+      return {
+        success: true,
+        message: isLocked
+          ? 'הכלי ננעל בהצלחה להוצאה מהמחסן.'
+          : 'נעילת הכלי שוחררה בהצלחה - הכלי זמין להוצאה.',
+        asset: returnAsset,
+      };
     } catch (err) {
       console.warn('Database error in toggleAssetLockAction:', err);
+      const msg = err instanceof Error ? err.message : 'Database error';
+      return { success: false, error: msg };
     }
   }
 
@@ -1649,21 +1804,71 @@ export async function renewSafetyInspectionAction(
 ): Promise<CustodyActionResult> {
   if (isSupabaseConfigured()) {
     try {
-      await supabase
+      const client = supabaseAdmin || supabase;
+      const { data: updatedRows, error: updateErr } = await client
         .from('assets')
         .update({
           safety_inspection_due: nextDueDate,
+          updated_at: new Date().toISOString(),
         })
-        .eq('id', assetId);
+        .eq('id', assetId)
+        .select('id, name, brand, model_number, qr_code, status, is_locked, lock_reason, condition, current_warehouse_id, current_assigned_worker, version, safety_inspection_due, warehouses(name, code)');
 
-      await supabase.from('custody_ledger').insert({
+      if (updateErr) {
+        console.error("DB Update Failed:", updateErr);
+        return { success: false, error: updateErr.message };
+      }
+
+      if (!updatedRows || updatedRows.length === 0) {
+        console.error("Zero rows updated for asset:", assetId);
+        return { success: false, error: "העדכון נכשל: הכלי לא נמצא או שנחסם עקב הרשאות (0 שורות עודכנו)." };
+      }
+
+      await client.from('custody_ledger').insert({
         asset_id: assetId,
         action: 'SAFETY_INSPECTION',
         performed_by: inspectedBy || 'בודק בטיחות מוסמך',
         notes: `חידוש בדיקת בטיחות תקופתית עד ${nextDueDate}`,
       });
+
+      const row = updatedRows[0];
+      const whRaw = (row as any).warehouses;
+      const whObj = (Array.isArray(whRaw) ? whRaw[0] : whRaw) || {};
+      const returnAsset: ScannedAssetDetails = {
+        id: row.id,
+        qrCode: row.qr_code || '',
+        status: row.status,
+        condition: row.condition || 'good',
+        currentAssignedWorker: row.current_assigned_worker || null,
+        currentWarehouseId: row.current_warehouse_id,
+        warehouseName: whObj.name || 'מחסן ראשי',
+        warehouseCode: whObj.code || 'WH',
+        toolName: row.name || 'כלי עבודה',
+        brand: row.brand || '',
+        modelNumber: row.model_number || null,
+        version: row.version || 1,
+        isLocked: row.is_locked,
+        lockReason: row.lock_reason,
+        safetyInspectionDue: row.safety_inspection_due,
+      };
+
+      try {
+        await clearDashboardCaches();
+        revalidatePath('/dashboard/warehouse');
+        revalidatePath('/dashboard/manager');
+      } catch (e) {
+        console.warn('revalidatePath warning:', e);
+      }
+
+      return {
+        success: true,
+        message: `תוקף בדיקת הבטיחות חודש בהצלחה עד ${new Date(nextDueDate).toLocaleDateString('he-IL')}.`,
+        asset: returnAsset,
+      };
     } catch (err) {
       console.warn('Database error in renewSafetyInspectionAction:', err);
+      const msg = err instanceof Error ? err.message : 'Database error';
+      return { success: false, error: msg };
     }
   }
 
@@ -1710,14 +1915,27 @@ export async function reserveAssetAction(
 ): Promise<CustodyActionResult> {
   if (isSupabaseConfigured()) {
     try {
-      await supabase
+      const client = supabaseAdmin || supabase;
+      const { data: updatedRows, error: updateErr } = await client
         .from('assets')
         .update({
           reservation,
+          updated_at: new Date().toISOString(),
         })
-        .eq('id', assetId);
+        .eq('id', assetId)
+        .select('id, name, brand, model_number, qr_code, status, is_locked, lock_reason, condition, current_warehouse_id, current_assigned_worker, version, reservation, warehouses(name, code)');
 
-      await supabase.from('custody_ledger').insert({
+      if (updateErr) {
+        console.error("DB Update Failed:", updateErr);
+        return { success: false, error: updateErr.message };
+      }
+
+      if (!updatedRows || updatedRows.length === 0) {
+        console.error("Zero rows updated for asset:", assetId);
+        return { success: false, error: "העדכון נכשל: הכלי לא נמצא או שנחסם עקב הרשאות (0 שורות עודכנו)." };
+      }
+
+      await client.from('custody_ledger').insert({
         asset_id: assetId,
         action: 'CHECKIN',
         performed_by: reservation?.reservedBy || 'מנהל פרויקט',
@@ -1725,8 +1943,47 @@ export async function reserveAssetAction(
           ? `שריון כלי לפרויקט ${reservation.projectName} לתאריך ${reservation.reservedForDate}`
           : 'ביטול שריון כלי',
       });
+
+      const row = updatedRows[0];
+      const whRaw = (row as any).warehouses;
+      const whObj = (Array.isArray(whRaw) ? whRaw[0] : whRaw) || {};
+      const returnAsset: ScannedAssetDetails = {
+        id: row.id,
+        qrCode: row.qr_code || '',
+        status: row.status,
+        condition: row.condition || 'good',
+        currentAssignedWorker: row.current_assigned_worker || null,
+        currentWarehouseId: row.current_warehouse_id,
+        warehouseName: whObj.name || 'מחסן ראשי',
+        warehouseCode: whObj.code || 'WH',
+        toolName: row.name || 'כלי עבודה',
+        brand: row.brand || '',
+        modelNumber: row.model_number || null,
+        version: row.version || 1,
+        isLocked: row.is_locked,
+        lockReason: row.lock_reason,
+        reservation: row.reservation,
+      };
+
+      try {
+        await clearDashboardCaches();
+        revalidatePath('/dashboard/warehouse');
+        revalidatePath('/dashboard/manager');
+      } catch (e) {
+        console.warn('revalidatePath warning:', e);
+      }
+
+      return {
+        success: true,
+        message: reservation
+          ? `הכלי שוריין בהצלחה לפרויקט "${reservation.projectName}".`
+          : 'שריון הכלי בוטל בהצלחה.',
+        asset: returnAsset,
+      };
     } catch (err) {
       console.warn('Database error in reserveAssetAction:', err);
+      const msg = err instanceof Error ? err.message : 'Database error';
+      return { success: false, error: msg };
     }
   }
 
@@ -1761,25 +2018,65 @@ export async function reportAssetDamageAction(
 
   if (isSupabaseConfigured()) {
     try {
-      const { error: updateErr } = await supabase
+      const client = supabaseAdmin || supabase;
+      const { data: updatedRows, error: updateErr } = await client
         .from('assets')
         .update({
           status: 'maintenance',
           condition: 'needs_repair',
           updated_at: new Date().toISOString(),
         })
-        .eq('id', assetId);
+        .eq('id', assetId)
+        .select('id, name, brand, model_number, qr_code, status, condition, current_warehouse_id, current_assigned_worker, version, warehouses(name, code)');
 
       if (updateErr) {
+        console.error("DB Update Failed:", updateErr);
         return { success: false, error: `שגיאה בעדכון תקלה: ${updateErr.message}` };
       }
 
-      await supabase.from('custody_ledger').insert({
+      if (!updatedRows || updatedRows.length === 0) {
+        console.error("Zero rows updated for asset:", assetId);
+        return { success: false, error: "העדכון נכשל: הכלי לא נמצא או שנחסם עקב הרשאות (0 שורות עודכנו)." };
+      }
+
+      await client.from('custody_ledger').insert({
         asset_id: assetId,
         action: 'MAINTENANCE_IN',
         performed_by: reportedBy || 'עובד שטח',
         notes: `דיווח תקלה (${issueType}): ${notes || 'ללא הערות'}`,
       });
+
+      const row = updatedRows[0];
+      const whRaw = (row as any).warehouses;
+      const whObj = (Array.isArray(whRaw) ? whRaw[0] : whRaw) || {};
+      const returnAsset: ScannedAssetDetails = {
+        id: row.id,
+        qrCode: row.qr_code || '',
+        status: row.status,
+        condition: row.condition || 'needs_repair',
+        currentAssignedWorker: row.current_assigned_worker || null,
+        currentWarehouseId: row.current_warehouse_id,
+        warehouseName: whObj.name || 'מחסן ראשי',
+        warehouseCode: whObj.code || 'WH',
+        toolName: row.name || 'כלי בבדיקה',
+        brand: row.brand || '',
+        modelNumber: row.model_number || null,
+        version: row.version || 1,
+      };
+
+      try {
+        await clearDashboardCaches();
+        revalidatePath('/dashboard/warehouse');
+        revalidatePath('/dashboard/manager');
+      } catch (e) {
+        console.warn('revalidatePath warning:', e);
+      }
+
+      return {
+        success: true,
+        message: 'דיווח על תקלה נקלט בהצלחה. הכלי הועבר לסטטוס בבדיקה/תיקון.',
+        asset: returnAsset,
+      };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Database error';
       return { success: false, error: msg };
@@ -1833,25 +2130,65 @@ export async function retireAssetAction(
 
   if (isSupabaseConfigured()) {
     try {
-      const { error: updateErr } = await supabase
+      const client = supabaseAdmin || supabase;
+      const { data: updatedRows, error: updateErr } = await client
         .from('assets')
         .update({
           status: 'maintenance',
           condition: 'retired',
           updated_at: new Date().toISOString(),
         })
-        .eq('id', assetId);
+        .eq('id', assetId)
+        .select('id, name, brand, model_number, qr_code, status, condition, current_warehouse_id, current_assigned_worker, version, warehouses(name, code)');
 
       if (updateErr) {
+        console.error("DB Update Failed:", updateErr);
         return { success: false, error: `שגיאה בהשבתת כלי: ${updateErr.message}` };
       }
 
-      await supabase.from('custody_ledger').insert({
+      if (!updatedRows || updatedRows.length === 0) {
+        console.error("Zero rows updated for asset:", assetId);
+        return { success: false, error: "העדכון נכשל: הכלי לא נמצא או שנחסם עקב הרשאות (0 שורות עודכנו)." };
+      }
+
+      await client.from('custody_ledger').insert({
         asset_id: assetId,
         action: 'DECOMMISSION',
         performed_by: retiredBy || 'מנהל מערכת',
         notes: `השבתת כלי וגריעה ממלאי: ${reason}`,
       });
+
+      const row = updatedRows[0];
+      const whRaw = (row as any).warehouses;
+      const whObj = (Array.isArray(whRaw) ? whRaw[0] : whRaw) || {};
+      const returnAsset: ScannedAssetDetails = {
+        id: row.id,
+        qrCode: row.qr_code || '',
+        status: row.status,
+        condition: row.condition || 'retired',
+        currentAssignedWorker: row.current_assigned_worker || null,
+        currentWarehouseId: row.current_warehouse_id,
+        warehouseName: whObj.name || 'מחסן מרכזי - תל אביב',
+        warehouseCode: whObj.code || 'TLV-01',
+        toolName: row.name || 'כלי שהושבת',
+        brand: row.brand || '',
+        modelNumber: row.model_number || null,
+        version: row.version || 2,
+      };
+
+      try {
+        await clearDashboardCaches();
+        revalidatePath('/dashboard/warehouse');
+        revalidatePath('/dashboard/manager');
+      } catch (e) {
+        console.warn('revalidatePath warning:', e);
+      }
+
+      return {
+        success: true,
+        message: 'הכלי הושבת ונגרע מפעילות בהצלחה.',
+        asset: returnAsset,
+      };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Database error';
       return { success: false, error: msg };
@@ -1932,14 +2269,18 @@ export async function dispatchAssetWithSignatureAction(data: {
 
   if (isSupabaseConfigured()) {
     try {
-      const { data: dbAsset, error: assetErr } = await supabaseAdmin
+      let assetQuery = supabaseAdmin
         .from('assets')
         .select(
           'id, name, brand, model_number, qr_code, status, is_locked, lock_reason, safety_inspection_due, condition, organization_id, tool_models(name, brand, model_number)'
         )
-        .eq('id', assetId)
-        .eq('organization_id', orgId)
-        .maybeSingle();
+        .eq('id', assetId);
+
+      if (orgId && orgId !== DEFAULT_ORGANIZATION.id) {
+        assetQuery = assetQuery.eq('organization_id', orgId);
+      }
+
+      const { data: dbAsset, error: assetErr } = await assetQuery.maybeSingle();
 
       if (assetErr) {
         return { success: false, error: assetErr.message };
@@ -2023,19 +2364,30 @@ export async function dispatchAssetWithSignatureAction(data: {
   // 3. Update asset in Supabase
   if (isSupabaseConfigured()) {
     try {
-      const { error: updateErr } = await supabaseAdmin
+      const updateQuery = supabaseAdmin
         .from('assets')
         .update({
           status: 'checked_out',
           current_warehouse_id: targetWarehouseId,
           current_assigned_worker: workerName.trim(),
+          organization_id: orgId,
           updated_at: now,
         })
-        .eq('id', assetId)
-        .eq('organization_id', orgId);
+        .eq('id', assetId);
+
+      if (orgId && orgId !== DEFAULT_ORGANIZATION.id) {
+        updateQuery.eq('organization_id', orgId);
+      }
+
+      const { data: updatedRows, error: updateErr } = await updateQuery.select();
 
       if (updateErr) {
         return { success: false, error: `שגיאה בעדכון סטטוס כלי: ${updateErr.message}` };
+      }
+
+      if (!updatedRows || updatedRows.length === 0) {
+        console.error("Zero rows updated for asset in dispatch:", assetId);
+        return { success: false, error: "העדכון נכשל: הכלי לא נמצא או שנחסם עקב הרשאות (0 שורות עודכנו)." };
       }
 
       // 4. Insert custody_ledger entry

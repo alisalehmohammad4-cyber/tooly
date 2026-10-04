@@ -90,12 +90,12 @@ export async function getAuditHistory(
     // Enforce strict tenant isolation on Supabase query
     query = query.eq('organization_id', orgId);
 
-    const rawAction = (filters?.actionType || filters?.action || '').toUpperCase();
-    if (rawAction && rawAction !== 'ALL') {
-      if (rawAction === 'TRANSFERS' || rawAction === 'TRANSFER_INIT' || rawAction === 'TRANSFER_RECEIVE' || rawAction === 'DIRECT_TRANSFER') {
+    const actionType = filters?.actionType || filters?.action;
+    if (actionType && actionType.toUpperCase() !== 'ALL') {
+      if (actionType === 'TRANSFERS') {
         query = query.in('action', ['TRANSFER_INIT', 'TRANSFER_RECEIVE', 'DIRECT_TRANSFER']);
       } else {
-        query = query.eq('action', rawAction);
+        query = query.eq('action', actionType);
       }
     }
 

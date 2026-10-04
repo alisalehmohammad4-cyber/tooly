@@ -324,7 +324,7 @@ export default function WarehouseToolsModal({
                   : 'bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100'
               }`}
             >
-              <span>🟢 זמין</span>
+              <span>🟢 זמינים במחסן</span>
               <span
                 className={`px-1.5 py-0.2 rounded-md text-[10px] ${
                   statusFilter === 'available'
@@ -341,16 +341,16 @@ export default function WarehouseToolsModal({
               onClick={() => setStatusFilter('checked_out')}
               className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
                 statusFilter === 'checked_out'
-                  ? 'bg-amber-600 text-white shadow-sm shadow-amber-900/20'
-                  : 'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100'
+                  ? 'bg-blue-600 text-white shadow-sm shadow-blue-900/20'
+                  : 'bg-blue-50 text-blue-800 border border-blue-200 hover:bg-blue-100'
               }`}
             >
-              <span>🟠 בשימוש</span>
+              <span>🔵 בשימוש בשטח</span>
               <span
                 className={`px-1.5 py-0.2 rounded-md text-[10px] ${
                   statusFilter === 'checked_out'
-                    ? 'bg-amber-800 text-amber-100'
-                    : 'bg-amber-100/80 text-amber-800'
+                    ? 'bg-blue-800 text-blue-100'
+                    : 'bg-blue-100/80 text-blue-800'
                 }`}
               >
                 {statusCounts.checkedOut}
@@ -366,7 +366,7 @@ export default function WarehouseToolsModal({
                   : 'bg-rose-50 text-rose-800 border border-rose-200 hover:bg-rose-100'
               }`}
             >
-              <span>🔴 בתיקון</span>
+              <span>🔴 בתיקון / תקלה</span>
               <span
                 className={`px-1.5 py-0.2 rounded-md text-[10px] ${
                   statusFilter === 'maintenance'
@@ -489,15 +489,15 @@ export default function WarehouseToolsModal({
                           isAvailable
                             ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
                             : isCheckedOut
-                            ? 'bg-amber-50 text-amber-800 border-amber-200'
+                            ? 'bg-blue-50 text-blue-800 border-blue-200'
                             : isMaintenance
                             ? 'bg-rose-50 text-rose-800 border-rose-200'
                             : 'bg-slate-100 text-slate-700 border-slate-200'
                         }`}
                       >
-                        {isAvailable && <span>🟢 זמין</span>}
-                        {isCheckedOut && <span>🟠 בשימוש</span>}
-                        {isMaintenance && <span>🔴 בתיקון</span>}
+                        {isAvailable && <span>🟢 זמין במחסן</span>}
+                        {isCheckedOut && <span>🔵 בשימוש בשטח</span>}
+                        {isMaintenance && <span>🔴 בתיקון / תקלה</span>}
                         {!isAvailable && !isCheckedOut && !isMaintenance && (
                           <span>⚪ מושבת</span>
                         )}

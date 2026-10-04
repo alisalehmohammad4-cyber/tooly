@@ -284,6 +284,9 @@ export default function ManualCheckinModal({
         return;
       }
 
+      // Optimistically remove from checked out list immediately:
+      setCheckedOutList((prev) => prev.filter((item) => item.id !== selectedAsset.id));
+
       // Force Next.js to re-fetch Server Components and update all tables/metrics:
       router.refresh();
 
@@ -586,7 +589,7 @@ export default function ManualCheckinModal({
             /* SELECTION STEP: TABS (Camera Scanner vs Manual Omnisearch) */
             <div className="space-y-4">
               {/* TOP TAB TOGGLE */}
-              <div className="flex overflow-x-auto no-scrollbar py-1 gap-2 border-b border-slate-200 sm:border sm:border-slate-200 sm:p-1 sm:bg-slate-100 sm:rounded-2xl">
+              <div className="flex flex-nowrap overflow-x-auto no-scrollbar py-1 gap-2 border-b border-slate-200 sm:border sm:border-slate-200 sm:p-1 sm:bg-slate-100 sm:rounded-2xl">
                 {/* Tab 1: Scanner */}
                 <button
                   type="button"

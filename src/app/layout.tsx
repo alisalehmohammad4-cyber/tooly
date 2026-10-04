@@ -6,6 +6,7 @@ import { AuthProvider } from "@/context/AuthContext";
 import { OfflineSyncProvider } from "@/context/OfflineSyncContext";
 import { LanguageProvider } from "@/context/LanguageContext";
 import PinPadModal from "@/components/common/PinPadModal";
+import { Analytics } from "@vercel/analytics/next";
 
 const heebo = Heebo({
   subsets: ["hebrew", "latin"],
@@ -51,6 +52,7 @@ export default function RootLayout({
             </OfflineSyncProvider>
           </AuthProvider>
         </LanguageProvider>
+        <Analytics />
       </body>
     </html>
   );

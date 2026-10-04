@@ -333,7 +333,7 @@ export default function ChiefNotesFeedView({
         </div>
 
         {/* Action Type Filter Chips */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+        <div className="flex flex-nowrap items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
           <button
             type="button"
             onClick={() => setSelectedType('ALL')}

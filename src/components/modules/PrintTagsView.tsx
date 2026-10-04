@@ -41,37 +41,22 @@ export function printThermalLabelsDirectly(labelsData: Array<{
 }>) {
   if (typeof window === 'undefined') return;
 
-  const printWindow = window.open('', '_blank', 'width=800,height=600');
+  const printWindow = window.open('', '_blank', 'width=700,height=500');
   if (!printWindow) {
-    alert('אנא אשר חלונות קופצים (Pop-ups) כדי להדפיס');
+    alert('אנא אשר חלונות קופצים (Pop-ups) להדפסה');
     return;
   }
 
-  const labelsHtml = labelsData.map(label => `
-    <div class="label-sheet">
-      <div class="qr-col">
-        <img src="${label.qrCodeDataUrl}" alt="QR" class="qr-img" />
-        <span class="qr-tag">${label.tagNumber}</span>
-      </div>
-      <div class="info-col">
-        <div class="company-title">${label.companyName || 'TOOLY'}</div>
-        <div class="tool-name">${label.toolName}</div>
-        <div class="tool-brand">${label.brand || ''}</div>
-        <div class="tag-number">${label.tagNumber}</div>
-      </div>
-    </div>
-  `).join('');
-
-  printWindow.document.write(`
+  const htmlContent = `
     <!DOCTYPE html>
     <html dir="rtl" lang="he">
     <head>
       <meta charset="utf-8" />
-      <title>הדפסת תגיות TSC</title>
+      <title>TSC Print</title>
       <style>
         @page {
-          size: 60mm 30mm landscape; /* Some drivers prefer explicit landscape */
-          margin: 0mm !important;
+          size: 60mm 30mm;
+          margin: 0;
         }
         * {
           box-sizing: border-box;
@@ -81,107 +66,115 @@ export function printThermalLabelsDirectly(labelsData: Array<{
           print-color-adjust: exact;
         }
         html, body {
-          width: 60mm !important;
-          height: 28mm !important; /* 28mm safety height to prevent overflowing to next sticker */
-          margin: 0 !important;
-          padding: 0 !important;
-          overflow: hidden !important;
-          background: #fff;
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+          width: 60mm;
+          height: 30mm;
+          margin: 0;
+          padding: 0;
+          background: #ffffff;
+          overflow: hidden;
+          font-family: Arial, Helvetica, sans-serif;
         }
-        .label-sheet {
-          width: 58mm !important;
-          height: 28mm !important;
-          max-width: 58mm !important;
-          max-height: 28mm !important;
+        .sticker {
+          position: relative;
+          width: 60mm;
+          height: 29mm; /* 29mm strictly fits inside 30mm with 1mm safety gap */
+          max-height: 29mm;
           page-break-after: always;
           page-break-inside: avoid;
-          display: flex !important;
-          flex-direction: row-reverse !important; /* QR on one side, Text on the other */
-          align-items: center !important;
-          justify-content: space-between !important;
-          padding: 1.5mm !important;
-          box-sizing: border-box !important;
-          overflow: hidden !important;
+          overflow: hidden;
+          background: #fff;
         }
-        .qr-col {
-          width: 20mm !important;
+        /* Fixed absolute layout: QR on Right (RTL), Details on Left */
+        .qr-box {
+          position: absolute;
+          top: 3mm;
+          right: 3mm;
+          width: 22mm;
+          height: 23mm;
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: center;
         }
-        .qr-img {
-          width: 17mm !important;
-          height: 17mm !important;
+        .qr-box img {
+          width: 19mm;
+          height: 19mm;
           object-fit: contain;
         }
-        .qr-tag {
+        .qr-box span {
           font-size: 7px;
           font-weight: bold;
           font-family: monospace;
           margin-top: 1mm;
-          line-height: 1;
+          color: #000;
         }
-        .info-col {
-          width: 35mm !important;
+        .details-box {
+          position: absolute;
+          top: 3mm;
+          left: 3mm;
+          width: 31mm;
+          height: 23mm;
+          text-align: right;
           display: flex;
           flex-direction: column;
-          justify-content: center;
-          text-align: right;
+          justify-content: space-between;
           overflow: hidden;
         }
-        .company-title {
+        .org-name {
           font-size: 8px;
           font-weight: 800;
           color: #333;
-          text-transform: uppercase;
-          line-height: 1.1;
-        }
-        .tool-name {
-          font-size: 9px;
-          font-weight: bold;
-          color: #000;
-          line-height: 1.1;
-          max-height: 10mm;
+          white-space: nowrap;
           overflow: hidden;
-          margin: 0.5mm 0;
+          text-overflow: ellipsis;
         }
-        .tool-brand {
-          font-size: 8px;
-          color: #555;
-          line-height: 1.1;
+        .tool-title {
+          font-size: 9px;
+          font-weight: 900;
+          color: #000;
+          line-height: 1.15;
+          max-height: 11mm;
+          overflow: hidden;
+          word-break: break-word;
         }
-        .tag-number {
+        .tag-badge {
           font-size: 13px;
           font-weight: 900;
           font-family: monospace;
           color: #000;
-          margin-top: 0.5mm;
           letter-spacing: 0.5px;
-          line-height: 1.1;
         }
       </style>
     </head>
     <body>
-      ${labelsHtml}
+      ${labelsData.map(l => `
+        <div class="sticker">
+          <div class="qr-box">
+            <img src="${l.qrCodeDataUrl}" alt="QR" />
+            <span>${l.tagNumber}</span>
+          </div>
+          <div class="details-box">
+            <div class="org-name">${l.companyName || 'TOOLY'}</div>
+            <div class="tool-title">${l.toolName}${l.brand ? '(' + l.brand + ')' : ''}</div>
+            <div class="tag-badge">${l.tagNumber}</div>
+          </div>
+        </div>
+      `).join('')}
       <script>
-        function triggerPrint() {
+        window.onload = function() {
           window.focus();
-          window.print();
-          window.onafterprint = function() { window.close(); };
-        }
-        if (document.readyState === 'complete') {
-          setTimeout(triggerPrint, 200);
-        } else {
-          window.onload = function() {
-            setTimeout(triggerPrint, 200);
-          };
-        }
+          setTimeout(function() {
+            window.print();
+            window.onafterprint = function() { window.close(); };
+          }, 250);
+        };
       </script>
     </body>
     </html>
-  `);
+  `;
+
+  printWindow.document.open();
+  printWindow.document.write(htmlContent);
   printWindow.document.close();
 }
 
@@ -208,21 +201,16 @@ function renderLabelToCanvasDataUrl(label: {
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      // Light dashed border
-      ctx.strokeStyle = '#cccccc';
-      ctx.lineWidth = 2;
-      ctx.setLineDash([8, 6]);
-      ctx.strokeRect(12, 12, canvas.width - 24, canvas.height - 24);
-      ctx.setLineDash([]); // reset dash
-
       const qrImg = new Image();
       qrImg.crossOrigin = 'anonymous';
       qrImg.onload = () => {
-        // Draw QR code on the left side
+        // Draw QR code on the right side (matches absolute print layout)
         const qrSize = 224;
-        const qrX = 36;
-        const qrY = 32;
+        const qrX = canvas.width - qrSize - 35;
+        const qrY = 35;
+        ctx.imageSmoothingEnabled = false;
         ctx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
+        ctx.imageSmoothingEnabled = true;
 
         // QR Tag Number under QR
         ctx.fillStyle = '#000000';
@@ -231,72 +219,29 @@ function renderLabelToCanvasDataUrl(label: {
         ctx.direction = 'ltr';
         ctx.fillText(label.tagNumber, qrX + qrSize / 2, qrY + qrSize + 26);
 
-        // Right side info (RTL text)
-        const rightMargin = canvas.width - 36;
+        // Details on the left (RTL text)
+        const detailsRight = qrX - 25;
         ctx.direction = 'rtl';
         ctx.textAlign = 'right';
 
         // 1. Company Name
         ctx.fillStyle = '#222222';
-        ctx.font = '800 24px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif';
+        ctx.font = '800 24px Arial, Helvetica, sans-serif';
         const compName = label.companyName || 'TOOLY';
-        ctx.fillText(compName, rightMargin, 62);
+        ctx.fillText(compName, detailsRight, 65);
 
-        if (label.isReprint) {
-          ctx.fillStyle = '#fef3c7';
-          ctx.fillRect(qrX + qrSize + 24, 40, 80, 28);
-          ctx.strokeStyle = '#f59e0b';
-          ctx.strokeRect(qrX + qrSize + 24, 40, 80, 28);
-          ctx.fillStyle = '#92400e';
-          ctx.font = 'bold 16px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif';
-          ctx.textAlign = 'center';
-          ctx.fillText('חלופית', qrX + qrSize + 24 + 40, 60);
-          ctx.textAlign = 'right';
-        }
+        // 2. Tool Title + Brand
+        ctx.fillStyle = '#000000';
+        ctx.font = '900 26px Arial, Helvetica, sans-serif';
+        const toolDisplayName = `${label.toolName || 'ציוד מבוקר'}${label.brand ? ' (' + label.brand + ')' : ''}`;
+        ctx.fillText(toolDisplayName.slice(0, 32), detailsRight, 130);
 
-        // Divider under company name
-        ctx.strokeStyle = '#e2e8f0';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.moveTo(qrX + qrSize + 24, 76);
-        ctx.lineTo(rightMargin, 76);
-        ctx.stroke();
-
-        // 2. Tool Name
-        ctx.fillStyle = '#0f172a';
-        ctx.font = 'bold 26px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif';
-        const toolDisplayName = label.toolName || 'ציוד מבוקר';
-        ctx.fillText(toolDisplayName.slice(0, 32), rightMargin, 118);
-
-        // 3. Brand / Model
-        ctx.fillStyle = '#475569';
-        ctx.font = '600 20px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif';
-        const brandText = label.brand || 'ציוד מקצועי';
-        ctx.fillText(brandText.slice(0, 28), rightMargin, 156);
-
-        // 4. Large bold Tag Number (Monospace)
+        // 3. Large bold Tag Number (Monospace)
         ctx.fillStyle = '#020617';
         ctx.font = '900 48px monospace';
         ctx.direction = 'ltr';
         ctx.textAlign = 'right';
-        ctx.fillText(label.tagNumber, rightMargin, 230);
-
-        // Divider above footer
-        ctx.strokeStyle = '#f1f5f9';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.moveTo(qrX + qrSize + 24, 252);
-        ctx.lineTo(rightMargin, 252);
-        ctx.stroke();
-
-        // 5. Micro Footer subtext
-        ctx.direction = 'rtl';
-        ctx.font = '600 17px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif';
-        ctx.fillStyle = '#64748b';
-        const footerText = label.isReprint
-          ? 'מדבקה חלופית • סרוק לבדיקה'
-          : 'ציוד מבוקר • סרוק לבדיקה';
-        ctx.fillText(footerText, rightMargin, 286);
+        ctx.fillText(label.tagNumber, detailsRight, 240);
 
         resolve(canvas.toDataURL('image/png'));
       };
@@ -643,13 +588,13 @@ export default function PrintTagsView() {
       {/* Global Print-specific CSS for TSC Thermal 60x30 mm */}
       <style jsx global>{`
         @page {
-          size: 60mm 30mm landscape;
-          margin: 0mm !important;
+          size: 60mm 30mm;
+          margin: 0;
         }
         @media print {
           @page {
-            size: 60mm 30mm landscape; /* Strictly 60mm Width by 30mm Height */
-            margin: 0mm !important;
+            size: 60mm 30mm;
+            margin: 0;
           }
           html,
           body {
@@ -715,7 +660,7 @@ export default function PrintTagsView() {
       <div className="print:hidden max-w-4xl mx-auto px-4 py-4 space-y-4">
 
         {/* Mode Selector Tabs */}
-        <div className="flex overflow-x-auto no-scrollbar py-1 gap-2 border-b border-slate-200 sm:border sm:border-slate-200 sm:bg-slate-100/80 sm:p-1.5 sm:rounded-2xl">
+        <div className="flex flex-nowrap overflow-x-auto no-scrollbar py-1 gap-2 border-b border-slate-200 sm:border sm:border-slate-200 sm:bg-slate-100/80 sm:p-1.5 sm:rounded-2xl">
           <button
             type="button"
             onClick={() => setActiveTab('batch')}
@@ -763,7 +708,7 @@ export default function PrintTagsView() {
                   title="הורד קובץ PDF למדבקות (60×30 מ״מ)"
                 >
                   <FileDown className="w-4 h-4 stroke-[2.5]" />
-                  <span>{isExportingPdf ? 'מייצר PDF...' : '📄 הורד קובץ PDF למדבקות (60×30 מ״מ)'}</span>
+                  <span>{isExportingPdf ? 'מייצר PDF...' : 'הורד קובץ PDF למדבקות (60×30 מ״מ)'}</span>
                 </button>
 
                 <button
@@ -964,11 +909,11 @@ export default function PrintTagsView() {
                     type="button"
                     onClick={handleDownloadPdf}
                     disabled={isGenerating || tags.length === 0 || isExportingPdf}
-                    className="min-h-[48px] px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-md active:scale-95 transition-all cursor-pointer disabled:opacity-50"
-                    title="הורד קובץ PDF למדבקה (60×30 מ״מ)"
+                    className="min-h-[48px] px-5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-md active:scale-95 transition-all cursor-pointer disabled:opacity-50"
+                    title="הורד קובץ PDF למדבקות (60×30 מ״מ)"
                   >
                     <FileDown className="w-4 h-4 stroke-[2.5]" />
-                    <span>{isExportingPdf ? 'מייצר PDF...' : '📄 הורד PDF (60×30 מ״מ)'}</span>
+                    <span>{isExportingPdf ? 'מייצר PDF...' : 'הורד קובץ PDF למדבקות (60×30 מ״מ)'}</span>
                   </button>
 
                   <button
@@ -1081,9 +1026,10 @@ export default function PrintTagsView() {
                     onClick={handleDownloadPdf}
                     disabled={isExportingPdf}
                     className="min-h-[44px] px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-black text-xs flex items-center gap-2 shadow-md cursor-pointer active:scale-95 transition-all"
+                    title="הורד קובץ PDF למדבקות (60×30 מ״מ)"
                   >
                     <FileDown className="w-4 h-4" />
-                    <span>{isExportingPdf ? 'מייצר...' : '📄 הורד PDF'}</span>
+                    <span>{isExportingPdf ? 'מייצר...' : 'הורד קובץ PDF למדבקות (60×30 מ״מ)'}</span>
                   </button>
                   <button
                     type="button"
@@ -1122,7 +1068,7 @@ export default function PrintTagsView() {
                 title="הורד קובץ PDF למדבקות (60×30 מ״מ)"
               >
                 <FileDown className="w-4 h-4 stroke-[2.5]" />
-                <span>{isExportingPdf ? 'מייצר PDF...' : '📄 הורד קובץ PDF (60×30 מ״מ)'}</span>
+                <span>{isExportingPdf ? 'מייצר PDF...' : 'הורד קובץ PDF למדבקות (60×30 מ״מ)'}</span>
               </button>
 
               <button
@@ -1145,9 +1091,10 @@ export default function PrintTagsView() {
               onClick={handleDownloadPdf}
               disabled={isExportingPdf}
               className="flex-1 min-h-[56px] rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-2xl active:scale-95 transition-all cursor-pointer border border-slate-700"
+              title="הורד קובץ PDF למדבקות (60×30 מ״מ)"
             >
               <FileDown className="w-4 h-4 stroke-[2.5]" />
-              <span>{isExportingPdf ? 'מייצר...' : '📄 הורד PDF'}</span>
+              <span>{isExportingPdf ? 'מייצר...' : 'הורד קובץ PDF למדבקות (60×30 מ״מ)'}</span>
             </button>
             <button
               type="button"
@@ -1180,22 +1127,23 @@ export default function PrintTagsView() {
             {tags.map((tag, idx) => (
               <div
                 key={`${tag.serial}-${idx}`}
-                dir="ltr"
+                dir="rtl"
                 className="print-label-page tsc-label bg-white border-2 border-slate-900 rounded-xl p-2.5 sm:p-3 aspect-[2/1] w-full max-w-[340px] mx-auto flex flex-row items-center justify-between gap-2.5 shadow-sm transition-all overflow-hidden print:shadow-none print:border-none print:rounded-none print:m-0 print:w-[60mm] print:h-[30mm] print:max-w-[60mm] print:max-h-[30mm] print:p-[1.5mm_2.5mm]"
               >
                 {/* Side 1: High-res QR code (approx 22mm x 22mm) */}
-                <div className="shrink-0 flex items-center justify-center p-0 bg-white">
+                <div className="shrink-0 flex flex-col items-center justify-center p-0 bg-white">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={tag.qrDataUrl}
                     alt={`QR Code for ${tag.serial}`}
                     className="tsc-qr-img aspect-square w-[72px] h-[72px] sm:w-[82px] sm:h-[82px] print:w-[22mm] print:h-[22mm] object-contain"
                   />
+                  <span className="text-[10px] font-bold font-mono text-slate-800" dir="ltr">{tag.serial}</span>
                 </div>
 
                 {/* Side 2: Company Name / Logo, Equipment / Tool Model, Large bold Tag Number */}
                 <div
-                  className="flex-1 flex flex-col justify-between h-full min-w-0 text-right pr-2 print:pr-[2mm] py-0.5 print:py-0 overflow-hidden"
+                  className="flex-1 flex flex-col justify-between h-full min-w-0 text-right pl-2 print:pl-[2mm] py-0.5 print:py-0 overflow-hidden"
                   dir="rtl"
                 >
                   {/* Micro header: Company Name / Logo */}

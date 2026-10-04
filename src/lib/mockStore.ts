@@ -43002,9 +43002,25 @@ export function getMockStorekeeperOperations(
           a.warehouseCode === currentWh.code
       );
 
+  const activeLoans: any[] = [];
+
   whAssets.forEach((asset) => {
     if (asset.status === 'available') availableCount++;
-    if (asset.status === 'checked_out') checkedOutCount++;
+    if (asset.status === 'checked_out') {
+      checkedOutCount++;
+      activeLoans.push({
+        assetId: asset.id,
+        toolName: asset.toolName,
+        brand: asset.brand,
+        modelNumber: asset.modelNumber,
+        qrCode: asset.qrCode,
+        workerName: asset.currentAssignedWorker || 'עובד שטח',
+        workerPhone: asset.workerPhone,
+        checkedOutAt: (asset as any).checkedOutAt || (asset as any).updated_at || new Date(Date.now() - 3 * 3600 * 1000).toISOString(),
+        expectedReturnDate: asset.expectedReturnDate || null,
+        checkoutNote: (asset as any).lastCheckoutNote || (asset as any).checkoutNote || 'ציוד הונפק לעובד שטח',
+      });
+    }
     if (asset.status === 'maintenance' || asset.status === 'needs_repair' || asset.isLocked) quarantinedCount++;
 
     if (asset.status === 'checked_out' && asset.expectedReturnDate) {
@@ -43085,6 +43101,7 @@ export function getMockStorekeeperOperations(
     quarantinedCount,
     availableCount,
     checkedOutCount,
+    activeLoans,
   };
 }
 

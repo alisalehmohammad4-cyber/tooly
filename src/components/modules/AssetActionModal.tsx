@@ -223,13 +223,22 @@ export default function AssetActionModal({
 
       if (!res.success) {
         setActionError(res.error);
+        alert(`שגיאה בניפוק הכלי: ${res.error || 'נסה שוב'}`);
         return;
       }
 
+      const updatedAsset: ScannedAssetDetails = res.asset || {
+        ...asset,
+        status: 'checked_out',
+        currentAssignedWorker: workerName.trim(),
+        current_assigned_worker: workerName.trim(),
+        expectedReturnDate: asset.expectedReturnDate || null,
+      };
+
       if (res.asset) await cacheAsset(res.asset);
-      onActionComplete(res.message, res.asset);
+      onActionComplete(res.message, updatedAsset);
       onClose();
-    } catch {
+    } catch (err: any) {
       // Fallback on network disconnect
       await enqueueSyncAction('checkout', checkoutPayload);
       const updated = await updateCachedAsset(asset.id, {
@@ -307,11 +316,20 @@ export default function AssetActionModal({
 
       if (!res.success) {
         setActionError(res.error);
+        alert(`שגיאה בהחזרת הכלי: ${res.error || 'נסה שוב'}`);
         return;
       }
 
+      const updatedAsset: ScannedAssetDetails = res.asset || {
+        ...asset,
+        status: newStatus as ScannedAssetDetails['status'],
+        condition: checkinCondition,
+        currentAssignedWorker: null,
+        current_assigned_worker: null,
+      };
+
       if (res.asset) await cacheAsset(res.asset);
-      onActionComplete(res.message, res.asset);
+      onActionComplete(res.message, updatedAsset);
       onClose();
     } catch {
       await enqueueSyncAction('checkin', checkinPayload);
@@ -822,7 +840,7 @@ export default function AssetActionModal({
           ) : (
             /* SUPERVISOR & ADMIN VIEW: FULL ACTION TABS */
             <>
-              <div className="flex overflow-x-auto no-scrollbar py-1 gap-1.5 p-2 bg-slate-100/80 border-b border-blue-100 text-xs font-black">
+              <div className="flex flex-nowrap overflow-x-auto no-scrollbar py-1 gap-1.5 p-2 bg-slate-100/80 border-b border-blue-100 text-xs font-black">
                 <button
                   type="button"
                   onClick={() => {
