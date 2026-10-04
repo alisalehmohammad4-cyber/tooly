@@ -541,11 +541,13 @@ export default function AssetActionModal({
 
       if (!res.success) {
         setActionError(res.error);
+        alert(`שגיאה בדיווח תקלה: ${res.error || 'נסה שוב'}`);
         return;
       }
 
       if (res.asset) await cacheAsset(res.asset);
       onActionComplete(res.message, res.asset);
+      router.refresh();
       onClose();
     } catch {
       await enqueueSyncAction('damage_report', damagePayload);
@@ -559,6 +561,7 @@ export default function AssetActionModal({
         status: 'maintenance',
         condition: 'needs_repair',
       });
+      router.refresh();
       onClose();
     }
   };
@@ -584,10 +587,12 @@ export default function AssetActionModal({
 
     if (!res.success) {
       setActionError(res.error);
+      alert(`שגיאה בהשבתת הכלי: ${res.error || 'נסה שוב'}`);
       return;
     }
 
     onActionComplete(res.message, res.asset);
+    router.refresh();
     onClose();
   };
 

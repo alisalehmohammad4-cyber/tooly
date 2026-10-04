@@ -77,7 +77,8 @@ interface SiteToolRequestRecord {
   assigned_asset_id?: string | null;
   source_warehouse_id?: string | null;
   rejection_reason?: string | null;
-  requested_by: string;
+  requester_name?: string;
+  requested_by?: string;
   requested_by_user_id?: string | null;
   decided_by?: string | null;
   decided_at?: string | null;
@@ -138,6 +139,7 @@ export async function createSiteToolRequestAction(data: {
     assigned_asset_id: null,
     source_warehouse_id: null,
     rejection_reason: null,
+    requester_name: requestedBy,
     requested_by: requestedBy,
     requested_by_user_id: user?.id || null,
     decided_by: null,
@@ -149,12 +151,27 @@ export async function createSiteToolRequestAction(data: {
 
   if (isSupabaseConfigured()) {
     try {
-      const { error } = await supabaseAdmin.from('site_tool_requests').insert(record);
+      const dbPayload = {
+        id: requestId,
+        organization_id: orgId,
+        requesting_warehouse_id: cleanWarehouseId,
+        tool_description: toolDesc,
+        quantity: Math.max(1, data.quantity || 1),
+        urgency: cleanUrgency,
+        reason: data.reason?.trim() || null,
+        status: 'PENDING',
+        requester_name: requestedBy,
+        created_at: now,
+        updated_at: now,
+      };
+      const { error } = await supabaseAdmin.from('site_tool_requests').insert(dbPayload);
       if (error) {
-        console.warn('[createSiteToolRequestAction] Supabase insert warning:', error);
+        console.error('[createSiteToolRequestAction] Supabase insert error:', error);
+        return { success: false, error: `שגיאה בשמירת הבקשה: ${error.message}` };
       }
-    } catch (err) {
-      console.warn('[createSiteToolRequestAction] Supabase error:', err);
+    } catch (err: any) {
+      console.error('[createSiteToolRequestAction] Supabase error:', err);
+      return { success: false, error: err?.message || 'שגיאה ברישום בקשת הציוד' };
     }
   }
 
@@ -327,7 +344,7 @@ export async function getSiteStorekeeperDashboardAction(
       sourceWarehouseId: r.source_warehouse_id,
       sourceWarehouseName: r.source_warehouse_id ? (whMap.get(r.source_warehouse_id) || r.source_warehouse_id) : null,
       rejectionReason: r.rejection_reason,
-      requestedBy: r.requested_by,
+      requestedBy: r.requester_name || r.requested_by || 'מחסנאי אתר',
       requestedByUserId: r.requested_by_user_id,
       decidedBy: r.decided_by,
       decidedAt: r.decided_at,
@@ -406,7 +423,7 @@ export async function getChiefStorekeeperInboxAction(): Promise<{
     assignedAssetId: r.assigned_asset_id,
     sourceWarehouseId: r.source_warehouse_id,
     rejectionReason: r.rejection_reason,
-    requestedBy: r.requested_by,
+    requestedBy: r.requester_name || r.requested_by || 'מחסנאי אתר',
     requestedByUserId: r.requested_by_user_id,
     decidedBy: r.decided_by,
     decidedAt: r.decided_at,
@@ -526,17 +543,40 @@ export async function resolveToolRequestAction(data: {
 
     const sourceWh = data.sourceWarehouseId || 'wh-central';
 
+    const updateFields = {
+      status: 'IN_TRANSIT' as const,
+      assigned_asset_id: data.assignedAssetId,
+      source_warehouse_id: sourceWh,
+      decided_by: decidedBy,
+      decided_at: now,
+      updated_at: now,
+    };
+
     // 1. Update asset status to 'in_transit'
     if (isSupabaseConfigured()) {
       try {
-        await supabaseAdmin
+        let assetQuery = supabaseAdmin
           .from('assets')
           .update({
             status: 'in_transit',
+            organization_id: orgId,
             updated_at: now,
           })
-          .eq('id', data.assignedAssetId)
-          .eq('organization_id', orgId);
+          .eq('id', data.assignedAssetId);
+
+        if (orgId && orgId !== DEFAULT_ORGANIZATION.id) {
+          assetQuery = assetQuery.eq('organization_id', orgId);
+        }
+
+        const { data: updatedAssets, error: assetErr } = await assetQuery.select();
+
+        if (assetErr || !updatedAssets || updatedAssets.length === 0) {
+          console.error('[resolveToolRequestAction] Failed to update asset:', assetErr);
+          return {
+            success: false,
+            error: assetErr?.message || 'עדכון סטטוס הכלי נכשל: הכלי לא נמצא או שנחסם (0 שורות עודכנו)',
+          };
+        }
 
         // 2. Log in custody ledger
         await supabaseAdmin.from('custody_ledger').insert({
@@ -547,8 +587,27 @@ export async function resolveToolRequestAction(data: {
           notes: `אושרה בקשת ציוד לאתר ${targetRecord.requesting_warehouse_id} (${data.requestId})`,
           created_at: now,
         });
-      } catch (err) {
-        console.warn('[resolveToolRequestAction] Supabase error during approval:', err);
+
+        // 3. Update request
+        const { data: updatedReqs, error: reqErr } = await supabaseAdmin
+          .from('site_tool_requests')
+          .update(updateFields)
+          .eq('id', data.requestId)
+          .select();
+
+        if (reqErr || !updatedReqs || updatedReqs.length === 0) {
+          console.error('[resolveToolRequestAction] Failed to update site tool request:', reqErr);
+          return {
+            success: false,
+            error: reqErr?.message || 'עדכון דרישת הציוד נכשל (0 שורות עודכנו)',
+          };
+        }
+      } catch (err: any) {
+        console.error('[resolveToolRequestAction] Supabase error during approval:', err);
+        return {
+          success: false,
+          error: err?.message || 'שגיאת שרת בעת אישור הדרישה',
+        };
       }
     }
 
@@ -562,28 +621,6 @@ export async function resolveToolRequestAction(data: {
         notes: `אושר שינוע ציוד לאתר`,
       }
     );
-
-    // Update request
-    const updateFields = {
-      status: 'IN_TRANSIT' as const,
-      assigned_asset_id: data.assignedAssetId,
-      source_warehouse_id: sourceWh,
-      decided_by: decidedBy,
-      decided_at: now,
-      updated_at: now,
-    };
-
-    if (isSupabaseConfigured()) {
-      try {
-        await supabaseAdmin
-          .from('site_tool_requests')
-          .update(updateFields)
-          .eq('id', data.requestId)
-          .eq('organization_id', orgId);
-      } catch (err) {
-        console.warn('[resolveToolRequestAction] Supabase request update error:', err);
-      }
-    }
 
     Object.assign(targetRecord, updateFields);
 
@@ -604,13 +641,24 @@ export async function resolveToolRequestAction(data: {
 
     if (isSupabaseConfigured()) {
       try {
-        await supabaseAdmin
+        const { data: updatedReqs, error: reqErr } = await supabaseAdmin
           .from('site_tool_requests')
           .update(updateFields)
           .eq('id', data.requestId)
-          .eq('organization_id', orgId);
-      } catch (err) {
-        console.warn('[resolveToolRequestAction] Supabase request reject error:', err);
+          .select();
+
+        if (reqErr || !updatedReqs || updatedReqs.length === 0) {
+          return {
+            success: false,
+            error: reqErr?.message || 'עדכון דרישת הציוד נכשל (0 שורות עודכנו)',
+          };
+        }
+      } catch (err: any) {
+        console.error('[resolveToolRequestAction] Supabase request reject error:', err);
+        return {
+          success: false,
+          error: err?.message || 'שגיאת שרת בעת דחיית הדרישה',
+        };
       }
     }
 
@@ -640,7 +688,7 @@ export async function confirmToolReceptionAction(
   if (isSupabaseConfigured()) {
     try {
       // 1. Mark request COMPLETED
-      await supabaseAdmin
+      const { data: updatedReqs, error: reqErr } = await supabaseAdmin
         .from('site_tool_requests')
         .update({
           status: 'COMPLETED',
@@ -648,18 +696,38 @@ export async function confirmToolReceptionAction(
           updated_at: now,
         })
         .eq('id', requestId)
-        .eq('organization_id', orgId);
+        .select();
+
+      if (reqErr || !updatedReqs || updatedReqs.length === 0) {
+        return {
+          success: false,
+          error: reqErr?.message || 'עדכון דרישת הציוד נכשל (0 שורות עודכנו)',
+        };
+      }
 
       // 2. Set asset status available & assign to site warehouse
-      await supabaseAdmin
+      let assetQuery = supabaseAdmin
         .from('assets')
         .update({
           status: 'available',
           current_warehouse_id: targetWarehouseId,
+          organization_id: orgId,
           updated_at: now,
         })
-        .eq('id', assetId)
-        .eq('organization_id', orgId);
+        .eq('id', assetId);
+
+      if (orgId && orgId !== DEFAULT_ORGANIZATION.id) {
+        assetQuery = assetQuery.eq('organization_id', orgId);
+      }
+
+      const { data: updatedAssets, error: assetErr } = await assetQuery.select();
+
+      if (assetErr || !updatedAssets || updatedAssets.length === 0) {
+        return {
+          success: false,
+          error: assetErr?.message || 'עדכון סטטוס הכלי נכשל: הכלי לא נמצא או שנחסם (0 שורות עודכנו)',
+        };
+      }
 
       // 3. Log TRANSFER_RECEIVE in custody ledger
       await supabaseAdmin.from('custody_ledger').insert({
@@ -670,8 +738,12 @@ export async function confirmToolReceptionAction(
         notes: `נקלט בהצלחה באתר היעד (${targetWarehouseId})`,
         created_at: now,
       });
-    } catch (err) {
-      console.warn('[confirmToolReceptionAction] Supabase error:', err);
+    } catch (err: any) {
+      console.error('[confirmToolReceptionAction] Supabase error:', err);
+      return {
+        success: false,
+        error: err?.message || 'שגיאת שרת בעת קליטת הכלי',
+      };
     }
   }
 

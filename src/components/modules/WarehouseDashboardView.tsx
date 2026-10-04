@@ -548,16 +548,21 @@ export default function WarehouseDashboardView({
         setInboxFeedback({ text: res.message || 'הבקשה עודכנה בהצלחה', type: 'success' });
         setRejectingSiteRequestId(null);
         setRejectReasonInput('');
+        setSiteRequestsInbox((prev) => prev.filter((r) => r.id !== requestId));
+        router.refresh();
         await loadChiefInbox();
         if (selectedWarehouseId !== 'all') {
           await loadSiteStorekeeperData(selectedWarehouseId);
         }
       } else {
+        alert(res.error || 'שגיאה בעדכון הבקשה');
         setInboxFeedback({ text: res.error || 'שגיאה בעדכון הבקשה', type: 'error' });
       }
     } catch (err) {
+      const msg = err instanceof Error ? err.message : 'שגיאת תקשורת';
+      alert(msg);
       setInboxFeedback({
-        text: err instanceof Error ? err.message : 'שגיאת תקשורת',
+        text: msg,
         type: 'error',
       });
     } finally {
@@ -578,14 +583,19 @@ export default function WarehouseDashboardView({
       );
       if (res.success) {
         setSiteActionFeedback({ text: res.message || 'הכלי נקלט בהצלחה במחסן האתר!', type: 'success' });
+        setSiteIncomingShipments((prev) => prev.filter((s) => s.id !== req.id));
+        router.refresh();
         await loadSiteStorekeeperData(selectedWarehouseId);
         await handleWarehouseChange(selectedWarehouseId);
       } else {
+        alert(res.error || 'שגיאה בקליטת הכלי');
         setSiteActionFeedback({ text: res.error || 'שגיאה בקליטת הכלי', type: 'error' });
       }
     } catch (err) {
+      const msg = err instanceof Error ? err.message : 'שגיאת תקשורת';
+      alert(msg);
       setSiteActionFeedback({
-        text: err instanceof Error ? err.message : 'שגיאת תקשורת',
+        text: msg,
         type: 'error',
       });
     } finally {
@@ -618,6 +628,7 @@ export default function WarehouseDashboardView({
         setRequestQuantity(1);
         setRequestUrgency('NORMAL');
         setRequestReason('');
+        router.refresh();
         await loadSiteStorekeeperData(selectedWarehouseId);
         if (isChiefOperations || isGeneralManager) {
           await loadChiefInbox();
@@ -627,11 +638,14 @@ export default function WarehouseDashboardView({
           setSiteRequestFeedback(null);
         }, 1500);
       } else {
+        alert(res.error || 'שגיאה בהגשת הבקשה');
         setSiteRequestFeedback({ text: res.error || 'שגיאה בהגשת הבקשה', type: 'error' });
       }
     } catch (err) {
+      const msg = err instanceof Error ? err.message : 'שגיאת תקשורת';
+      alert(msg);
       setSiteRequestFeedback({
-        text: err instanceof Error ? err.message : 'שגיאת תקשורת',
+        text: msg,
         type: 'error',
       });
     } finally {
@@ -1222,17 +1236,21 @@ export default function WarehouseDashboardView({
           text: res.message || 'ספירת המלאי אומתה בהצלחה',
           type: 'success',
         });
+        router.refresh();
         setTimeout(() => {
           setIsReconcileModalOpen(false);
         }, 1500);
       } else {
+        alert(res.error || 'שגיאה באימות ספירת מלאי');
         setReconcileFeedback({
           text: res.error || 'שגיאה באימות ספירת מלאי',
           type: 'error',
         });
       }
-    } catch {
-      setReconcileFeedback({ text: 'שגיאה באימות ספירת מלאי', type: 'error' });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'שגיאה באימות ספירת מלאי';
+      alert(msg);
+      setReconcileFeedback({ text: msg, type: 'error' });
     } finally {
       setIsReconciling(false);
     }
