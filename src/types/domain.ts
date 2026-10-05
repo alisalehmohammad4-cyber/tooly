@@ -1,3 +1,5 @@
+export type OrganizationStatus = 'active' | 'pending_approval' | 'rejected' | 'suspended';
+
 export interface Organization {
   id: string;
   name: string;
@@ -5,6 +7,15 @@ export interface Organization {
   serialPrefix: string;
   defaultCurrency: string;
   logoUrl?: string;
+  status?: OrganizationStatus;
+  contact_phone?: string;
+  contact_email?: string;
+  contactPhone?: string;
+  contactEmail?: string;
+  created_at?: string;
+  approved_at?: string | null;
+  approved_by?: string | null;
+  approvedBy?: string | null;
 }
 
 export type WarehouseType = 'central_warehouse' | 'site_container' | 'service_van';

@@ -1,0 +1,471 @@
+'use server';
+
+import { randomUUID } from 'crypto';
+import { revalidatePath } from 'next/cache';
+import {
+  TenantRegistrationSchema,
+  type RegisterOrganizationResult,
+} from '@/core/tenant/tenantOnboard.schema';
+import { isSupabaseConfigured, getSupabaseServerClient } from '@/lib/supabase';
+import {
+  getMockOrganizationById,
+  getMockOrganizationBySlug,
+  getMockOrganizations,
+  updateMockOrganization,
+  addMockOrganization,
+  addMockWarehouse,
+  addMockCategory,
+  addMockUser,
+} from '@/lib/mockStore';
+import type { Organization, AppUser } from '@/types/domain';
+
+const INITIAL_CATEGORIES = [
+  { name: 'כלי עבודה חשמליים', slug: 'power-tools', icon: 'drill' },
+  { name: 'כלי עבודה ידניים', slug: 'hand-tools', icon: 'wrench' },
+  { name: 'מדידה ואופטיקה', slug: 'measuring-optical', icon: 'ruler' },
+  { name: 'ציוד בטיחות ומיגון', slug: 'safety-ppe', icon: 'shield' },
+  { name: 'ריתוך וחימום', slug: 'welding-heat', icon: 'flame' },
+  { name: 'ציוד כבד וגנרטורים', slug: 'heavy-generators', icon: 'truck' },
+];
+
+/**
+ * Notifies system superadmins via email about a newly registered organization awaiting review.
+ * Uses Resend API if RESEND_API_KEY is present; otherwise gracefully logs formatted notification.
+ */
+async function sendAdminNotificationEmail(params: {
+  orgName: string;
+  contactPerson: string;
+  phone: string;
+  email: string;
+}) {
+  const adminEmail = process.env.ADMIN_NOTIFICATION_EMAIL || 'alisalehmohammad4@gmail.com';
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://tooly-dun.vercel.app';
+  const approvalUrl = `${appUrl}/dashboard/manager`;
+
+  const emailSubject = `🔔 בקשת רישום ארגון חדש ב-Tooly: ${params.orgName}`;
+  const emailText = `שלום מנהל המערכת,
+
+התקבלה בקשת רישום ארגון חדש במערכת Tooly הממתינה לאישורך:
+- שם החברה/ארגון: ${params.orgName}
+- איש קשר ומנהל: ${params.contactPerson}
+- טלפון: ${params.phone || 'לא הוזן'}
+- אימייל: ${params.email || 'לא הוזן'}
+
+לצפייה בבקשה ואישורה בלחיצת כפתור אחת:
+${approvalUrl}
+
+בברכה,
+צוות Tooly`;
+
+  try {
+    const resendApiKey = process.env.RESEND_API_KEY;
+    if (resendApiKey) {
+      await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${resendApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from: process.env.RESEND_FROM_EMAIL || 'Tooly Onboarding <onboarding@tooly.app>',
+          to: [adminEmail],
+          subject: emailSubject,
+          text: emailText,
+        }),
+      });
+      console.log(`[Admin Notification Email] Sent via Resend to ${adminEmail} for org "${params.orgName}"`);
+    } else {
+      console.log(`[Admin Notification Email] Clean alert logged for Admin:
+To: ${adminEmail}
+Subject: ${emailSubject}
+Approval Link: ${approvalUrl}
+Org: ${params.orgName} | Contact: ${params.contactPerson} | Phone: ${params.phone} | Email: ${params.email}`);
+    }
+  } catch (err) {
+    console.warn('[Admin Notification Email] Notification attempt completed with warning:', err);
+  }
+}
+
+export async function registerNewOrganizationAction(
+  rawInput: unknown
+): Promise<RegisterOrganizationResult> {
+  const parsed = TenantRegistrationSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    const firstError = parsed.error.issues[0]?.message || 'נתוני הרישום אינם תקינים';
+    return { success: false, error: firstError };
+  }
+
+  const {
+    companyName,
+    slug,
+    serialPrefix,
+    defaultCurrency,
+    contactEmail,
+    contactPhone,
+    contact_email,
+    contact_phone,
+    adminFullName,
+    adminUsername,
+    adminPin,
+    initialWarehouseName,
+  } = parsed.data;
+
+  const cleanSlug = slug.trim().toLowerCase();
+  const phone = (contactPhone || contact_phone || '').trim();
+  const email = (contactEmail || contact_email || '').trim();
+
+  // 1. Slug uniqueness check against mock store
+  if (getMockOrganizationBySlug(cleanSlug)) {
+    return {
+      success: false,
+      error: 'מזהה ארגון זה (slug) כבר קיים במערכת. אנא בחר מזהה ייחודי אחר.',
+    };
+  }
+
+  const orgId = randomUUID();
+  const whId = randomUUID();
+  const userId = randomUUID();
+  const whCode = 'MAIN-01';
+  const nowIso = new Date().toISOString();
+
+  const newOrg: Organization = {
+    id: orgId,
+    name: companyName.trim(),
+    slug: cleanSlug,
+    serialPrefix: serialPrefix.trim().toUpperCase(),
+    defaultCurrency,
+    status: 'pending_approval',
+    contact_phone: phone,
+    contact_email: email,
+    contactPhone: phone,
+    contactEmail: email,
+    created_at: nowIso,
+    approved_at: null,
+    approved_by: null,
+  };
+
+  const newWarehouse = {
+    id: whId,
+    name: initialWarehouseName.trim() || 'מחסן ראשי',
+    code: whCode,
+    type: 'central_warehouse' as const,
+    isActive: true,
+    organizationId: orgId,
+  };
+
+  const adminUser: AppUser = {
+    id: userId,
+    fullName: adminFullName.trim(),
+    username: adminUsername.trim(),
+    pinCode: adminPin.trim(),
+    role: 'general_manager',
+    organizationId: orgId,
+    assignedWarehouseId: whId,
+    assignedWarehouseName: initialWarehouseName.trim() || 'מחסן ראשי',
+    isActive: true,
+    email: email || undefined,
+    phone: phone || undefined,
+    createdAt: nowIso,
+  };
+
+  // 2. Supabase Integration
+  if (isSupabaseConfigured()) {
+    try {
+      const serverClient = getSupabaseServerClient();
+
+      // Verify slug uniqueness in database
+      const { data: existingOrg } = await serverClient
+        .from('organizations')
+        .select('id, slug')
+        .eq('slug', cleanSlug)
+        .maybeSingle();
+
+      if (existingOrg) {
+        return {
+          success: false,
+          error: 'מזהה ארגון זה (slug) כבר קיים במערכת. אנא בחר מזהה ייחודי אחר.',
+        };
+      }
+
+      // Insert organization
+      const { error: orgErr } = await serverClient.from('organizations').insert({
+        id: orgId,
+        name: newOrg.name,
+        slug: newOrg.slug,
+        serial_prefix: newOrg.serialPrefix,
+        default_currency: newOrg.defaultCurrency,
+        status: 'pending_approval',
+        contact_phone: newOrg.contact_phone,
+        contact_email: newOrg.contact_email,
+      });
+
+      if (orgErr) {
+        console.warn('Could not insert organization with new fields into Supabase (trying base fields):', orgErr.message);
+        if (orgErr.message?.includes('column') || orgErr.code === 'PGRST204') {
+          await serverClient.from('organizations').insert({
+            id: orgId,
+            name: newOrg.name,
+            slug: newOrg.slug,
+            serial_prefix: newOrg.serialPrefix,
+            default_currency: newOrg.defaultCurrency,
+          });
+        }
+      }
+
+      // Insert warehouse
+      const { error: whErr } = await serverClient.from('warehouses').insert({
+        id: whId,
+        name: newWarehouse.name,
+        code: newWarehouse.code,
+        type: newWarehouse.type,
+        is_active: true,
+        organization_id: orgId,
+      });
+
+      if (whErr) {
+        console.warn('Could not insert warehouse into Supabase:', whErr.message);
+      }
+
+      // Insert admin user
+      const { error: userErr } = await serverClient.from('app_users').insert({
+        id: userId,
+        full_name: adminUser.fullName,
+        username: adminUser.username,
+        pin_code: adminUser.pinCode,
+        role: adminUser.role,
+        is_active: true,
+        assigned_warehouse_id: whId,
+        organization_id: orgId,
+      });
+
+      if (userErr) {
+        console.warn('Could not insert admin user into Supabase app_users:', userErr.message);
+      }
+
+      // Insert initial categories
+      const categoriesRows = INITIAL_CATEGORIES.map((cat, idx) => ({
+        id: randomUUID(),
+        name: cat.name,
+        slug: `${cleanSlug}-${cat.slug}`,
+        icon: cat.icon,
+        display_order: idx + 1,
+        organization_id: orgId,
+      }));
+
+      const { error: catErr } = await serverClient.from('categories').insert(categoriesRows);
+      if (catErr) {
+        console.warn('Could not insert categories into Supabase:', catErr.message);
+      }
+    } catch (dbErr) {
+      console.warn('Supabase organization creation failed, fallback to local store:', dbErr);
+    }
+  }
+
+  // 3. Sync to Authoritative In-Memory Mock Store
+  addMockOrganization(newOrg);
+  addMockWarehouse(newWarehouse);
+  addMockUser(adminUser);
+
+  INITIAL_CATEGORIES.forEach((cat, idx) => {
+    addMockCategory({
+      id: `cat-${cleanSlug}-${cat.slug}`,
+      name: cat.name,
+      slug: `${cleanSlug}-${cat.slug}`,
+      icon: cat.icon,
+      displayOrder: idx + 1,
+      organizationId: orgId,
+    });
+  });
+
+  // 4. Send email notification to Admin asynchronously without blocking
+  void sendAdminNotificationEmail({
+    orgName: newOrg.name,
+    contactPerson: adminUser.fullName,
+    phone: phone,
+    email: email,
+  });
+
+  return {
+    success: true,
+    pendingApproval: true,
+    organization: newOrg,
+    user: adminUser,
+  };
+}
+
+export async function getPendingOrganizationsAction(): Promise<{
+  success: boolean;
+  organizations: Organization[];
+  error?: string;
+}> {
+  try {
+    const orgsMap = new Map<string, Organization>();
+
+    // 1. Supabase query if configured
+    if (isSupabaseConfigured()) {
+      try {
+        const serverClient = getSupabaseServerClient();
+        const { data, error } = await serverClient
+          .from('organizations')
+          .select('*')
+          .eq('status', 'pending_approval')
+          .order('created_at', { ascending: false });
+
+        if (data && !error) {
+          for (const row of data as any[]) {
+            const orgObj: Organization = {
+              id: row.id,
+              name: row.name,
+              slug: row.slug,
+              serialPrefix: row.serial_prefix || row.serialPrefix || 'TOOL-',
+              defaultCurrency: row.default_currency || row.defaultCurrency || 'ILS',
+              logoUrl: row.logo_url || row.logoUrl,
+              status: 'pending_approval',
+              contact_phone: row.contact_phone || row.contactPhone,
+              contact_email: row.contact_email || row.contactEmail,
+              contactPhone: row.contact_phone || row.contactPhone,
+              contactEmail: row.contact_email || row.contactEmail,
+              created_at: row.created_at,
+              approved_at: row.approved_at,
+              approved_by: row.approved_by,
+            };
+            orgsMap.set(orgObj.id, orgObj);
+          }
+        }
+      } catch (err) {
+        console.warn('[getPendingOrganizationsAction] Supabase query failed:', err);
+      }
+    }
+
+    // 2. Mock Store Pending Organizations
+    const mockPending = getMockOrganizations().filter((o) => o.status === 'pending_approval');
+    for (const mo of mockPending) {
+      if (!orgsMap.has(mo.id)) {
+        orgsMap.set(mo.id, mo);
+      }
+    }
+
+    // Sort descending by created_at
+    const sorted = Array.from(orgsMap.values()).sort((a, b) => {
+      const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return timeB - timeA;
+    });
+
+    return {
+      success: true,
+      organizations: sorted,
+    };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'שגיאה בטעינת ארגונים ממתינים לאישור';
+    return {
+      success: false,
+      organizations: [],
+      error: msg,
+    };
+  }
+}
+
+export async function approveOrganizationAction(
+  orgId: string,
+  approvedByUserId?: string
+): Promise<{ success: boolean; error?: string; message?: string }> {
+  try {
+    const nowIso = new Date().toISOString();
+
+    // 1. Update Mock Store
+    const updatedMock = updateMockOrganization(orgId, {
+      status: 'active',
+      approved_at: nowIso,
+      approved_by: approvedByUserId || null,
+      approvedBy: approvedByUserId || null,
+    });
+
+    // 2. Update Supabase
+    if (isSupabaseConfigured()) {
+      try {
+        const serverClient = getSupabaseServerClient();
+        const updatePayload: Record<string, any> = {
+          status: 'active',
+          approved_at: nowIso,
+        };
+        if (approvedByUserId) {
+          updatePayload.approved_by = approvedByUserId;
+        }
+
+        const { error: sbErr } = await serverClient
+          .from('organizations')
+          .update(updatePayload)
+          .eq('id', orgId);
+
+        if (sbErr) {
+          console.warn('[approveOrganizationAction] Supabase update warning:', sbErr.message);
+        }
+      } catch (err) {
+        console.warn('[approveOrganizationAction] Supabase update failed:', err);
+      }
+    }
+
+    revalidatePath('/dashboard/manager');
+    revalidatePath('/');
+
+    return {
+      success: true,
+      message: updatedMock?.name
+        ? `ארגון "${updatedMock.name}" אושר בהצלחה!`
+        : 'הארגון אושר בהצלחה ופעיל כעת במערכת',
+    };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'שגיאה באישור הארגון';
+    return {
+      success: false,
+      error: msg,
+    };
+  }
+}
+
+export async function rejectOrganizationAction(
+  orgId: string
+): Promise<{ success: boolean; error?: string; message?: string }> {
+  try {
+    // 1. Update Mock Store
+    const updatedMock = updateMockOrganization(orgId, {
+      status: 'rejected',
+    });
+
+    // 2. Update Supabase
+    if (isSupabaseConfigured()) {
+      try {
+        const serverClient = getSupabaseServerClient();
+        const { error: sbErr } = await serverClient
+          .from('organizations')
+          .update({
+            status: 'rejected',
+          })
+          .eq('id', orgId);
+
+        if (sbErr) {
+          console.warn('[rejectOrganizationAction] Supabase update warning:', sbErr.message);
+        }
+      } catch (err) {
+        console.warn('[rejectOrganizationAction] Supabase update failed:', err);
+      }
+    }
+
+    revalidatePath('/dashboard/manager');
+    revalidatePath('/');
+
+    return {
+      success: true,
+      message: updatedMock?.name
+        ? `בקשת הארגון "${updatedMock.name}" נדחתה`
+        : 'בקשת הארגון נדחתה בהצלחה',
+    };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'שגיאה בדחיית הארגון';
+    return {
+      success: false,
+      error: msg,
+    };
+  }
+}

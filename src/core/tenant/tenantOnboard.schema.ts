@@ -24,6 +24,18 @@ export const TenantRegistrationSchema = z.object({
   defaultCurrency: z
     .enum(['ILS', 'USD', 'EUR', 'AED', 'SAR'])
     .default('ILS'),
+  contactEmail: z
+    .string()
+    .trim()
+    .optional()
+    .or(z.literal('')),
+  contactPhone: z
+    .string()
+    .trim()
+    .optional()
+    .or(z.literal('')),
+  contact_email: z.string().trim().optional(),
+  contact_phone: z.string().trim().optional(),
   adminFullName: z
     .string()
     .trim()
@@ -52,6 +64,7 @@ export type TenantRegistrationInput = z.infer<typeof TenantRegistrationSchema>;
 
 export interface RegisterOrganizationResult {
   success: boolean;
+  pendingApproval?: boolean;
   error?: string;
   organization?: import('@/types/domain').Organization;
   user?: import('@/types/domain').AppUser;

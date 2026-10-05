@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useId } from 'react';
-import { useRouter } from 'next/navigation';
 import {
   X,
   Building2,
@@ -17,14 +16,16 @@ import {
   ShieldCheck,
   Globe2,
   Layers,
+  Clock,
+  Phone,
+  Mail,
 } from 'lucide-react';
-import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
 import {
   TenantRegistrationSchema,
   type TenantRegistrationInput,
 } from '@/core/tenant/tenantOnboard.schema';
-import { registerNewOrganizationAction } from '@/app/actions/tenants';
+import { registerNewOrganizationAction } from '@/app/actions/organizations';
 
 interface RegisterOrganizationModalProps {
   isOpen: boolean;
@@ -35,15 +36,13 @@ export default function RegisterOrganizationModal({
   isOpen,
   onClose,
 }: RegisterOrganizationModalProps) {
-  const router = useRouter();
-  const { loginAsUser } = useAuth();
   const { dir, t } = useLanguage();
   const isRtl = dir === 'rtl';
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [isSuccess, setIsSuccess] = useState(false);
+  const [isSubmitted, setIsSubmitted] = useState(false);
 
   // Form State
   const [formData, setFormData] = useState<TenantRegistrationInput>({
@@ -51,6 +50,8 @@ export default function RegisterOrganizationModal({
     slug: '',
     serialPrefix: 'TOOL-',
     defaultCurrency: 'ILS',
+    contactPhone: '',
+    contactEmail: '',
     adminFullName: '',
     adminUsername: '',
     adminPin: '',
@@ -61,6 +62,8 @@ export default function RegisterOrganizationModal({
   const slugId = useId();
   const serialPrefixId = useId();
   const currencyId = useId();
+  const contactPhoneId = useId();
+  const contactEmailId = useId();
   const adminNameId = useId();
   const adminUsernameId = useId();
   const adminPinId = useId();
@@ -68,10 +71,29 @@ export default function RegisterOrganizationModal({
 
   if (!isOpen) return null;
 
+  const handleResetAndClose = () => {
+    setIsSubmitted(false);
+    setIsSubmitting(false);
+    setErrorMessage(null);
+    setStep(1);
+    setFormData({
+      companyName: '',
+      slug: '',
+      serialPrefix: 'TOOL-',
+      defaultCurrency: 'ILS',
+      contactPhone: '',
+      contactEmail: '',
+      adminFullName: '',
+      adminUsername: '',
+      adminPin: '',
+      initialWarehouseName: 'מחסן ראשי',
+    });
+    onClose();
+  };
+
   // Auto-generate slug suggestion from company name if slug hasn't been manually typed
   const handleCompanyNameChange = (val: string) => {
     const updated = { ...formData, companyName: val };
-    // If slug is empty or was previously auto-derived
     const autoSlug = val
       .trim()
       .toLowerCase()
@@ -94,6 +116,8 @@ export default function RegisterOrganizationModal({
       slug: true,
       serialPrefix: true,
       defaultCurrency: true,
+      contactPhone: true,
+      contactEmail: true,
     });
     const res = step1Schema.safeParse(formData);
     if (!res.success) {
@@ -129,21 +153,15 @@ export default function RegisterOrganizationModal({
     setIsSubmitting(true);
     try {
       const actionResult = await registerNewOrganizationAction(formData);
-      if (!actionResult.success || !actionResult.user) {
+      if (!actionResult.success) {
         setErrorMessage(actionResult.error || 'נכשלה פתיחת הארגון. אנא נסה שנית.');
         setIsSubmitting(false);
         return;
       }
 
-      setIsSuccess(true);
-      // Auto-login the newly created general manager
-      loginAsUser(actionResult.user);
-
-      // Short delay for celebration animation then redirect
-      setTimeout(() => {
-        onClose();
-        router.push('/dashboard/manager');
-      }, 1400);
+      // Success: Gated approval workflow - do NOT auto login or redirect!
+      setIsSubmitted(true);
+      setIsSubmitting(false);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'שגיאה בלתי צפויה ברישום החברה';
       setErrorMessage(msg);
@@ -181,7 +199,7 @@ export default function RegisterOrganizationModal({
 
           <button
             type="button"
-            onClick={onClose}
+            onClick={isSubmitted ? handleResetAndClose : onClose}
             disabled={isSubmitting}
             aria-label="סגור חלון"
             className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors cursor-pointer disabled:opacity-50 z-10"
@@ -190,61 +208,63 @@ export default function RegisterOrganizationModal({
           </button>
         </div>
 
-        {/* Wizard Steps Progress Indicator */}
-        <div className="bg-slate-50 border-b border-slate-200 px-6 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-xs font-bold text-slate-600">
-            <div
-              className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${
-                step === 1
-                  ? 'bg-blue-600 text-white font-black shadow-xs'
-                  : step > 1
-                  ? 'bg-emerald-500 text-white'
-                  : 'bg-slate-200 text-slate-500'
-              }`}
-            >
-              {step > 1 ? <CheckCircle2 className="w-4 h-4" /> : '1'}
+        {/* Wizard Steps Progress Indicator (Hidden on approval screen) */}
+        {!isSubmitted && (
+          <div className="bg-slate-50 border-b border-slate-200 px-6 py-3 flex items-center justify-between">
+            <div className="flex items-center gap-2 text-xs font-bold text-slate-600">
+              <div
+                className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${
+                  step === 1
+                    ? 'bg-blue-600 text-white font-black shadow-xs'
+                    : step > 1
+                    ? 'bg-emerald-500 text-white'
+                    : 'bg-slate-200 text-slate-500'
+                }`}
+              >
+                {step > 1 ? <CheckCircle2 className="w-4 h-4" /> : '1'}
+              </div>
+              <span className={step === 1 ? 'text-blue-700 font-extrabold' : ''}>
+                {t('onboarding.step1', 'פרטי הארגון')}
+              </span>
             </div>
-            <span className={step === 1 ? 'text-blue-700 font-extrabold' : ''}>
-              {t('onboarding.step1', 'פרטי הארגון')}
-            </span>
-          </div>
 
-          <div className="w-8 h-[2px] bg-slate-200" />
+            <div className="w-8 h-[2px] bg-slate-200" />
 
-          <div className="flex items-center gap-2 text-xs font-bold text-slate-600">
-            <div
-              className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${
-                step === 2
-                  ? 'bg-blue-600 text-white font-black shadow-xs'
-                  : step > 2
-                  ? 'bg-emerald-500 text-white'
-                  : 'bg-slate-200 text-slate-500'
-              }`}
-            >
-              {step > 2 ? <CheckCircle2 className="w-4 h-4" /> : '2'}
+            <div className="flex items-center gap-2 text-xs font-bold text-slate-600">
+              <div
+                className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${
+                  step === 2
+                    ? 'bg-blue-600 text-white font-black shadow-xs'
+                    : step > 2
+                    ? 'bg-emerald-500 text-white'
+                    : 'bg-slate-200 text-slate-500'
+                }`}
+              >
+                {step > 2 ? <CheckCircle2 className="w-4 h-4" /> : '2'}
+              </div>
+              <span className={step === 2 ? 'text-blue-700 font-extrabold' : ''}>
+                {t('onboarding.step2', 'מנהל ראשי')}
+              </span>
             </div>
-            <span className={step === 2 ? 'text-blue-700 font-extrabold' : ''}>
-              {t('onboarding.step2', 'מנהל ראשי')}
-            </span>
-          </div>
 
-          <div className="w-8 h-[2px] bg-slate-200" />
+            <div className="w-8 h-[2px] bg-slate-200" />
 
-          <div className="flex items-center gap-2 text-xs font-bold text-slate-600">
-            <div
-              className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${
-                step === 3
-                  ? 'bg-blue-600 text-white font-black shadow-xs'
-                  : 'bg-slate-200 text-slate-500'
-              }`}
-            >
-              3
+            <div className="flex items-center gap-2 text-xs font-bold text-slate-600">
+              <div
+                className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${
+                  step === 3
+                    ? 'bg-blue-600 text-white font-black shadow-xs'
+                    : 'bg-slate-200 text-slate-500'
+                }`}
+              >
+                3
+              </div>
+              <span className={step === 3 ? 'text-blue-700 font-extrabold' : ''}>
+                {t('onboarding.step3', 'מחסן ואישור')}
+              </span>
             </div>
-            <span className={step === 3 ? 'text-blue-700 font-extrabold' : ''}>
-              {t('onboarding.step3', 'מחסן ואישור')}
-            </span>
           </div>
-        </div>
+        )}
 
         {/* Error Alert */}
         {errorMessage && (
@@ -256,25 +276,86 @@ export default function RegisterOrganizationModal({
 
         {/* Modal Body / Steps */}
         <div className="p-6 overflow-y-auto flex-1 space-y-4">
-          {isSuccess ? (
-            <div className="py-8 flex flex-col items-center justify-center text-center space-y-4 animate-in zoom-in-95">
-              <div className="w-20 h-20 rounded-3xl bg-emerald-100 border border-emerald-300 flex items-center justify-center text-emerald-600 shadow-lg shadow-emerald-500/20">
-                <Sparkles className="w-10 h-10 animate-bounce" />
+          {isSubmitted ? (
+            /* Approval-Gated Pending Confirmation Screen */
+            <div className="py-6 px-2 flex flex-col items-center justify-center text-center space-y-5 animate-in zoom-in-95">
+              <div className="relative">
+                <div className="w-20 h-20 rounded-3xl bg-amber-50 border-2 border-amber-300 flex items-center justify-center text-amber-600 shadow-xl shadow-amber-500/10">
+                  <Clock className="w-10 h-10 animate-pulse" />
+                </div>
+                <div className="absolute -bottom-1 -right-1 w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center border-2 border-white shadow-md">
+                  <ShieldCheck className="w-4 h-4" />
+                </div>
               </div>
-              <h3 className="text-2xl font-black text-slate-900">
-                הארגון הוקם בהצלחה!
-              </h3>
-              <p className="text-sm text-slate-600 max-w-md">
-                מרחב העבודה של <strong className="text-slate-900">{formData.companyName}</strong> מוכן לשימוש.
-                המערכת מעבירה אותך כעת ללוח הניהול...
-              </p>
-              <div className="flex items-center gap-2 text-xs text-blue-600 font-bold">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>טוען סביבת עבודה...</span>
+
+              <div className="space-y-2">
+                <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-amber-100 border border-amber-300 text-amber-900 text-xs font-black shadow-xs">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-600"></span>
+                  </span>
+                  <span>סטטוס: ממתין לאישור מנהל ראשי</span>
+                </div>
+                <h3 className="text-2xl font-black text-slate-900">
+                  הבקשה נשלחה בהצלחה וממתינה לאישור!
+                </h3>
+                <p className="text-sm text-slate-600 max-w-md mx-auto leading-relaxed">
+                  פרטי החברה והמחסן התקבלו במערכת Tooly. מטעמי אבטחה ובקרת איכות, חשבונך ממתין לאישור הנהלת המערכת לפני הפעלתו.
+                </p>
               </div>
+
+              {/* Information Note */}
+              <div className="w-full max-w-md p-3.5 rounded-2xl bg-blue-50/90 border border-blue-200 text-blue-900 text-xs flex items-center gap-2.5 text-right font-medium">
+                <Sparkles className="w-4 h-4 text-blue-600 shrink-0" />
+                <span>הודעת אישור תישלח לכתובת האימייל והנייד שהזנת ברגע שהחשבון יופעל.</span>
+              </div>
+
+              <div className="w-full max-w-md p-4 rounded-2xl bg-slate-50 border border-slate-200 text-right space-y-2.5 text-xs text-slate-700">
+                <div className="font-bold text-slate-900 border-b border-slate-200 pb-2 flex items-center justify-between">
+                  <span>סיכום פרטי הרישום</span>
+                  <span className="font-mono text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 text-[11px]">
+                    {formData.slug}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2.5 text-[11px]">
+                  <div>
+                    <span className="text-slate-400 block">ארגון:</span>
+                    <strong className="text-slate-900">{formData.companyName}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block">מנהל מבוקש:</span>
+                    <strong className="text-slate-900">{formData.adminFullName} ({formData.adminUsername})</strong>
+                  </div>
+                  {formData.contactPhone ? (
+                    <div>
+                      <span className="text-slate-400 block">טלפון ליצירת קשר:</span>
+                      <strong className="text-slate-900 font-mono">{formData.contactPhone}</strong>
+                    </div>
+                  ) : null}
+                  {formData.contactEmail ? (
+                    <div>
+                      <span className="text-slate-400 block">אימייל ליצירת קשר:</span>
+                      <strong className="text-slate-900 font-mono">{formData.contactEmail}</strong>
+                    </div>
+                  ) : null}
+                  <div>
+                    <span className="text-slate-400 block">מחסן פותח:</span>
+                    <strong className="text-slate-900">{formData.initialWarehouseName}</strong>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleResetAndClose}
+                className="w-full max-w-md py-3 px-6 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-black text-sm shadow-md shadow-blue-600/25 flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-[0.98]"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>חזרה למסך הכניסה</span>
+              </button>
             </div>
           ) : step === 1 ? (
-            /* STEP 1: Company Identity */
+            /* STEP 1: Company Identity & Contact Details */
             <div className="space-y-4 animate-in fade-in-50">
               <div>
                 <label
@@ -322,6 +403,61 @@ export default function RegisterOrganizationModal({
                 <div className="mt-1.5 px-3 py-1.5 rounded-lg bg-blue-50 border border-blue-100 flex items-center gap-1.5 text-[11px] text-blue-700 font-mono">
                   <span>כתובת גישה:</span>
                   <span className="font-bold">tooly.app/org/{formData.slug || 'your-slug'}</span>
+                </div>
+              </div>
+
+              {/* Contact Phone & Email */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label
+                    htmlFor={contactPhoneId}
+                    className="block text-xs font-bold text-slate-700 mb-1"
+                  >
+                    טלפון ליצירת קשר:
+                  </label>
+                  <div className="relative">
+                    <input
+                      id={contactPhoneId}
+                      type="tel"
+                      value={formData.contactPhone || ''}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          contactPhone: e.target.value,
+                          contact_phone: e.target.value,
+                        })
+                      }
+                      placeholder="050-1234567"
+                      className="w-full bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20 rounded-xl px-4 py-2.5 text-sm outline-none transition-all"
+                    />
+                    <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  </div>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor={contactEmailId}
+                    className="block text-xs font-bold text-slate-700 mb-1"
+                  >
+                    אימייל ליצירת קשר:
+                  </label>
+                  <div className="relative">
+                    <input
+                      id={contactEmailId}
+                      type="email"
+                      value={formData.contactEmail || ''}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          contactEmail: e.target.value,
+                          contact_email: e.target.value,
+                        })
+                      }
+                      placeholder="office@company.co.il"
+                      className="w-full bg-slate-50 border border-slate-300 text-slate-900 focus:bg-white focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20 rounded-xl px-4 py-2.5 text-sm outline-none transition-all"
+                    />
+                    <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  </div>
                 </div>
               </div>
 
@@ -387,7 +523,7 @@ export default function RegisterOrganizationModal({
               <div className="p-3.5 rounded-xl bg-blue-50 border border-blue-200 text-xs text-blue-800 flex items-center gap-2 font-medium">
                 <ShieldCheck className="w-5 h-5 text-blue-600 shrink-0" />
                 <span>
-                  חשבון זה יוגדר כ-<strong>מנכ&quot;ל / מנהל כללי</strong> ויהיה בעל סמכויות מלאות לניהול מחסנים, משתמשים והרשאות בארגון.
+                  חשבון זה יוגדר כ-<strong>מנכ&quot;ל / מנהל כללי</strong> ויהיה בעל סמכויות מלאות לניהול מחסנים, משתמשים והרשאות בארגון לאחר אישור ההנהלה.
                 </span>
               </div>
 
@@ -514,6 +650,18 @@ export default function RegisterOrganizationModal({
                     <span className="text-slate-400 block">מחסן פותח:</span>
                     <strong className="text-slate-900">{formData.initialWarehouseName}</strong>
                   </div>
+                  {formData.contactPhone ? (
+                    <div>
+                      <span className="text-slate-400 block">טלפון ליצירת קשר:</span>
+                      <strong className="text-slate-900 font-mono">{formData.contactPhone}</strong>
+                    </div>
+                  ) : null}
+                  {formData.contactEmail ? (
+                    <div>
+                      <span className="text-slate-400 block">אימייל ליצירת קשר:</span>
+                      <strong className="text-slate-900 font-mono">{formData.contactEmail}</strong>
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="pt-2 border-t border-slate-200 flex items-center gap-2 text-emerald-700 font-bold">
@@ -528,7 +676,7 @@ export default function RegisterOrganizationModal({
         </div>
 
         {/* Modal Footer / Navigation Buttons */}
-        {!isSuccess && (
+        {!isSubmitted && (
           <div className="bg-slate-50 border-t border-slate-200 px-6 py-4 flex items-center justify-between">
             {step > 1 ? (
               <button
@@ -586,12 +734,12 @@ export default function RegisterOrganizationModal({
                 {isSubmitting ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>מקים את הארגון...</span>
+                    <span>שולח בקשה לאישור...</span>
                   </>
                 ) : (
                   <>
                     <Sparkles className="w-4 h-4" />
-                    <span>הקמת ארגון וכניסה למערכת</span>
+                    <span>שליחת בקשת הקמת ארגון</span>
                   </>
                 )}
               </button>

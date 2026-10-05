@@ -42,10 +42,11 @@ import {
   Factory,
   Scissors,
   PieChart,
+  Mail,
 } from 'lucide-react';
 import Link from 'next/link';
 import type { PlantManagerAnalyticsPayload } from '@/app/actions/dashboard';
-import type { AppUser } from '@/types/domain';
+import type { AppUser, Organization } from '@/types/domain';
 import type { WarehouseAdminItem } from '@/lib/mockStore';
 import {
   getStorekeepersListAction,
@@ -60,6 +61,11 @@ import {
   getWarehousesAdminAction,
   deleteWarehouseAction,
 } from '@/app/actions/warehouses';
+import {
+  getPendingOrganizationsAction,
+  approveOrganizationAction,
+  rejectOrganizationAction,
+} from '@/app/actions/organizations';
 
 import WarehouseFormModal from '@/components/modules/WarehouseFormModal';
 import WarehouseToolsModal from '@/components/modules/WarehouseToolsModal';
@@ -138,6 +144,12 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
     return data.facilityDistribution;
   }, [warehousesList, data.facilityDistribution]);
 
+  // Pending Organization Approvals State (SuperAdmin / Manager)
+  const [pendingOrganizations, setPendingOrganizations] = useState<Organization[]>([]);
+  const [isLoadingPendingOrgs, setIsLoadingPendingOrgs] = useState<boolean>(false);
+  const [approvingOrgId, setApprovingOrgId] = useState<string | null>(null);
+  const [rejectingOrgId, setRejectingOrgId] = useState<string | null>(null);
+
   // Derived effective warehouse ID for form dropdown
   const effectiveAssignedWarehouseId = useMemo(() => {
     if (newAssignedWarehouseId === 'all') {
@@ -177,6 +189,88 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
       setIsLoadingWarehouses(false);
     }
   }, [currentOrganization]);
+
+  // Load pending organizations for SuperAdmin / Manager approval
+  const loadPendingOrganizations = useCallback(async () => {
+    setIsLoadingPendingOrgs(true);
+    try {
+      const res = await getPendingOrganizationsAction();
+      if (res.success && Array.isArray(res.organizations)) {
+        setPendingOrganizations(res.organizations);
+      }
+    } catch (err) {
+      console.warn('Error loading pending organizations:', err);
+    } finally {
+      setIsLoadingPendingOrgs(false);
+    }
+  }, []);
+
+  const handleApproveOrganization = async (orgId: string, orgName: string) => {
+    setApprovingOrgId(orgId);
+    // Optimistic UI update
+    setPendingOrganizations((prev) => prev.filter((o) => o.id !== orgId));
+    try {
+      const res = await approveOrganizationAction(orgId, user?.id);
+      if (res.success) {
+        setFeedbackMessage({
+          text: res.message || `ארגון "${orgName}" אושר בהצלחה!`,
+          type: 'success',
+        });
+        await loadPendingOrganizations();
+      } else {
+        setFeedbackMessage({
+          text: res.error || 'שגיאה באישור הארגון',
+          type: 'error',
+        });
+        await loadPendingOrganizations();
+      }
+    } catch {
+      setFeedbackMessage({
+        text: 'שגיאת רשת באישור הארגון',
+        type: 'error',
+      });
+      await loadPendingOrganizations();
+    } finally {
+      setApprovingOrgId(null);
+    }
+  };
+
+  const handleRejectOrganization = async (orgId: string, orgName: string) => {
+    if (!confirm(`האם אתה בטוח שברצונך לדחות את בקשת ההצטרפות של ארגון "${orgName}"?`)) {
+      return;
+    }
+    setRejectingOrgId(orgId);
+    // Optimistic UI update
+    setPendingOrganizations((prev) => prev.filter((o) => o.id !== orgId));
+    try {
+      const res = await rejectOrganizationAction(orgId);
+      if (res.success) {
+        setFeedbackMessage({
+          text: res.message || `בקשת הארגון "${orgName}" נדחתה.`,
+          type: 'success',
+        });
+        await loadPendingOrganizations();
+      } else {
+        setFeedbackMessage({
+          text: res.error || 'שגיאה בדחיית הארגון',
+          type: 'error',
+        });
+        await loadPendingOrganizations();
+      }
+    } catch {
+      setFeedbackMessage({
+        text: 'שגיאת רשת בדחיית הארגון',
+        type: 'error',
+      });
+      await loadPendingOrganizations();
+    } finally {
+      setRejectingOrgId(null);
+    }
+  };
+
+  useEffect(() => {
+    void loadPendingOrganizations();
+  }, [loadPendingOrganizations]);
 
   // Fetch data whenever tabs change or on mount
   useEffect(() => {
@@ -621,6 +715,189 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
       </div>
 
       <main className="max-w-6xl mx-auto px-4 py-5 space-y-6">
+        {/* ============================================================ */}
+        {/* SUPERADMIN APPROVAL QUEUE: PENDING ORGANIZATIONS             */}
+        {/* ============================================================ */}
+        <section
+          className={`rounded-3xl border transition-all print:hidden ${
+            pendingOrganizations.length > 0
+              ? 'border-amber-300 bg-gradient-to-br from-amber-50/90 via-orange-50/40 to-white p-5 sm:p-6 shadow-md'
+              : 'border-slate-200 bg-white p-4 sm:p-5 shadow-xs'
+          }`}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div
+                className={`w-11 h-11 rounded-2xl flex items-center justify-center shadow-xs shrink-0 ${
+                  pendingOrganizations.length > 0
+                    ? 'bg-amber-500 text-white'
+                    : 'bg-slate-100 text-slate-600'
+                }`}
+              >
+                <ShieldCheck className="w-6 h-6" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-black text-slate-900 tracking-tight">
+                    {pendingOrganizations.length > 0
+                      ? `🔔 בקשות הצטרפות חדשות לאישור (${pendingOrganizations.length})`
+                      : 'אישור ארגונים חדשים (Onboarding Approvals)'}
+                  </h3>
+                  {pendingOrganizations.length > 0 ? (
+                    <span className="inline-flex items-center gap-1 text-[11px] bg-amber-500 text-white font-black px-2.5 py-0.5 rounded-full shadow-xs animate-pulse">
+                      <Clock className="w-3 h-3" />
+                      {pendingOrganizations.length} ממתינים לאישור
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 text-[11px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">
+                      <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                      הכל מעודכן
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 font-medium">
+                  בקרת הצטרפות ארגונים וסביבות עבודה עצמאיות למערכת Tooly
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={loadPendingOrganizations}
+              disabled={isLoadingPendingOrgs}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-600 font-bold text-xs transition-colors cursor-pointer disabled:opacity-50"
+            >
+              <Activity className={`w-3.5 h-3.5 text-blue-600 ${isLoadingPendingOrgs ? 'animate-spin' : ''}`} />
+              <span>רענן רשימה</span>
+            </button>
+          </div>
+
+          {/* Pending List or Empty State */}
+          {pendingOrganizations.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5">
+              {pendingOrganizations.map((org) => {
+                const isApproving = approvingOrgId === org.id;
+                const contactPhone = org.contact_phone || org.contactPhone;
+                const contactEmail = org.contact_email || org.contactEmail;
+
+                return (
+                  <div
+                    key={org.id}
+                    className="relative bg-white rounded-2xl border border-amber-200/90 p-4 sm:p-5 shadow-sm hover:shadow-md transition-all flex flex-col justify-between gap-4"
+                  >
+                    <div className="space-y-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-amber-100 border border-amber-200 flex items-center justify-center text-amber-700 shrink-0">
+                            <Building2 className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <h4 className="text-sm font-black text-slate-900 leading-tight">
+                              {org.name}
+                            </h4>
+                            <div className="flex items-center gap-2 mt-1">
+                              <span className="font-mono text-[11px] text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 font-bold">
+                                {org.slug}
+                              </span>
+                              <span className="text-[11px] text-slate-500 font-medium">
+                                קידומת: <strong className="font-mono text-slate-700">{org.serialPrefix || 'TOOL-'}</strong>
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-100 text-amber-900 text-[10px] font-black border border-amber-200 shrink-0">
+                          <Clock className="w-3 h-3 text-amber-700" />
+                          ממתין לאישור
+                        </span>
+                      </div>
+
+                      {/* Contact & Registration Meta */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs bg-slate-50 p-3 rounded-xl border border-slate-100 text-slate-700">
+                        {contactPhone ? (
+                          <div className="flex items-center gap-2">
+                            <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <span className="font-mono font-medium" dir="ltr">
+                              {contactPhone}
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="text-slate-400 text-[11px]">ללא טלפון</div>
+                        )}
+
+                        {contactEmail ? (
+                          <div className="flex items-center gap-2 truncate">
+                            <Mail className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <span className="font-mono font-medium truncate" dir="ltr">
+                              {contactEmail}
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="text-slate-400 text-[11px]">ללא אימייל</div>
+                        )}
+
+                        {org.created_at && (
+                          <div className="sm:col-span-2 text-[10px] text-slate-500 pt-1.5 border-t border-slate-200/60 flex items-center gap-1.5">
+                            <Calendar className="w-3 h-3 text-slate-400" />
+                            <span>
+                              תאריך הרשמה: {new Date(org.created_at).toLocaleDateString('he-IL')} בשעה {new Date(org.created_at).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-100 flex items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        disabled={isApproving || rejectingOrgId === org.id}
+                        onClick={() => handleRejectOrganization(org.id, org.name)}
+                        className="py-2 px-3.5 rounded-xl border border-red-300 hover:bg-red-50 text-red-700 disabled:opacity-50 font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                      >
+                        {rejectingOrgId === org.id ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-red-600" />
+                            <span>דוחה...</span>
+                          </>
+                        ) : (
+                          <>
+                            <X className="w-3.5 h-3.5 text-red-600" />
+                            <span>דחה</span>
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={isApproving || rejectingOrgId === org.id}
+                        onClick={() => handleApproveOrganization(org.id, org.name)}
+                        className="py-2 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-black text-xs shadow-md shadow-emerald-600/20 flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                      >
+                        {isApproving ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>מאשר...</span>
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>אשר ארגון</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="mt-3 py-2 px-3 text-xs text-slate-500 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>אין כרגע ארגונים הממתינים לאישור. כל בקשות ההצטרפות נבדקו ואושרו.</span>
+            </div>
+          )}
+        </section>
+
         {/* Navigation Tab Switcher */}
         <div className="flex flex-nowrap overflow-x-auto no-scrollbar py-1 gap-2 border-b border-slate-200 sm:border sm:border-slate-300 sm:bg-slate-200/80 sm:p-1.5 sm:rounded-2xl print:hidden">
           <button

@@ -15,9 +15,65 @@ import {
   updateMockUserRole,
   toggleMockUserActive,
   DEFAULT_ORGANIZATION,
+  getMockOrganizationById,
 } from '@/lib/mockStore';
 
 const DEFAULT_ORGANIZATION_ID = DEFAULT_ORGANIZATION.id;
+
+async function checkOrganizationApprovalStatus(orgId?: string): Promise<{
+  allowed: boolean;
+  error?: string;
+}> {
+  if (!orgId) return { allowed: true };
+
+  // 1. Live Supabase check
+  if (isSupabaseConfigured()) {
+    try {
+      const serverClient = getSupabaseServerClient();
+      const { data: orgData, error: orgErr } = await serverClient
+        .from('organizations')
+        .select('status')
+        .eq('id', orgId)
+        .maybeSingle();
+
+      if (orgData && !orgErr) {
+        if (orgData.status === 'pending_approval') {
+          return {
+            allowed: false,
+            error: 'חשבון הארגון ממתין לאישור מנהל המערכת. ניצור איתך קשר בהקדם.',
+          };
+        }
+        if (orgData.status === 'rejected') {
+          return {
+            allowed: false,
+            error: 'חשבון זה נדחה על ידי הנהלת המערכת.',
+          };
+        }
+      }
+    } catch (e) {
+      console.warn('Could not query organization status in Supabase:', e);
+    }
+  }
+
+  // 2. Authoritative Mock Store check
+  const mockOrg = getMockOrganizationById(orgId);
+  if (mockOrg) {
+    if (mockOrg.status === 'pending_approval') {
+      return {
+        allowed: false,
+        error: 'חשבון הארגון ממתין לאישור מנהל המערכת. ניצור איתך קשר בהקדם.',
+      };
+    }
+    if (mockOrg.status === 'rejected') {
+      return {
+        allowed: false,
+        error: 'חשבון זה נדחה על ידי הנהלת המערכת.',
+      };
+    }
+  }
+
+  return { allowed: true };
+}
 
 export async function resolveActiveOrganizationId(providedOrgId?: string): Promise<string> {
   const resolved = await getServerSessionOrgId(providedOrgId);
@@ -177,6 +233,14 @@ export async function authenticateUserAction(
             organization_id: effectiveOrg || DEFAULT_ORGANIZATION_ID,
           };
 
+          const orgStatus = await checkOrganizationApprovalStatus(effectiveOrg);
+          if (!orgStatus.allowed) {
+            return {
+              success: false,
+              error: orgStatus.error || 'חשבון הארגון ממתין לאישור מנהל המערכת. ניצור איתך קשר בהקדם.',
+            };
+          }
+
           await setSessionCookies(returnedUser);
 
           return {
@@ -242,6 +306,14 @@ export async function authenticateUserAction(
           organization_id: effectiveOrg || DEFAULT_ORGANIZATION_ID,
         };
 
+        const orgStatus = await checkOrganizationApprovalStatus(effectiveOrg);
+        if (!orgStatus.allowed) {
+          return {
+            success: false,
+            error: orgStatus.error || 'חשבון הארגון ממתין לאישור מנהל המערכת. ניצור איתך קשר בהקדם.',
+          };
+        }
+
         await setSessionCookies(returnedUser);
 
         return {
@@ -295,6 +367,14 @@ export async function authenticateUserAction(
         organizationId: effectiveOrg || DEFAULT_ORGANIZATION_ID,
         organization_id: effectiveOrg || DEFAULT_ORGANIZATION_ID,
       };
+      const orgStatus = await checkOrganizationApprovalStatus(effectiveOrg);
+      if (!orgStatus.allowed) {
+        return {
+          success: false,
+          error: orgStatus.error || 'חשבון הארגון ממתין לאישור מנהל המערכת. ניצור איתך קשר בהקדם.',
+        };
+      }
+
       await setSessionCookies(safeUser);
       return { success: true, user: safeUser };
     }
@@ -355,6 +435,14 @@ export async function authenticateUserAction(
     organizationId: effectiveOrg || DEFAULT_ORGANIZATION_ID,
     organization_id: effectiveOrg || DEFAULT_ORGANIZATION_ID,
   };
+  const orgStatus = await checkOrganizationApprovalStatus(effectiveOrg);
+  if (!orgStatus.allowed) {
+    return {
+      success: false,
+      error: orgStatus.error || 'חשבון הארגון ממתין לאישור מנהל המערכת. ניצור איתך קשר בהקדם.',
+    };
+  }
+
   await setSessionCookies(safeUser);
   return { success: true, user: safeUser };
 }

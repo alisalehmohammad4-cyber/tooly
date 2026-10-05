@@ -29,6 +29,13 @@ export const DEFAULT_ORGANIZATION: Organization = {
   slug: 'zatout',
   serialPrefix: 'ZR-',
   defaultCurrency: 'ILS',
+  status: 'active',
+  contact_phone: '050-1234567',
+  contact_email: 'office@zatout.co.il',
+  contactPhone: '050-1234567',
+  contactEmail: 'office@zatout.co.il',
+  created_at: '2024-01-01T00:00:00.000Z',
+  approved_at: '2024-01-01T00:00:00.000Z',
 };
 
 export const SALEHALI_ORGANIZATION: Organization = {
@@ -37,6 +44,13 @@ export const SALEHALI_ORGANIZATION: Organization = {
   slug: 'salehali',
   serialPrefix: 'ALI-',
   defaultCurrency: 'ILS',
+  status: 'active',
+  contact_phone: '052-9876543',
+  contact_email: 'admin@salehali.com',
+  contactPhone: '052-9876543',
+  contactEmail: 'admin@salehali.com',
+  created_at: '2024-01-01T00:00:00.000Z',
+  approved_at: '2024-01-01T00:00:00.000Z',
 };
 
 export const MOCK_ORGANIZATIONS: Organization[] = [DEFAULT_ORGANIZATION, SALEHALI_ORGANIZATION];
@@ -62,9 +76,7 @@ export function updateMockOrganization(
 ): Organization | null {
   const org = MOCK_ORGANIZATIONS.find((o) => o.id === id);
   if (!org) return null;
-  if (patch.name !== undefined) org.name = patch.name;
-  if (patch.serialPrefix !== undefined) org.serialPrefix = patch.serialPrefix;
-  if (patch.defaultCurrency !== undefined) org.defaultCurrency = patch.defaultCurrency;
+  Object.assign(org, patch);
   return org;
 }
 

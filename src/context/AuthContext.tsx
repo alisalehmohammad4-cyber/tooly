@@ -442,6 +442,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             error: 'משתמש זה הושבת על ידי הנהלת המפעל.',
           };
         }
+
+        const org = getMockOrganizationById(matchedUser.organizationId || '');
+        if (org?.status === 'pending_approval') {
+          return {
+            success: false,
+            error: 'חשבון הארגון ממתין לאישור מנהל המערכת. ניצור איתך קשר בהקדם.',
+          };
+        }
+        if (org?.status === 'rejected') {
+          return {
+            success: false,
+            error: 'חשבון זה נדחה על ידי הנהלת המערכת.',
+          };
+        }
+
         persistUserToStorage(matchedUser);
         notifyAuthSubscribers();
         setIsPinModalOpen(false);
@@ -496,6 +511,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               error: 'משתמש זה הושבת על ידי הנהלת המפעל.',
             };
           }
+
+          const org = getMockOrganizationById(matched.organizationId || '');
+          if (org?.status === 'pending_approval') {
+            return {
+              success: false,
+              error: 'חשבון הארגון ממתין לאישור מנהל המערכת. ניצור איתך קשר בהקדם.',
+            };
+          }
+          if (org?.status === 'rejected') {
+            return {
+              success: false,
+              error: 'חשבון זה נדחה על ידי הנהלת המערכת.',
+            };
+          }
+
           persistUserToStorage(matched);
           notifyAuthSubscribers();
           setIsPinModalOpen(false);
