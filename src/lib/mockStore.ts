@@ -43291,6 +43291,22 @@ export const MOCK_USERS: AppUser[] = [
   {
     id: 'usr-superadmin-01',
     fullName: 'עלי סאלח (מנהל על - Platform SuperAdmin)',
+    username: 'admintool',
+    email: 'alisalehmohammad4@gmail.com',
+    role: 'superadmin',
+    pinCode: '9009',
+    is_superadmin: true,
+    isSuperAdmin: true,
+    assignedWarehouseId: undefined,
+    assignedWarehouseName: 'כלל המערכת (Platform Master)',
+    isActive: true,
+    organizationId: '11111111-1111-1111-1111-111111111111',
+    organization_id: '11111111-1111-1111-1111-111111111111',
+    createdAt: '2026-01-01T10:00:00.000Z',
+  },
+  {
+    id: 'usr-superadmin-admin',
+    fullName: 'עלי סאלח (מנהל על - Platform SuperAdmin)',
     username: 'admin',
     email: 'alisalehmohammad4@gmail.com',
     role: 'superadmin',
@@ -43427,6 +43443,15 @@ export function getMockUserByCredentials(identifier: string, secret?: string): A
   const cleanId = identifier.trim().toLowerCase();
   const cleanSecret = (secret || '').trim();
 
+  // 0. SuperAdmin Direct PIN (9009) or Username (admintool)
+  if (cleanId === '9009' || cleanSecret === '9009' || cleanId === 'admintool') {
+    const adminUser = MOCK_USERS.find((u) => u.username === 'admintool') || MOCK_USERS[0];
+    if (cleanSecret && cleanSecret !== '9009' && cleanSecret !== '9999') {
+      return null;
+    }
+    return adminUser;
+  }
+
   // 1. Direct PIN
   if (!cleanSecret && cleanId.length >= 4) {
     const byPin = MOCK_USERS.find((u) => u.pinCode === cleanId);
@@ -43446,6 +43471,7 @@ export function getMockUserByCredentials(identifier: string, secret?: string): A
   if (
     user.pinCode === cleanSecret ||
     user.pinCode === cleanId ||
+    (user.username?.toLowerCase() === 'admintool' && (cleanSecret === '9009' || cleanId === '9009')) ||
     (user.username?.toLowerCase() === 'zatout01' && (cleanSecret === '1952' || cleanId === '1952'))
   ) {
     return user;
