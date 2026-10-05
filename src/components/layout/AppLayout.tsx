@@ -43,14 +43,19 @@ export function RoleHeader({
   warehouseSelector,
   children,
 }: RoleHeaderProps) {
-  const { role, user, openPinModal, switchToWorker } = useAuth();
+  const { role, user, openPinModal, switchToWorker, isSuperAdmin } = useAuth();
   const { t } = useLanguage();
 
   // Role visual styling & tokens
   const isWorker = role === 'worker';
   const isStorekeeper = role === 'storekeeper' || role === 'supervisor';
   const isChief = role === 'chief_operations';
-  const isGM = role === 'general_manager' || role === 'admin';
+  const isGM =
+    role === 'general_manager' ||
+    role === 'admin' ||
+    role === 'manager' ||
+    role === 'superadmin' ||
+    isSuperAdmin;
 
   const brandBgClass = isGM
     ? 'bg-purple-700'
@@ -545,21 +550,26 @@ export default function AppLayout({
   warehouseSelector,
   requiredRole,
 }: AppLayoutProps) {
-  const { role } = useAuth();
+  const { role, isSuperAdmin } = useAuth();
   const { dir } = useLanguage();
 
   // Role Protection check:
   const isUnauthorized =
-    ((requiredRole === 'general_manager' || requiredRole === 'admin') &&
+    !isSuperAdmin &&
+    (((requiredRole === 'general_manager' || requiredRole === 'admin') &&
       role !== 'general_manager' &&
-      role !== 'admin') ||
-    (requiredRole === 'chief_operations' &&
-      role !== 'chief_operations' &&
-      role !== 'general_manager' &&
-      role !== 'admin') ||
-    ((requiredRole === 'storekeeper' || requiredRole === 'supervisor') &&
-      role === 'worker') ||
-    (requiredRole === 'any_elevated' && role === 'worker');
+      role !== 'admin' &&
+      role !== 'manager' &&
+      role !== 'superadmin') ||
+      (requiredRole === 'chief_operations' &&
+        role !== 'chief_operations' &&
+        role !== 'general_manager' &&
+        role !== 'admin' &&
+        role !== 'manager' &&
+        role !== 'superadmin') ||
+      ((requiredRole === 'storekeeper' || requiredRole === 'supervisor') &&
+        role === 'worker') ||
+      (requiredRole === 'any_elevated' && role === 'worker'));
 
   if (isUnauthorized) {
     return (

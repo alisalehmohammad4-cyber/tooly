@@ -128,6 +128,7 @@ export type UserRole =
   | 'storekeeper'
   | 'chief_operations'
   | 'general_manager'
+  | 'manager'
   | 'supervisor'
   | 'admin'
   | 'superadmin';
@@ -135,6 +136,8 @@ export type UserRole =
 export interface AppUser {
   id: string;
   fullName: string;
+  name?: string;
+  full_name?: string;
   role: UserRole;
   pinCode?: string;
   username?: string;
