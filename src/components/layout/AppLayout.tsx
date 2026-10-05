@@ -447,6 +447,18 @@ function AuthGateLoginForm({ requiredRole }: AuthGateLoginFormProps) {
       if (!result.success) {
         setLoginError(result.error || 'פרטי התחברות שגויים');
       } else if (result.user) {
+        const isSuper =
+          result.user.is_superadmin === true ||
+          result.user.isSuperAdmin === true ||
+          result.user.role === 'superadmin' ||
+          result.user.username?.toLowerCase() === 'admintool' ||
+          result.user.username?.toLowerCase() === 'admin';
+
+        if (isSuper) {
+          window.location.href = '/admin';
+          return;
+        }
+
         const userRole = result.user.role;
         const stillUnauthorized =
           ((requiredRole === 'general_manager' || requiredRole === 'admin') &&

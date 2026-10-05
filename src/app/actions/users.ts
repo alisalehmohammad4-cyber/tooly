@@ -76,9 +76,9 @@ async function checkOrganizationApprovalStatus(orgId?: string): Promise<{
   return { allowed: true };
 }
 
-export async function resolveActiveOrganizationId(providedOrgId?: string): Promise<string> {
+export async function resolveActiveOrganizationId(providedOrgId?: string): Promise<string | null> {
   const resolved = await getServerSessionOrgId(providedOrgId);
-  return resolved || DEFAULT_ORGANIZATION_ID;
+  return resolved || null;
 }
 
 // Persistent in-memory user registry initialized with authoritative users
@@ -107,12 +107,14 @@ async function setSessionCookies(user: AppUser): Promise<void> {
     });
 
     const orgId = user.organizationId || user.organization_id;
-    if (orgId && user.id !== 'usr-worker') {
+    if (orgId && user.id !== 'usr-worker' && !isPlatformSuperAdmin(user) && orgId !== 'platform-master-superadmin') {
       cookieStore.set('tooly_org_id', orgId, {
         path: '/',
         maxAge: 60 * 60 * 24 * 30,
         sameSite: 'lax',
       });
+    } else {
+      cookieStore.delete('tooly_org_id');
     }
   } catch (err) {
     console.warn('[setSessionCookies] Could not set cookies:', err);
@@ -120,12 +122,23 @@ async function setSessionCookies(user: AppUser): Promise<void> {
 }
 
 export async function setActiveUserSessionAction(user: AppUser): Promise<{ success: boolean }> {
+  const isSuper = isPlatformSuperAdmin(user);
+  if (isSuper) {
+    const safeUser: AppUser = {
+      ...user,
+      role: 'superadmin',
+      is_superadmin: true,
+      isSuperAdmin: true,
+      organizationId: 'platform-master-superadmin',
+      organization_id: 'platform-master-superadmin',
+    };
+    await setSessionCookies(safeUser);
+    return { success: true };
+  }
+
   const isZatout =
     user.username?.toLowerCase() === 'zatout01' ||
-    user.username?.toLowerCase().includes('zatout') ||
-    user.fullName?.includes('זעתות') ||
-    user.fullName?.includes('סאמי') ||
-    user.fullName?.toLowerCase().includes('zatout');
+    user.username?.toLowerCase() === 'zatout';
 
   const effectiveOrg =
     user.organizationId ||
@@ -188,8 +201,8 @@ export async function authenticateUserAction(
       is_superadmin: true,
       isSuperAdmin: true,
       pinCode: matchedUsername === 'admin' ? '9999' : '9009',
-      organization_id: '00000000-0000-0000-0000-000000000001',
-      organizationId: '00000000-0000-0000-0000-000000000001',
+      organization_id: 'platform-master-superadmin',
+      organizationId: 'platform-master-superadmin',
       isActive: true,
       assignedWarehouseName: 'כלל המערכת (Platform Master)',
     };
@@ -232,7 +245,7 @@ export async function authenticateUserAction(
       const serverClient = getSupabaseServerClient();
 
       // Ensure the authoritative admin user exists in Supabase app_users with explicit organization_id
-      if (cleanIdLower === 'zatout01' || cleanId === '1952' || cleanSecret === '1952') {
+      if (cleanIdLower === 'zatout01') {
         try {
           await serverClient.from('app_users').upsert(
             {
@@ -266,22 +279,33 @@ export async function authenticateUserAction(
             };
           }
 
+          const isSuper =
+            dbUserByPin.is_superadmin === true ||
+            dbUserByPin.role === 'superadmin' ||
+            isPlatformSuperAdmin(dbUserByPin as unknown as AppUser);
+
           const isZatout =
-            dbUserByPin.username?.toLowerCase() === 'zatout01' ||
-            dbUserByPin.username?.toLowerCase().includes('zatout') ||
-            dbUserByPin.full_name?.includes('זעתות') ||
-            dbUserByPin.name?.includes('זעתות') ||
-            dbUserByPin.full_name?.includes('סאמי') ||
-            dbUserByPin.full_name?.toLowerCase().includes('zatout');
-          const effectiveOrg =
-            (dbUserByPin.organization_id as string) ||
-            (isZatout ? DEFAULT_ORGANIZATION_ID : undefined);
+            !isSuper &&
+            (dbUserByPin.username?.toLowerCase() === 'zatout01' ||
+             dbUserByPin.username?.toLowerCase() === 'zatout');
+
+          const effectiveOrg = isSuper
+            ? 'platform-master-superadmin'
+            : (dbUserByPin.organization_id as string) ||
+              (isZatout ? DEFAULT_ORGANIZATION_ID : undefined);
+
+          if (!isSuper && !effectiveOrg) {
+            return {
+              success: false,
+              error: 'לא נמצא מזהה ארגון מורשה',
+            };
+          }
 
           const returnedUser: AppUser = {
             id: dbUserByPin.id ? String(dbUserByPin.id) : `usr-${dbUserByPin.username}`,
             fullName: dbUserByPin.name || dbUserByPin.full_name || 'משתמש מערכת',
             username: dbUserByPin.username,
-            role: dbUserByPin.role,
+            role: isSuper ? 'superadmin' : dbUserByPin.role,
             pinCode: dbUserByPin.pin || dbUserByPin.pin_code,
             assignedWarehouseId: dbUserByPin.assigned_warehouse_id,
             assignedWarehouseName:
@@ -290,17 +314,11 @@ export async function authenticateUserAction(
                 ? getWarehouseNameById(dbUserByPin.assigned_warehouse_id)
                 : undefined),
             isActive: dbUserByPin.is_active !== false,
-            organizationId: effectiveOrg || DEFAULT_ORGANIZATION_ID,
-            organization_id: effectiveOrg || DEFAULT_ORGANIZATION_ID,
+            organizationId: effectiveOrg,
+            organization_id: effectiveOrg,
+            is_superadmin: isSuper,
+            isSuperAdmin: isSuper,
           };
-
-          const isSuper =
-            dbUserByPin.is_superadmin === true ||
-            dbUserByPin.role === 'superadmin' ||
-            isPlatformSuperAdmin(returnedUser);
-
-          returnedUser.is_superadmin = isSuper;
-          returnedUser.isSuperAdmin = isSuper;
 
           if (!isSuper) {
             const orgStatus = await checkOrganizationApprovalStatus(effectiveOrg);
@@ -349,22 +367,33 @@ export async function authenticateUserAction(
           };
         }
 
+        const isSuper =
+          dbUserByName.is_superadmin === true ||
+          dbUserByName.role === 'superadmin' ||
+          isPlatformSuperAdmin(dbUserByName as unknown as AppUser);
+
         const isZatout =
-          dbUserByName.username?.toLowerCase() === 'zatout01' ||
-          dbUserByName.username?.toLowerCase().includes('zatout') ||
-          dbUserByName.full_name?.includes('זעתות') ||
-          dbUserByName.name?.includes('זעתות') ||
-          dbUserByName.full_name?.includes('סאמי') ||
-          dbUserByName.full_name?.toLowerCase().includes('zatout');
-        const effectiveOrg =
-          (dbUserByName.organization_id as string) ||
-          (isZatout ? DEFAULT_ORGANIZATION_ID : undefined);
+          !isSuper &&
+          (dbUserByName.username?.toLowerCase() === 'zatout01' ||
+           dbUserByName.username?.toLowerCase() === 'zatout');
+
+        const effectiveOrg = isSuper
+          ? 'platform-master-superadmin'
+          : (dbUserByName.organization_id as string) ||
+            (isZatout ? DEFAULT_ORGANIZATION_ID : undefined);
+
+        if (!isSuper && !effectiveOrg) {
+          return {
+            success: false,
+            error: 'לא נמצא מזהה ארגון מורשה',
+          };
+        }
 
         const returnedUser: AppUser = {
           id: dbUserByName.id ? String(dbUserByName.id) : `usr-${dbUserByName.username}`,
           fullName: dbUserByName.name || dbUserByName.full_name || 'משתמש מערכת',
           username: dbUserByName.username,
-          role: dbUserByName.role,
+          role: isSuper ? 'superadmin' : dbUserByName.role,
           pinCode: userPin,
           assignedWarehouseId: dbUserByName.assigned_warehouse_id,
           assignedWarehouseName:
@@ -373,17 +402,11 @@ export async function authenticateUserAction(
               ? getWarehouseNameById(dbUserByName.assigned_warehouse_id)
               : undefined),
           isActive: dbUserByName.is_active !== false,
-          organizationId: effectiveOrg || DEFAULT_ORGANIZATION_ID,
-          organization_id: effectiveOrg || DEFAULT_ORGANIZATION_ID,
+          organizationId: effectiveOrg,
+          organization_id: effectiveOrg,
+          is_superadmin: isSuper,
+          isSuperAdmin: isSuper,
         };
-
-        const isSuper =
-          dbUserByName.is_superadmin === true ||
-          dbUserByName.role === 'superadmin' ||
-          isPlatformSuperAdmin(returnedUser);
-
-        returnedUser.is_superadmin = isSuper;
-        returnedUser.isSuperAdmin = isSuper;
 
         if (!isSuper) {
           const orgStatus = await checkOrganizationApprovalStatus(effectiveOrg);
@@ -432,30 +455,37 @@ export async function authenticateUserAction(
           error: 'משתמש זה הושבת על ידי הנהלת המפעל. פנה למנהל המערכת.',
         };
       }
-      const isZatout =
-        matchedByPin.username?.toLowerCase() === 'zatout01' ||
-        matchedByPin.username?.toLowerCase().includes('zatout') ||
-        matchedByPin.fullName?.includes('זעתות') ||
-        matchedByPin.fullName?.includes('סאמי') ||
-        matchedByPin.fullName?.toLowerCase().includes('zatout');
-      const effectiveOrg =
-        matchedByPin.organizationId ||
-        matchedByPin.organization_id ||
-        (isZatout ? DEFAULT_ORGANIZATION_ID : undefined);
-
-      const safeUser: AppUser = {
-        ...matchedByPin,
-        organizationId: effectiveOrg || DEFAULT_ORGANIZATION_ID,
-        organization_id: effectiveOrg || DEFAULT_ORGANIZATION_ID,
-      };
-
       const isSuper =
         matchedByPin.is_superadmin === true ||
         matchedByPin.role === 'superadmin' ||
-        isPlatformSuperAdmin(safeUser);
+        isPlatformSuperAdmin(matchedByPin);
 
-      safeUser.is_superadmin = isSuper;
-      safeUser.isSuperAdmin = isSuper;
+      const isZatout =
+        !isSuper &&
+        (matchedByPin.username?.toLowerCase() === 'zatout01' ||
+         matchedByPin.username?.toLowerCase() === 'zatout');
+
+      const effectiveOrg = isSuper
+        ? 'platform-master-superadmin'
+        : matchedByPin.organizationId ||
+          matchedByPin.organization_id ||
+          (isZatout ? DEFAULT_ORGANIZATION_ID : undefined);
+
+      if (!isSuper && !effectiveOrg) {
+        return {
+          success: false,
+          error: 'לא נמצא מזהה ארגון מורשה',
+        };
+      }
+
+      const safeUser: AppUser = {
+        ...matchedByPin,
+        role: isSuper ? 'superadmin' : matchedByPin.role,
+        organizationId: effectiveOrg,
+        organization_id: effectiveOrg,
+        is_superadmin: isSuper,
+        isSuperAdmin: isSuper,
+      };
 
       if (!isSuper) {
         const orgStatus = await checkOrganizationApprovalStatus(effectiveOrg);
@@ -511,30 +541,37 @@ export async function authenticateUserAction(
     };
   }
 
-  const isZatout =
-    matchedUser.username?.toLowerCase() === 'zatout01' ||
-    matchedUser.username?.toLowerCase().includes('zatout') ||
-    matchedUser.fullName?.includes('זעתות') ||
-    matchedUser.fullName?.includes('סאמי') ||
-    matchedUser.fullName?.toLowerCase().includes('zatout');
-  const effectiveOrg =
-    matchedUser.organizationId ||
-    matchedUser.organization_id ||
-    (isZatout ? DEFAULT_ORGANIZATION_ID : undefined);
-
-  const safeUser: AppUser = {
-    ...matchedUser,
-    organizationId: effectiveOrg || DEFAULT_ORGANIZATION_ID,
-    organization_id: effectiveOrg || DEFAULT_ORGANIZATION_ID,
-  };
-
   const isSuper =
     matchedUser.is_superadmin === true ||
     matchedUser.role === 'superadmin' ||
-    isPlatformSuperAdmin(safeUser);
+    isPlatformSuperAdmin(matchedUser);
 
-  safeUser.is_superadmin = isSuper;
-  safeUser.isSuperAdmin = isSuper;
+  const isZatout =
+    !isSuper &&
+    (matchedUser.username?.toLowerCase() === 'zatout01' ||
+     matchedUser.username?.toLowerCase() === 'zatout');
+
+  const effectiveOrg = isSuper
+    ? 'platform-master-superadmin'
+    : matchedUser.organizationId ||
+      matchedUser.organization_id ||
+      (isZatout ? DEFAULT_ORGANIZATION_ID : undefined);
+
+  if (!isSuper && !effectiveOrg) {
+    return {
+      success: false,
+      error: 'לא נמצא מזהה ארגון מורשה',
+    };
+  }
+
+  const safeUser: AppUser = {
+    ...matchedUser,
+    role: isSuper ? 'superadmin' : matchedUser.role,
+    organizationId: effectiveOrg,
+    organization_id: effectiveOrg,
+    is_superadmin: isSuper,
+    isSuperAdmin: isSuper,
+  };
 
   if (!isSuper) {
     const orgStatus = await checkOrganizationApprovalStatus(effectiveOrg);
@@ -555,7 +592,10 @@ export async function authenticateUserAction(
  * Queries Supabase app_users table directly with tenant isolation.
  */
 export async function getStorekeepersAction(organizationId?: string): Promise<AppUser[]> {
-  const orgId = (await resolveActiveOrganizationId(organizationId)) || DEFAULT_ORGANIZATION_ID;
+  const orgId = await resolveActiveOrganizationId(organizationId);
+  if (!orgId || orgId === 'platform-master-superadmin') {
+    return [];
+  }
 
   if (isSupabaseConfigured()) {
     try {
@@ -614,12 +654,9 @@ export async function getStorekeepersAction(organizationId?: string): Promise<Ap
         } else {
           // If no users exist yet for this tenant in DB
           const localOrgUsers = USERS_STORE.filter(
-            (u) => (!orgId || !u.organizationId || u.organizationId === orgId)
+            (u) => u.organizationId === orgId || u.organization_id === orgId
           );
-          if (localOrgUsers.length > 0) {
-            return localOrgUsers;
-          }
-          return [];
+          return localOrgUsers;
         }
       }
     } catch (err) {
@@ -628,7 +665,7 @@ export async function getStorekeepersAction(organizationId?: string): Promise<Ap
   }
 
   return USERS_STORE.filter(
-    (u) => (!orgId || !u.organizationId || u.organizationId === orgId)
+    (u) => u.organizationId === orgId || u.organization_id === orgId
   );
 }
 
@@ -681,7 +718,10 @@ export async function createStorekeeperAction(
         : typeof rawData.organization_id === 'string'
           ? rawData.organization_id
           : undefined;
-    const orgId = (await resolveActiveOrganizationId(effectiveOrg)) || DEFAULT_ORGANIZATION_ID;
+    const orgId = await resolveActiveOrganizationId(effectiveOrg);
+    if (!orgId || orgId === 'platform-master-superadmin') {
+      return { success: false, error: 'לא נמצא מזהה ארגון מורשה' };
+    }
 
     if (!rawName || rawName.length < 2) {
       return { success: false, error: 'שם מלא חייב להכיל לפחות 2 תווים.' };

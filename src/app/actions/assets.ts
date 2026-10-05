@@ -747,6 +747,9 @@ export async function updateAssetStatusAction(
   }
 
   const orgId = await resolveActiveOrganizationId();
+  if (!orgId || orgId === 'platform-master-superadmin') {
+    return { success: false, error: 'לא נמצא מזהה ארגון מורשה' };
+  }
   const sessionUser = await getServerSessionUser();
   const performedBy = sessionUser?.fullName || 'מחסנאי / מנהל';
   const now = new Date().toISOString();
@@ -775,7 +778,7 @@ export async function updateAssetStatusAction(
         })
         .eq('id', assetId);
 
-      if (orgId && orgId !== DEFAULT_ORGANIZATION.id) {
+      if (orgId) {
         updateQuery.eq('organization_id', orgId);
       }
 

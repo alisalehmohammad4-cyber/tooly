@@ -89,12 +89,11 @@ import {
   mutateMockAsset,
   getMockAssets,
   getMockWarehouses,
-  DEFAULT_ORGANIZATION,
 } from '@/lib/mockStore';
 
-export async function resolveActiveOrganizationId(providedOrgId?: string): Promise<string> {
+export async function resolveActiveOrganizationId(providedOrgId?: string): Promise<string | null> {
   const resolved = await getServerSessionOrgId(providedOrgId);
-  return resolved || DEFAULT_ORGANIZATION.id;
+  return resolved || null;
 }
 
 // In-memory fallback dataset synchronized with unified mockStore
@@ -123,7 +122,7 @@ function initCustodyAssets() {
       lockReason: a.lockReason,
       expectedReturnDate: a.expectedReturnDate,
       accessories: a.accessories,
-      organizationId: a.organizationId || DEFAULT_ORGANIZATION.id,
+      organizationId: a.organizationId,
     };
   });
 }
@@ -278,6 +277,7 @@ export async function getAssetDetailsByQr(
   if (!cleanQr) return null;
 
   const orgId = await resolveActiveOrganizationId(organizationId);
+  if (!orgId || orgId === 'platform-master-superadmin') return null;
 
   if (isSupabaseConfigured()) {
     try {
@@ -316,11 +316,7 @@ export async function getAssetDetailsByQr(
         `)
         .or(`qr_code.eq.${cleanQr},nfc_uid.eq.${cleanQr},id.eq.${cleanQr}`);
 
-      if (orgId === DEFAULT_ORGANIZATION.id) {
-        exactQuery = exactQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
-      } else {
-        exactQuery = exactQuery.eq('organization_id', orgId);
-      }
+      exactQuery = exactQuery.eq('organization_id', orgId);
 
       const { data: exactData, error: exactError } = await exactQuery.maybeSingle();
 
@@ -366,11 +362,7 @@ export async function getAssetDetailsByQr(
         `)
         .ilike('qr_code', `%${cleanQr}`);
 
-      if (orgId === DEFAULT_ORGANIZATION.id) {
-        suffixQuery = suffixQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
-      } else {
-        suffixQuery = suffixQuery.eq('organization_id', orgId);
-      }
+      suffixQuery = suffixQuery.eq('organization_id', orgId);
 
       const { data: suffixData, error: suffixError } = await suffixQuery;
 
@@ -397,10 +389,7 @@ export async function getAssetDetailsByQr(
   const normalized = cleanQr.toUpperCase();
   for (const key of Object.keys(FALLBACK_CUSTODY_ASSETS)) {
     const a = FALLBACK_CUSTODY_ASSETS[key];
-    const matchesOrg =
-      orgId === DEFAULT_ORGANIZATION.id
-        ? !a.organizationId || a.organizationId === orgId
-        : a.organizationId === orgId;
+    const matchesOrg = a.organizationId === orgId;
     if (matchesOrg && key.toUpperCase() === normalized) {
       return enrichLastCheckoutNote({ ...a }, orgId);
     }
@@ -408,10 +397,7 @@ export async function getAssetDetailsByQr(
 
   // 2. Suffix match in fallback registry
   const fallbackMatches = Object.values(FALLBACK_CUSTODY_ASSETS).filter((a) => {
-    const matchesOrg =
-      orgId === DEFAULT_ORGANIZATION.id
-        ? !a.organizationId || a.organizationId === orgId
-        : a.organizationId === orgId;
+    const matchesOrg = a.organizationId === orgId;
     return matchesOrg && matchesCodeSuffix(a.qrCode, cleanQr);
   });
   if (fallbackMatches.length > 0) {
@@ -436,6 +422,7 @@ export async function getAssetDetailsByNfc(
   if (!cleanUid) return null;
 
   const orgId = await resolveActiveOrganizationId(organizationId);
+  if (!orgId || orgId === 'platform-master-superadmin') return null;
 
   if (isSupabaseConfigured()) {
     try {
@@ -471,11 +458,7 @@ export async function getAssetDetailsByNfc(
         `)
         .eq('nfc_uid', cleanUid);
 
-      if (orgId === DEFAULT_ORGANIZATION.id) {
-        query = query.or(`organization_id.eq.${orgId},organization_id.is.null`);
-      } else {
-        query = query.eq('organization_id', orgId);
-      }
+      query = query.eq('organization_id', orgId);
 
       const { data, error } = await query.maybeSingle();
       if (!error && data) {
@@ -516,6 +499,12 @@ export async function bulkCheckoutAssetAction(
   } = parsed.data;
 
   const orgId = await resolveActiveOrganizationId();
+  if (!orgId || orgId === 'platform-master-superadmin') {
+    return {
+      success: false,
+      error: 'לא נמצא מזהה ארגון מורשה',
+    };
+  }
 
   // 1. Pre-validation: Enforce Administrative Lockout & Periodic Safety Inspection Due & Tenant Ownership
   for (const id of assetIds) {
@@ -527,10 +516,7 @@ export async function bulkCheckoutAssetAction(
       }
     }
     if (targetAsset) {
-      const isOwner =
-        orgId === DEFAULT_ORGANIZATION.id
-          ? !targetAsset.organizationId || targetAsset.organizationId === orgId
-          : targetAsset.organizationId === orgId;
+      const isOwner = targetAsset.organizationId === orgId;
       if (!isOwner) {
         return {
           success: false,
@@ -548,10 +534,7 @@ export async function bulkCheckoutAssetAction(
 
     const anyMockAsset = getMockAssets().find((a) => a.id === id);
     if (anyMockAsset) {
-      const isOwner =
-        orgId === DEFAULT_ORGANIZATION.id
-          ? !anyMockAsset.organizationId || anyMockAsset.organizationId === orgId
-          : anyMockAsset.organizationId === orgId;
+      const isOwner = anyMockAsset.organizationId === orgId;
       if (!isOwner) {
         return {
           success: false,
@@ -584,11 +567,8 @@ export async function bulkCheckoutAssetAction(
 
       // Check tenant ownership & lockouts in DB
       for (const item of currentAssets) {
-        const itemOrgId = (item.organization_id as string) || DEFAULT_ORGANIZATION.id;
-        const isOwner =
-          orgId === DEFAULT_ORGANIZATION.id
-            ? !item.organization_id || itemOrgId === orgId
-            : itemOrgId === orgId;
+        const itemOrgId = item.organization_id as string;
+        const isOwner = itemOrgId === orgId;
         if (!isOwner) {
           return {
             success: false,
@@ -645,7 +625,7 @@ export async function bulkCheckoutAssetAction(
           })
           .eq('id', item.id);
 
-        if (orgId && orgId !== DEFAULT_ORGANIZATION.id) {
+        if (orgId) {
           updateQuery.eq('organization_id', orgId);
         }
 
@@ -898,6 +878,9 @@ export async function checkinAssetAction(
   const newStatus: ScannedAssetDetails['status'] = isDamaged ? 'maintenance' : 'available';
 
   const orgId = await resolveActiveOrganizationId();
+  if (!orgId || orgId === 'platform-master-superadmin') {
+    return { success: false, error: 'לא נמצא מזהה ארגון מורשה' };
+  }
 
   if (isSupabaseConfigured()) {
     try {
@@ -915,11 +898,8 @@ export async function checkinAssetAction(
         return { success: false, error: 'Asset not found in database.' };
       }
 
-      const itemOrg = (currentAsset.organization_id as string) || DEFAULT_ORGANIZATION.id;
-      const isOwner =
-        orgId === DEFAULT_ORGANIZATION.id
-          ? !currentAsset.organization_id || itemOrg === orgId
-          : itemOrg === orgId;
+      const itemOrg = currentAsset.organization_id as string;
+      const isOwner = itemOrg === orgId;
 
       if (!isOwner) {
         return {
@@ -942,7 +922,7 @@ export async function checkinAssetAction(
         })
         .eq('id', assetId);
 
-      if (orgId && orgId !== DEFAULT_ORGANIZATION.id) {
+      if (orgId) {
         updateQuery.eq('organization_id', orgId);
       }
 
@@ -1214,6 +1194,9 @@ export async function getCheckedOutAssetsForReturnAction(
   organizationId?: string
 ): Promise<ActiveCheckedOutAssetItem[]> {
   const orgId = await resolveActiveOrganizationId(organizationId);
+  if (!orgId || orgId === 'platform-master-superadmin') {
+    return [];
+  }
 
   if (isSupabaseConfigured()) {
     try {
@@ -1249,11 +1232,7 @@ export async function getCheckedOutAssetsForReturnAction(
         `)
         .eq('status', 'checked_out');
 
-      if (orgId && orgId !== DEFAULT_ORGANIZATION.id) {
-        query = query.eq('organization_id', orgId);
-      } else {
-        query = query.or(`organization_id.eq.${orgId},organization_id.is.null`);
-      }
+      query = query.eq('organization_id', orgId);
 
       if (warehouseId && warehouseId !== 'all') {
         query = query.eq('current_warehouse_id', warehouseId);
@@ -1389,6 +1368,9 @@ export async function transferAssetAction(
 
   const { assetId, targetWarehouseId, gps, notes } = parsed.data;
   const orgId = await resolveActiveOrganizationId();
+  if (!orgId || orgId === 'platform-master-superadmin') {
+    return { success: false, error: 'לא נמצא מזהה ארגון מורשה' };
+  }
 
   // 1. Verify destination warehouse belongs to active organization
   const mockWh = getMockWarehouses(true, orgId).find((w) => w.id === targetWarehouseId || w.code === targetWarehouseId);
@@ -1403,11 +1385,8 @@ export async function transferAssetAction(
         .maybeSingle();
 
       if (dbWh) {
-        const whOrg = (dbWh.organization_id as string) || DEFAULT_ORGANIZATION.id;
-        isWhValid =
-          orgId === DEFAULT_ORGANIZATION.id
-            ? !dbWh.organization_id || whOrg === orgId
-            : whOrg === orgId;
+        const whOrg = dbWh.organization_id as string;
+        isWhValid = whOrg === orgId;
       }
     } catch {}
   }
@@ -1421,20 +1400,14 @@ export async function transferAssetAction(
 
   // 2. Verify asset belongs to active organization
   let isAssetValid = false;
-  const mockAsset = getMockAssets().find((a) => a.id === assetId);
+  const mockAsset = getMockAssets().find((a) => a.id === assetId && a.organizationId === orgId);
   if (mockAsset) {
-    isAssetValid =
-      orgId === DEFAULT_ORGANIZATION.id
-        ? !mockAsset.organizationId || mockAsset.organizationId === orgId
-        : mockAsset.organizationId === orgId;
+    isAssetValid = true;
   }
   for (const key of Object.keys(FALLBACK_CUSTODY_ASSETS)) {
     const fAsset = FALLBACK_CUSTODY_ASSETS[key];
-    if (fAsset.id === assetId) {
-      isAssetValid =
-        orgId === DEFAULT_ORGANIZATION.id
-          ? !fAsset.organizationId || fAsset.organizationId === orgId
-          : fAsset.organizationId === orgId;
+    if (fAsset.id === assetId && fAsset.organizationId === orgId) {
+      isAssetValid = true;
       break;
     }
   }
@@ -1464,11 +1437,8 @@ export async function transferAssetAction(
         return { success: false, error: 'Asset not found in database.' };
       }
 
-      const assetOrg = (currentAsset.organization_id as string) || DEFAULT_ORGANIZATION.id;
-      const isAssetOwner =
-        orgId === DEFAULT_ORGANIZATION.id
-          ? !currentAsset.organization_id || assetOrg === orgId
-          : assetOrg === orgId;
+      const assetOrg = currentAsset.organization_id as string;
+      const isAssetOwner = assetOrg === orgId;
 
       if (!isAssetOwner) {
         return {
@@ -1493,7 +1463,7 @@ export async function transferAssetAction(
         })
         .eq('id', assetId);
 
-      if (orgId && orgId !== DEFAULT_ORGANIZATION.id) {
+      if (orgId) {
         updateQuery.eq('organization_id', orgId);
       }
 
@@ -2256,6 +2226,9 @@ export async function dispatchAssetWithSignatureAction(data: {
   }
 
   const orgId = await resolveActiveOrganizationId();
+  if (!orgId || orgId === 'platform-master-superadmin') {
+    return { success: false, error: 'לא נמצא מזהה ארגון מורשה' };
+  }
   const sessionUser = await getServerSessionUser();
   const performedBy = sessionUser?.fullName || 'מחסנאי מורשה';
   const now = new Date().toISOString();
@@ -2276,7 +2249,7 @@ export async function dispatchAssetWithSignatureAction(data: {
         )
         .eq('id', assetId);
 
-      if (orgId && orgId !== DEFAULT_ORGANIZATION.id) {
+      if (orgId) {
         assetQuery = assetQuery.eq('organization_id', orgId);
       }
 
@@ -2315,7 +2288,7 @@ export async function dispatchAssetWithSignatureAction(data: {
     }
   } else {
     const mockAsset = getMockAssets().find(
-      (a) => a.id === assetId && (!a.organizationId || a.organizationId === orgId)
+      (a) => a.id === assetId && a.organizationId === orgId
     );
     if (!mockAsset) {
       return { success: false, error: 'כלי העבודה אינו קיים או אינו שייך לארגון' };
@@ -2375,7 +2348,7 @@ export async function dispatchAssetWithSignatureAction(data: {
         })
         .eq('id', assetId);
 
-      if (orgId && orgId !== DEFAULT_ORGANIZATION.id) {
+      if (orgId) {
         updateQuery.eq('organization_id', orgId);
       }
 
@@ -2478,7 +2451,7 @@ export async function dispatchAssetWithSignatureAction(data: {
     warehouseCode: targetWarehouseCode,
     notes: `הוצאה לאתר ${targetWarehouseName} עם אישור תיוג פיזי וחתימה דיגיטלית`,
     createdAt: now,
-    organizationId: orgId,
+    organizationId: orgId || undefined,
     signatureData,
     isTagVerified,
     signedAt: now,
@@ -2518,6 +2491,9 @@ export async function snapOcrTagToAssetAction(
   }
 
   const orgId = await resolveActiveOrganizationId(organizationId);
+  if (!orgId || orgId === 'platform-master-superadmin') {
+    return { success: false, asset: null, message: 'לא נמצא מזהה ארגון מורשה' };
+  }
 
   // Check 1: Query getAssetDetailsByQr directly (checks qr_code, id, nfc_uid, suffix)
   const assetByCode = await getAssetDetailsByQr(cleanTag, facilityId, orgId);
@@ -2572,11 +2548,7 @@ export async function snapOcrTagToAssetAction(
         `)
         .or(`tag_number.eq.${cleanTag},tag_number.eq.${dashedVariant},serial_number.eq.${cleanTag}`);
 
-      if (orgId === DEFAULT_ORGANIZATION.id) {
-        query = query.or(`organization_id.eq.${orgId},organization_id.is.null`);
-      } else {
-        query = query.eq('organization_id', orgId);
-      }
+      query = query.eq('organization_id', orgId);
 
       const { data, error } = await query.maybeSingle();
       if (!error && data) {

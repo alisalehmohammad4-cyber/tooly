@@ -67,6 +67,7 @@ import WarehouseFormModal from '@/components/modules/WarehouseFormModal';
 import WarehouseToolsModal from '@/components/modules/WarehouseToolsModal';
 import AppLayout from '@/components/layout/AppLayout';
 import { useAuth } from '@/context/AuthContext';
+import { isPlatformSuperAdmin } from '@/lib/auth/superadmin';
 
 
 interface ManagerDashboardViewProps {
@@ -76,7 +77,10 @@ interface ManagerDashboardViewProps {
 export default function ManagerDashboardView({ data }: ManagerDashboardViewProps) {
   const { currentOrganization, user } = useAuth();
 
-  const orgDisplayName = data.organizationName || currentOrganization?.name || 'סאמי זעתות';
+  const isSuper = isPlatformSuperAdmin(user);
+  const orgDisplayName = isSuper
+    ? 'Tooly Master - הנהלת מערכת ראשית'
+    : (data.organizationName && data.organizationName !== 'חברה' ? data.organizationName : currentOrganization?.name) || 'חברה';
   const totalAssetsCount = data.utilization?.totalAssets ?? 0;
 
   // Main Tab Navigation: Warehouses vs Storekeepers vs Executive BI Analytics
@@ -603,9 +607,9 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
 
   return (
     <AppLayout
-      title={`Tooly - ${orgDisplayName} (Executive BI)`}
-      subtitle="לוח בקרה ניהולי, מדדים פיננסיים ומרכז דוחות"
-      requiredRole="general_manager"
+      title={isSuper ? 'Tooly Master - הנהלת מערכת ראשית' : `Tooly - ${orgDisplayName} (Executive BI)`}
+      subtitle={isSuper ? 'פורטל שליטה ובקרת פלטפורמה ראשית' : 'לוח בקרה ניהולי, מדדים פיננסיים ומרכז דוחות'}
+      requiredRole={isSuper ? undefined : 'general_manager'}
     >
       {/* PRINT-ONLY HEADER */}
       <div className="hidden print:block p-6 border-b-2 border-slate-900 mb-6 text-center" dir="rtl">

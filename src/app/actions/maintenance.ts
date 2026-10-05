@@ -1,12 +1,11 @@
 'use server';
 
 import { supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase';
-import { getServerSessionOrgId, getServerSessionUser, DEFAULT_ORGANIZATION_ID } from '@/lib/auth/session';
+import { getServerSessionOrgId, getServerSessionUser } from '@/lib/auth/session';
 import {
   getMockWarehouses,
   getMockAssets,
   mutateMockAsset,
-  DEFAULT_ORGANIZATION,
 } from '@/lib/mockStore';
 
 export interface InTransitFleetItem {
@@ -60,9 +59,9 @@ export interface ScrapAssetInput {
   retiredBy?: string;
 }
 
-async function resolveActiveOrg(providedOrgId?: string): Promise<string> {
+async function resolveActiveOrg(providedOrgId?: string): Promise<string | null> {
   const resolved = await getServerSessionOrgId(providedOrgId);
-  return resolved || DEFAULT_ORGANIZATION_ID;
+  return resolved || null;
 }
 
 function formatElapsedHebrew(dateStr?: string | null): string {
@@ -92,6 +91,9 @@ export async function getInTransitFleetAction(
   providedOrgId?: string
 ): Promise<InTransitFleetItem[]> {
   const orgId = await resolveActiveOrg(providedOrgId);
+  if (!orgId || orgId === 'platform-master-superadmin') {
+    return [];
+  }
 
   if (isSupabaseConfigured()) {
     try {
@@ -123,11 +125,7 @@ export async function getInTransitFleetAction(
         `)
         .eq('status', 'in_transit');
 
-      if (orgId && orgId !== DEFAULT_ORGANIZATION.id) {
-        assetQuery = assetQuery.eq('organization_id', orgId);
-      } else {
-        assetQuery = assetQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
-      }
+      assetQuery = assetQuery.eq('organization_id', orgId);
 
       const { data: assetRows, error: assetErr } = await assetQuery.order('updated_at', { ascending: false });
 
@@ -286,6 +284,9 @@ export async function getMaintenanceAssetsAction(
   providedOrgId?: string
 ): Promise<MaintenanceAssetItem[]> {
   const orgId = await resolveActiveOrg(providedOrgId);
+  if (!orgId || orgId === 'platform-master-superadmin') {
+    return [];
+  }
 
   if (isSupabaseConfigured()) {
     try {
@@ -319,11 +320,7 @@ export async function getMaintenanceAssetsAction(
         .eq('status', 'maintenance')
         .neq('condition', 'retired');
 
-      if (orgId && orgId !== DEFAULT_ORGANIZATION.id) {
-        assetQuery = assetQuery.eq('organization_id', orgId);
-      } else {
-        assetQuery = assetQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
-      }
+      assetQuery = assetQuery.eq('organization_id', orgId);
 
       const { data: assetRows, error: assetErr } = await assetQuery.order('updated_at', { ascending: false });
 
@@ -472,6 +469,9 @@ export async function returnFromMaintenanceAction(
   input: ReturnFromMaintenanceInput
 ): Promise<{ success: boolean; error?: string; message?: string }> {
   const orgId = await resolveActiveOrg();
+  if (!orgId || orgId === 'platform-master-superadmin') {
+    return { success: false, error: 'לא נמצא מזהה ארגון מורשה' };
+  }
   const user = await getServerSessionUser();
   const receivedBy = input.repairedBy || user?.fullName || 'אחראי תפעול ראשי';
   const now = new Date().toISOString();
@@ -495,7 +495,7 @@ export async function returnFromMaintenanceAction(
         })
         .eq('id', assetId);
 
-      if (orgId && orgId !== DEFAULT_ORGANIZATION.id) {
+      if (orgId) {
         updateQuery.eq('organization_id', orgId);
       }
 
@@ -558,6 +558,9 @@ export async function scrapAndRetireAssetAction(
   input: ScrapAssetInput
 ): Promise<{ success: boolean; error?: string; message?: string }> {
   const orgId = await resolveActiveOrg();
+  if (!orgId || orgId === 'platform-master-superadmin') {
+    return { success: false, error: 'לא נמצא מזהה ארגון מורשה' };
+  }
   const user = await getServerSessionUser();
   const retiredBy = input.retiredBy || user?.fullName || 'אחראי תפעול ראשי';
   const now = new Date().toISOString();
@@ -580,7 +583,7 @@ export async function scrapAndRetireAssetAction(
         })
         .eq('id', assetId);
 
-      if (orgId && orgId !== DEFAULT_ORGANIZATION.id) {
+      if (orgId) {
         updateQuery.eq('organization_id', orgId);
       }
 

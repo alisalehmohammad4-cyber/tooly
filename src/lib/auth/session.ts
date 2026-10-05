@@ -1,4 +1,5 @@
 import type { AppUser } from '@/types/domain';
+import { isPlatformSuperAdmin } from './superadmin';
 
 export const ACTIVE_USER_COOKIE = 'tooly_active_user';
 export const ORG_ID_COOKIE = 'tooly_org_id';
@@ -7,10 +8,11 @@ export const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
 /**
  * Authoritative server helper to resolve the active organization ID.
  * - Reads from explicit argument first.
+ * - Checks if SuperAdmin (returns 'platform-master-superadmin').
  * - Reads from active authenticated user session cookies ('tooly_org_id', 'tooly_active_user').
  * - Handles both camelCase 'organizationId' and snake_case 'organization_id'.
- * - If user is Zatout01 or Zatout staff, falls back to '00000000-0000-0000-0000-000000000001'.
- * - Reads from request headers ('x-organization-id', 'x-org-id').
+ * - If user is specifically zatout01, falls back to Zatout org ID.
+ * - Otherwise NEVER falls back to Zatout.
  */
 export async function getServerSessionOrgId(
   explicitOrgParam?: string | null
@@ -39,19 +41,17 @@ export async function getServerSessionOrgId(
         }
 
         if (parsed && typeof parsed === 'object') {
+          if (isPlatformSuperAdmin(parsed as unknown as AppUser)) {
+            return 'platform-master-superadmin';
+          }
+
           const userOrg =
             (typeof parsed.organizationId === 'string' && parsed.organizationId.trim()) ||
             (typeof parsed.organization_id === 'string' && parsed.organization_id.trim()) ||
             null;
 
           const username = String(parsed.username || '').toLowerCase().trim();
-          const fullName = String(parsed.fullName || parsed.full_name || '').toLowerCase().trim();
-          const isZatoutUser =
-            username === 'zatout01' ||
-            username.includes('zatout') ||
-            fullName.includes('zatout') ||
-            fullName.includes('זעתות') ||
-            fullName.includes('סאמי');
+          const isZatoutUser = username === 'zatout01' || username === 'zatout';
 
           if (isZatoutUser) {
             return userOrg || DEFAULT_ORGANIZATION_ID;
@@ -109,14 +109,20 @@ export async function getServerSessionUser(): Promise<AppUser | null> {
       }
 
       if (parsed && typeof parsed === 'object') {
+        const typedUser = parsed as unknown as AppUser;
+        if (isPlatformSuperAdmin(typedUser)) {
+          return {
+            ...typedUser,
+            role: 'superadmin',
+            is_superadmin: true,
+            isSuperAdmin: true,
+            organizationId: 'platform-master-superadmin',
+            organization_id: 'platform-master-superadmin',
+          };
+        }
+
         const username = String(parsed.username || '').toLowerCase().trim();
-        const fullName = String(parsed.fullName || parsed.full_name || '').toLowerCase().trim();
-        const isZatoutUser =
-          username === 'zatout01' ||
-          username.includes('zatout') ||
-          fullName.includes('zatout') ||
-          fullName.includes('זעתות') ||
-          fullName.includes('סאמי');
+        const isZatoutUser = username === 'zatout01' || username === 'zatout';
 
         const effectiveOrg =
           (typeof parsed.organizationId === 'string' && parsed.organizationId.trim()) ||
@@ -139,3 +145,4 @@ export async function getServerSessionUser(): Promise<AppUser | null> {
 }
 
 export { isPlatformSuperAdmin } from './superadmin';
+

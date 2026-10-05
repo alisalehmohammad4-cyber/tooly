@@ -231,7 +231,7 @@ export async function getPlantManagerAnalytics(
   organizationId?: string
 ): Promise<PlantManagerAnalyticsPayload> {
   const orgId = await resolveActiveOrganizationId(organizationId);
-  if (!orgId) {
+  if (!orgId || orgId === 'platform-master-superadmin') {
     return EMPTY_PLANT_MANAGER_ANALYTICS;
   }
   const cacheKey = `analytics_${orgId}`;
@@ -241,7 +241,7 @@ export async function getPlantManagerAnalytics(
   }
 
   // Fetch active organization details (name, serial_prefix, currency)
-  let organizationName = 'סאמי זעתות';
+  let organizationName = 'חברה';
   let organizationPrefix = 'TOOL';
   let currency = 'ILS';
 
@@ -264,7 +264,7 @@ export async function getPlantManagerAnalytics(
   } else {
     const mockOrg = getMockOrganizationById(orgId);
     if (mockOrg) {
-      organizationName = mockOrg.name || organizationName;
+      organizationName = mockOrg.name || 'חברה';
       organizationPrefix = mockOrg.serialPrefix || 'TOOL';
       currency = mockOrg.defaultCurrency || 'ILS';
     }

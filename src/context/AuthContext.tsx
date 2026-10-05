@@ -22,8 +22,8 @@ export const DEFAULT_WORKER_USER: AppUser = {
   id: 'usr-worker',
   fullName: 'עובד שטח',
   role: 'worker',
-  organizationId: DEFAULT_ORGANIZATION.id,
-  organization_id: DEFAULT_ORGANIZATION.id,
+  organizationId: undefined,
+  organization_id: undefined,
 };
 
 export const PREDEFINED_USERS: Record<string, AppUser> = {
@@ -177,8 +177,8 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
     pinCode: '9009',
     is_superadmin: true,
     isSuperAdmin: true,
-    organizationId: '00000000-0000-0000-0000-000000000001',
-    organization_id: '00000000-0000-0000-0000-000000000001',
+    organizationId: 'platform-master-superadmin',
+    organization_id: 'platform-master-superadmin',
     assignedWarehouseName: 'כלל המערכת (Platform Master)',
     isActive: true,
   },
@@ -193,8 +193,8 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
     pinCode: '9009',
     is_superadmin: true,
     isSuperAdmin: true,
-    organizationId: '00000000-0000-0000-0000-000000000001',
-    organization_id: '00000000-0000-0000-0000-000000000001',
+    organizationId: 'platform-master-superadmin',
+    organization_id: 'platform-master-superadmin',
     assignedWarehouseName: 'כלל המערכת (Platform Master)',
     isActive: true,
   },
@@ -209,8 +209,8 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
     pinCode: '9999',
     is_superadmin: true,
     isSuperAdmin: true,
-    organizationId: '00000000-0000-0000-0000-000000000001',
-    organization_id: '00000000-0000-0000-0000-000000000001',
+    organizationId: 'platform-master-superadmin',
+    organization_id: 'platform-master-superadmin',
     assignedWarehouseName: 'כלל המערכת (Platform Master)',
     isActive: true,
   },
@@ -225,8 +225,8 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
     pinCode: '9999',
     is_superadmin: true,
     isSuperAdmin: true,
-    organizationId: '00000000-0000-0000-0000-000000000001',
-    organization_id: '00000000-0000-0000-0000-000000000001',
+    organizationId: 'platform-master-superadmin',
+    organization_id: 'platform-master-superadmin',
     assignedWarehouseName: 'כלל המערכת (Platform Master)',
     isActive: true,
   },
@@ -241,8 +241,8 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
     pinCode: '9009',
     is_superadmin: true,
     isSuperAdmin: true,
-    organizationId: '00000000-0000-0000-0000-000000000001',
-    organization_id: '00000000-0000-0000-0000-000000000001',
+    organizationId: 'platform-master-superadmin',
+    organization_id: 'platform-master-superadmin',
     assignedWarehouseName: 'כלל המערכת (Platform Master)',
     isActive: true,
   },
@@ -352,6 +352,21 @@ function getAuthSnapshot(): string {
           parsed.isSuperAdmin === true ||
           parsed.id === '00000000-0000-0000-0000-000000000099')
       ) {
+        if (isPlatformSuperAdmin(parsed)) {
+          parsed.organizationId = 'platform-master-superadmin';
+          parsed.organization_id = 'platform-master-superadmin';
+          const repaired = JSON.stringify(parsed);
+          localStorage.setItem(STORAGE_KEY, repaired);
+          if (typeof sessionStorage !== 'undefined') {
+            sessionStorage.setItem(STORAGE_KEY, repaired);
+          }
+          document.cookie = `${STORAGE_KEY}=${encodeURIComponent(
+            repaired
+          )}; path=/; max-age=2592000; SameSite=Lax`;
+          document.cookie = `tooly_org_id=; path=/; max-age=0; SameSite=Lax`;
+          return repaired;
+        }
+
         // Auto-heal existing browser storage / cookie missing organization_id for Zatout01
         const isZatout =
           parsed.username?.toLowerCase() === 'zatout01' ||
@@ -376,7 +391,7 @@ function getAuthSnapshot(): string {
           document.cookie = `${STORAGE_KEY}=${encodeURIComponent(
             repaired
           )}; path=/; max-age=2592000; SameSite=Lax`;
-          if (parsed.id !== 'usr-worker') {
+          if (parsed.id !== 'usr-worker' && !isPlatformSuperAdmin(parsed)) {
             document.cookie = `tooly_org_id=${encodeURIComponent(
               effectiveOrg
             )}; path=/; max-age=2592000; SameSite=Lax`;
@@ -400,17 +415,20 @@ function getAuthServerSnapshot(): string {
 function persistUserToStorage(userToSave: AppUser) {
   if (typeof window === 'undefined') return;
   try {
+    const isSuper = isPlatformSuperAdmin(userToSave);
     const isZatout =
-      userToSave.username?.toLowerCase() === 'zatout01' ||
-      userToSave.username?.toLowerCase().includes('zatout') ||
-      userToSave.fullName?.includes('זעתות') ||
-      userToSave.fullName?.includes('סאמי') ||
-      userToSave.fullName?.toLowerCase().includes('zatout');
+      !isSuper &&
+      (userToSave.username?.toLowerCase() === 'zatout01' ||
+        userToSave.username?.toLowerCase().includes('zatout') ||
+        userToSave.fullName?.includes('זעתות') ||
+        userToSave.fullName?.includes('סאמי') ||
+        userToSave.fullName?.toLowerCase().includes('zatout'));
 
-    const effectiveOrg =
-      userToSave.organizationId ||
-      userToSave.organization_id ||
-      (isZatout ? DEFAULT_ORGANIZATION.id : undefined);
+    const effectiveOrg = isSuper
+      ? 'platform-master-superadmin'
+      : (userToSave.organizationId ||
+          userToSave.organization_id ||
+          (isZatout ? DEFAULT_ORGANIZATION.id : undefined));
 
     const safeUserToSave: AppUser = {
       ...userToSave,
@@ -428,7 +446,7 @@ function persistUserToStorage(userToSave: AppUser) {
       serialized
     )}; path=/; max-age=2592000; SameSite=Lax`;
 
-    if (effectiveOrg && safeUserToSave.id !== 'usr-worker') {
+    if (effectiveOrg && safeUserToSave.id !== 'usr-worker' && !isSuper) {
       document.cookie = `tooly_org_id=${encodeURIComponent(
         effectiveOrg
       )}; path=/; max-age=2592000; SameSite=Lax`;
@@ -443,12 +461,17 @@ function persistUserToStorage(userToSave: AppUser) {
 function clearUserFromStorage() {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem(STORAGE_KEY, DEFAULT_WORKER_SERIALIZED);
+    localStorage.removeItem('tooly_active_user');
+    localStorage.removeItem('tooly_org_id');
+    localStorage.removeItem('tooly_active_warehouse_id');
+    localStorage.clear();
     if (typeof sessionStorage !== 'undefined') {
-      sessionStorage.setItem(STORAGE_KEY, DEFAULT_WORKER_SERIALIZED);
+      sessionStorage.clear();
     }
-    document.cookie = `${STORAGE_KEY}=; path=/; max-age=0; SameSite=Lax`;
-    document.cookie = `tooly_org_id=; path=/; max-age=0; SameSite=Lax`;
+    // Clear all cookies
+    document.cookie.split(";").forEach((c) => {
+      document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
+    });
   } catch {
     // Ignore storage errors
   }
@@ -530,8 +553,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           pinCode: cleanPin,
           is_superadmin: true,
           isSuperAdmin: true,
-          organizationId: '00000000-0000-0000-0000-000000000001',
-          organization_id: '00000000-0000-0000-0000-000000000001',
+          organizationId: 'platform-master-superadmin',
+          organization_id: 'platform-master-superadmin',
           assignedWarehouseName: 'כלל המערכת (Platform Master)',
           isActive: true,
         };
@@ -622,8 +645,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           pinCode: cleanUser === 'admin' || cleanUser === '9999' ? '9999' : '9009',
           is_superadmin: true,
           isSuperAdmin: true,
-          organizationId: '00000000-0000-0000-0000-000000000001',
-          organization_id: '00000000-0000-0000-0000-000000000001',
+          organizationId: 'platform-master-superadmin',
+          organization_id: 'platform-master-superadmin',
           assignedWarehouseName: 'כלל המערכת (Platform Master)',
           isActive: true,
         };
@@ -705,6 +728,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsPinModalOpen(false);
     setPinDialogMessage(undefined);
     pinSuccessCallbackRef.current = null;
+    if (typeof window !== 'undefined') {
+      window.location.href = '/';
+    }
   }, []);
 
   const value = useMemo<AuthContextType>(() => {
@@ -720,15 +746,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const isSupervisorOrAdmin = user.role !== 'worker';
     const isAdmin = isGeneralManager;
     const canSwitchDepots = isGeneralManager || isChiefOperations;
-    const currentOrganization: Organization = user.organizationId
-      ? getMockOrganizationById(user.organizationId) || {
-          id: user.organizationId,
-          name: user.organizationId === DEFAULT_ORGANIZATION.id ? DEFAULT_ORGANIZATION.name : 'סאמי זעתות',
-          slug: user.organizationId,
-          serialPrefix: 'TOOL-',
+    const currentOrganization: Organization = isSuperAdmin
+      ? {
+          id: 'platform-master-superadmin',
+          name: 'Tooly Master - הנהלת מערכת ראשית',
+          slug: 'tooly-master',
+          serialPrefix: 'TOOLY-',
           defaultCurrency: 'ILS',
+          status: 'active',
         }
-      : DEFAULT_ORGANIZATION;
+      : user.organizationId && user.organizationId !== 'platform-master-superadmin'
+        ? getMockOrganizationById(user.organizationId) || {
+            id: user.organizationId,
+            name: user.fullName?.includes('זעתות') ? 'סאמי זעתות' : 'חברה',
+            slug: user.organizationId,
+            serialPrefix: 'TOOL-',
+            defaultCurrency: 'ILS',
+            status: 'active',
+          }
+        : {
+            id: '',
+            name: 'Tooly',
+            slug: 'tooly',
+            serialPrefix: 'TOOL-',
+            defaultCurrency: 'ILS',
+            status: 'active',
+          };
 
     return {
       user,

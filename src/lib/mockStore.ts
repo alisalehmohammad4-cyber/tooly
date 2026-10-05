@@ -42935,7 +42935,7 @@ export function getMockPlantManagerAnalytics(organizationId?: string): PlantMana
   });
 
   return {
-    organizationName: (organizationId ? getMockOrganizationById(organizationId)?.name : DEFAULT_ORGANIZATION.name) || 'חברה',
+    organizationName: (organizationId ? getMockOrganizationById(organizationId)?.name : '') || 'חברה',
     totalFleetValue,
     depreciation: {
       totalAcquisitionCost: totalFleetValue,
@@ -43300,8 +43300,8 @@ export const MOCK_USERS: AppUser[] = [
     assignedWarehouseId: undefined,
     assignedWarehouseName: 'כלל המערכת (Platform Master)',
     isActive: true,
-    organizationId: '11111111-1111-1111-1111-111111111111',
-    organization_id: '11111111-1111-1111-1111-111111111111',
+    organizationId: 'platform-master-superadmin',
+    organization_id: 'platform-master-superadmin',
     createdAt: '2026-01-01T10:00:00.000Z',
   },
   {
@@ -43316,8 +43316,8 @@ export const MOCK_USERS: AppUser[] = [
     assignedWarehouseId: undefined,
     assignedWarehouseName: 'כלל המערכת (Platform Master)',
     isActive: true,
-    organizationId: '11111111-1111-1111-1111-111111111111',
-    organization_id: '11111111-1111-1111-1111-111111111111',
+    organizationId: 'platform-master-superadmin',
+    organization_id: 'platform-master-superadmin',
     createdAt: '2026-01-01T10:00:00.000Z',
   },
   {
@@ -43355,13 +43355,21 @@ export const MOCK_USERS: AppUser[] = [
 
 export function getMockUsers(organizationId?: string): AppUser[] {
   if (organizationId) {
-    return MOCK_USERS.filter((u) => !u.organizationId || u.organizationId === organizationId);
+    if (organizationId === 'platform-master-superadmin') {
+      return MOCK_USERS.filter((u) => u.isSuperAdmin || u.is_superadmin);
+    }
+    return MOCK_USERS.filter(
+      (u) =>
+        (u.organizationId === organizationId || u.organization_id === organizationId) &&
+        !u.isSuperAdmin &&
+        !u.is_superadmin
+    );
   }
   return [...MOCK_USERS];
 }
 
 export function addMockUser(user: AppUser): AppUser {
-  const org = user.organizationId || user.organization_id || DEFAULT_ORGANIZATION.id;
+  const org = user.organizationId || user.organization_id;
   const userWithOrg: AppUser = {
     ...user,
     organizationId: org,

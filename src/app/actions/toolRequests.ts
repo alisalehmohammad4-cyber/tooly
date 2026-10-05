@@ -1,12 +1,11 @@
 'use server';
 
 import { supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase';
-import { getServerSessionOrgId, getServerSessionUser, DEFAULT_ORGANIZATION_ID } from '@/lib/auth/session';
+import { getServerSessionOrgId, getServerSessionUser } from '@/lib/auth/session';
 import {
   getMockWarehouses,
   getMockAssets,
   mutateMockAsset,
-  DEFAULT_ORGANIZATION,
 } from '@/lib/mockStore';
 
 export interface SiteToolRequestItem {
@@ -90,9 +89,9 @@ interface SiteToolRequestRecord {
 // In-memory resilient storage for offline / mock testing
 const inMemorySiteToolRequests: SiteToolRequestRecord[] = [];
 
-async function resolveActiveOrg(providedOrgId?: string): Promise<string> {
+async function resolveActiveOrg(providedOrgId?: string): Promise<string | null> {
   const resolved = await getServerSessionOrgId(providedOrgId);
-  return resolved || DEFAULT_ORGANIZATION_ID;
+  return resolved || null;
 }
 
 /**
@@ -107,6 +106,9 @@ export async function createSiteToolRequestAction(data: {
   requestingWarehouseId?: string;
 }): Promise<{ success: boolean; error?: string; requestId?: string; message?: string }> {
   const orgId = await resolveActiveOrg();
+  if (!orgId || orgId === 'platform-master-superadmin') {
+    return { success: false, error: 'לא נמצא מזהה ארגון מורשה' };
+  }
   const user = await getServerSessionUser();
 
   const toolDesc = (data.toolDescription || '').trim();
@@ -193,6 +195,9 @@ export async function getSiteStorekeeperDashboardAction(
   warehouseId: string
 ): Promise<SiteStorekeeperDashboardData> {
   const orgId = await resolveActiveOrg();
+  if (!orgId || orgId === 'platform-master-superadmin') {
+    return { siteInventory: [], incomingShipments: [], myRequests: [] };
+  }
 
   let dbSiteInventory: Array<{
     id: string;
@@ -373,6 +378,9 @@ export async function getChiefStorekeeperInboxAction(): Promise<{
   availableAssets: SuggestedToolAsset[];
 }> {
   const orgId = await resolveActiveOrg();
+  if (!orgId || orgId === 'platform-master-superadmin') {
+    return { pendingRequests: [], availableAssets: [] };
+  }
 
   let dbRequests: SiteToolRequestRecord[] = [];
   if (isSupabaseConfigured()) {
@@ -505,6 +513,9 @@ export async function resolveToolRequestAction(data: {
   rejectionReason?: string;
 }): Promise<{ success: boolean; error?: string; message?: string }> {
   const orgId = await resolveActiveOrg();
+  if (!orgId || orgId === 'platform-master-superadmin') {
+    return { success: false, error: 'לא נמצא מזהה ארגון מורשה' };
+  }
   const managerUser = await getServerSessionUser();
   const decidedBy = managerUser?.fullName || 'אחראי תפעול ראשי';
   const now = new Date().toISOString();
@@ -564,7 +575,7 @@ export async function resolveToolRequestAction(data: {
           })
           .eq('id', data.assignedAssetId);
 
-        if (orgId && orgId !== DEFAULT_ORGANIZATION.id) {
+        if (orgId) {
           assetQuery = assetQuery.eq('organization_id', orgId);
         }
 
@@ -681,6 +692,9 @@ export async function confirmToolReceptionAction(
   targetWarehouseId: string
 ): Promise<{ success: boolean; error?: string; message?: string }> {
   const orgId = await resolveActiveOrg();
+  if (!orgId || orgId === 'platform-master-superadmin') {
+    return { success: false, error: 'לא נמצא מזהה ארגון מורשה' };
+  }
   const user = await getServerSessionUser();
   const receivedBy = user?.fullName || 'מחסנאי אתר';
   const now = new Date().toISOString();
@@ -716,7 +730,7 @@ export async function confirmToolReceptionAction(
         })
         .eq('id', assetId);
 
-      if (orgId && orgId !== DEFAULT_ORGANIZATION.id) {
+      if (orgId) {
         assetQuery = assetQuery.eq('organization_id', orgId);
       }
 

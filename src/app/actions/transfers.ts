@@ -3,12 +3,11 @@
 import { revalidatePath } from 'next/cache';
 import { supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase';
 import { clearDashboardCaches } from '@/app/actions/dashboard';
-import { getServerSessionOrgId, getServerSessionUser, DEFAULT_ORGANIZATION_ID } from '@/lib/auth/session';
+import { getServerSessionOrgId, getServerSessionUser } from '@/lib/auth/session';
 import {
   getMockWarehouses,
   getMockAssets,
   mutateMockAsset,
-  DEFAULT_ORGANIZATION,
 } from '@/lib/mockStore';
 
 export interface PendingTransferItem {
@@ -64,9 +63,9 @@ interface TransferRecord {
 
 const inMemoryTransferRequests: TransferRecord[] = [];
 
-async function resolveActiveOrg(providedOrgId?: string): Promise<string> {
+async function resolveActiveOrg(providedOrgId?: string): Promise<string | null> {
   const resolved = await getServerSessionOrgId(providedOrgId);
-  return resolved || DEFAULT_ORGANIZATION_ID;
+  return resolved || null;
 }
 
 /**
@@ -80,6 +79,9 @@ export async function createTransferRequestAction(data: {
   reason?: string;
 }): Promise<{ success: boolean; error?: string; requestId?: string }> {
   const orgId = await resolveActiveOrg();
+  if (!orgId || orgId === 'platform-master-superadmin') {
+    return { success: false, error: 'לא נמצא מזהה ארגון מורשה' };
+  }
   const user = await getServerSessionUser();
 
   const { assetId, sourceWarehouseId, targetWarehouseId, reason } = data;
@@ -128,7 +130,7 @@ export async function createTransferRequestAction(data: {
         .maybeSingle();
 
       if (assetErr || !asset) {
-        const mockAsset = getMockAssets().find((a) => a.id === assetId && (!a.organizationId || a.organizationId === orgId));
+        const mockAsset = getMockAssets().find((a) => a.id === assetId && a.organizationId === orgId);
         if (!mockAsset) {
           return { success: false, error: 'כלי העבודה אינו שייך לארגון זה' };
         }
@@ -193,6 +195,9 @@ export async function createTransferRequestAction(data: {
  */
 export async function getPendingTransfersAction(): Promise<PendingTransferItem[]> {
   const orgId = await resolveActiveOrg();
+  if (!orgId || orgId === 'platform-master-superadmin') {
+    return [];
+  }
 
   let dbRequests: TransferRecord[] = [];
 
@@ -360,6 +365,9 @@ export async function getAvailableAssetsForTransferAction(
   targetWarehouseId?: string
 ): Promise<AvailableTransferAssetItem[]> {
   const orgId = await resolveActiveOrg();
+  if (!orgId || orgId === 'platform-master-superadmin') {
+    return [];
+  }
 
   const results: AvailableTransferAssetItem[] = [];
 
@@ -446,6 +454,9 @@ export async function decideTransferRequestAction(
   rejectionReason?: string
 ): Promise<{ success: boolean; error?: string; message?: string }> {
   const orgId = await resolveActiveOrg();
+  if (!orgId || orgId === 'platform-master-superadmin') {
+    return { success: false, error: 'לא נמצא מזהה ארגון מורשה' };
+  }
   const managerUser = await getServerSessionUser();
   const decidedBy = managerUser?.fullName || 'אחראי תפעול ראשי';
   const now = new Date().toISOString();
@@ -492,7 +503,7 @@ export async function decideTransferRequestAction(
           })
           .eq('id', targetRecord.asset_id);
 
-        if (orgId && orgId !== DEFAULT_ORGANIZATION.id) {
+        if (orgId) {
           assetUpdateQuery.eq('organization_id', orgId);
         }
 
@@ -569,7 +580,7 @@ export async function decideTransferRequestAction(
         })
         .eq('id', requestId);
 
-      if (orgId && orgId !== DEFAULT_ORGANIZATION.id) {
+      if (orgId) {
         reqUpdateQuery.eq('organization_id', orgId);
       }
 
@@ -612,6 +623,9 @@ export async function completeTransferReceptionAction(
   targetWarehouseId: string
 ): Promise<{ success: boolean; error?: string; message?: string }> {
   const orgId = await resolveActiveOrg();
+  if (!orgId || orgId === 'platform-master-superadmin') {
+    return { success: false, error: 'לא נמצא מזהה ארגון מורשה' };
+  }
   const user = await getServerSessionUser();
   const receivedBy = user?.fullName || 'מחסנאי קולט';
   const now = new Date().toISOString();
@@ -649,7 +663,7 @@ export async function completeTransferReceptionAction(
         })
         .eq('id', assetId);
 
-      if (orgId && orgId !== DEFAULT_ORGANIZATION.id) {
+      if (orgId) {
         assetUpdateQuery.eq('organization_id', orgId);
       }
 
@@ -683,7 +697,7 @@ export async function completeTransferReceptionAction(
         })
         .eq('id', requestId);
 
-      if (orgId && orgId !== DEFAULT_ORGANIZATION.id) {
+      if (orgId) {
         reqUpdateQuery.eq('organization_id', orgId);
       }
 
@@ -743,6 +757,9 @@ export async function getIncomingInTransitTransfersAction(
   targetWarehouseId?: string
 ): Promise<PendingTransferItem[]> {
   const orgId = await resolveActiveOrg();
+  if (!orgId || orgId === 'platform-master-superadmin') {
+    return [];
+  }
 
   let dbRequests: TransferRecord[] = [];
 
@@ -837,8 +854,8 @@ export async function getIncomingInTransitTransfersAction(
     } catch {}
   }
 
-  const mockAssets = getMockAssets();
-  const mockWhs = getMockWarehouses(true, orgId);
+  const mockAssets = getMockAssets(orgId || undefined);
+  const mockWhs = getMockWarehouses(true, orgId || undefined);
   mockWhs.forEach((w) => {
     if (!warehousesMap.has(w.id)) warehousesMap.set(w.id, w.name);
   });
@@ -887,6 +904,9 @@ export async function getLocalAvailableAssetsForTransferAction(
   sourceWarehouseId?: string
 ): Promise<AvailableTransferAssetItem[]> {
   const orgId = await resolveActiveOrg();
+  if (!orgId || orgId === 'platform-master-superadmin') {
+    return [];
+  }
   const results: AvailableTransferAssetItem[] = [];
 
   if (isSupabaseConfigured()) {
@@ -977,6 +997,9 @@ export async function directStorekeeperTransferAction(data: {
   sourceWarehouseId?: string;
 }): Promise<{ success: boolean; error?: string; message?: string; transferId?: string }> {
   const orgId = await resolveActiveOrg();
+  if (!orgId || orgId === 'platform-master-superadmin') {
+    return { success: false, error: 'לא נמצא מזהה ארגון מורשה' };
+  }
   const sessionUser = await getServerSessionUser();
   const performedBy = sessionUser?.fullName || (sessionUser as unknown as { name?: string })?.name || 'מחסנאי שטח';
   const now = new Date().toISOString();
@@ -1042,7 +1065,7 @@ export async function directStorekeeperTransferAction(data: {
         })
         .eq('id', assetId);
 
-      if (orgId && orgId !== DEFAULT_ORGANIZATION.id) {
+      if (orgId) {
         updateQuery.eq('organization_id', orgId);
       }
 
