@@ -7,6 +7,8 @@ import {
   type RegisterOrganizationResult,
 } from '@/core/tenant/tenantOnboard.schema';
 import { isSupabaseConfigured, getSupabaseServerClient } from '@/lib/supabase';
+import { isPlatformSuperAdmin } from '@/lib/auth/superadmin';
+import { getServerSessionUser } from '@/lib/auth/session';
 import {
   getMockOrganizationById,
   getMockOrganizationBySlug,
@@ -296,9 +298,24 @@ export async function registerNewOrganizationAction(
 export async function getPendingOrganizationsAction(): Promise<{
   success: boolean;
   organizations: Organization[];
+  data: Organization[];
   error?: string;
 }> {
   try {
+    // Strict server-side check: Only Platform SuperAdmin can view pending onboarding requests
+    const caller = await getServerSessionUser();
+    if (!isPlatformSuperAdmin(caller)) {
+      console.warn(
+        `[getPendingOrganizationsAction] Access denied for non-superadmin user: ${caller?.username || caller?.id || 'anonymous'}`
+      );
+      return {
+        success: false,
+        organizations: [],
+        data: [],
+        error: 'אין לך הרשאת מנהל על (Platform SuperAdmin) לצפות בבקשות הצטרפות של ארגונים.',
+      };
+    }
+
     const orgsMap = new Map<string, Organization>();
 
     // 1. Supabase query if configured
@@ -355,12 +372,14 @@ export async function getPendingOrganizationsAction(): Promise<{
     return {
       success: true,
       organizations: sorted,
+      data: sorted,
     };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'שגיאה בטעינת ארגונים ממתינים לאישור';
     return {
       success: false,
       organizations: [],
+      data: [],
       error: msg,
     };
   }
@@ -371,6 +390,18 @@ export async function approveOrganizationAction(
   approvedByUserId?: string
 ): Promise<{ success: boolean; error?: string; message?: string }> {
   try {
+    // Strict server-side check: Only Platform SuperAdmin can approve new organizations
+    const caller = await getServerSessionUser();
+    if (!isPlatformSuperAdmin(caller)) {
+      console.warn(
+        `[approveOrganizationAction] Unauthorized approval attempt by user: ${caller?.username || caller?.id || 'anonymous'}`
+      );
+      return {
+        success: false,
+        error: 'פעולה זו מורשית בלבד עבור מנהל העל של המערכת (Platform SuperAdmin).',
+      };
+    }
+
     const nowIso = new Date().toISOString();
 
     // 1. Update Mock Store
@@ -428,6 +459,18 @@ export async function rejectOrganizationAction(
   orgId: string
 ): Promise<{ success: boolean; error?: string; message?: string }> {
   try {
+    // Strict server-side check: Only Platform SuperAdmin can reject organizations
+    const caller = await getServerSessionUser();
+    if (!isPlatformSuperAdmin(caller)) {
+      console.warn(
+        `[rejectOrganizationAction] Unauthorized rejection attempt by user: ${caller?.username || caller?.id || 'anonymous'}`
+      );
+      return {
+        success: false,
+        error: 'פעולה זו מורשית בלבד עבור מנהל העל של המערכת (Platform SuperAdmin).',
+      };
+    }
+
     // 1. Update Mock Store
     const updatedMock = updateMockOrganization(orgId, {
       status: 'rejected',

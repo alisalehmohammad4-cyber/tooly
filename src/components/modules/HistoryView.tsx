@@ -47,6 +47,9 @@ import AppLayout from '@/components/layout/AppLayout';
 import ToolPassportModal from '@/components/modules/ToolPassportModal';
 import AssetActionModal from '@/components/modules/AssetActionModal';
 import { getAssetDetailsByQr, type ScannedAssetDetails } from '@/app/actions/custody';
+import { getAuditHistory } from '@/app/actions/history';
+import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
 
 const BuildingOfficeIcon = Building2;
@@ -232,6 +235,116 @@ function renderActionBadge(action: AuditActionType) {
 }
 
 export default function HistoryView({ initialData }: HistoryViewProps) {
+  const { currentOrganization } = useAuth();
+  const [historyData, setHistoryData] = useState<AuditHistoryPayload>(initialData);
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+  const [newMovementIds, setNewMovementIds] = useState<Set<string>>(new Set());
+  const isRefreshingRef = React.useRef<boolean>(false);
+
+  // Sync state when initialData prop changes
+  useEffect(() => {
+    setHistoryData(initialData);
+  }, [initialData]);
+
+  // Refresh history data from authoritative server action
+  const refreshHistoryData = async (options?: { isBackgroundPoll?: boolean }) => {
+    if (isRefreshingRef.current) return;
+    isRefreshingRef.current = true;
+    if (!options?.isBackgroundPoll) {
+      setIsRefreshing(true);
+    }
+
+    try {
+      const orgId = currentOrganization?.id || initialData.records[0]?.organizationId;
+      const latestPayload = await getAuditHistory(undefined, orgId);
+
+      if (latestPayload && Array.isArray(latestPayload.records)) {
+        setHistoryData((prev) => {
+          const existingIds = new Set(prev.records.map((r) => r.id));
+          const newRecords = latestPayload.records.filter((r) => !existingIds.has(r.id));
+
+          if (newRecords.length > 0) {
+            // Prepend new records to top and trigger highlight animation
+            setNewMovementIds((prevSet) => {
+              const next = new Set(prevSet);
+              newRecords.forEach((r) => next.add(r.id));
+              return next;
+            });
+
+            // Automatically clear highlight animation after 4 seconds
+            setTimeout(() => {
+              setNewMovementIds((prevSet) => {
+                const next = new Set(prevSet);
+                newRecords.forEach((r) => next.delete(r.id));
+                return next;
+              });
+            }, 4000);
+
+            return {
+              ...latestPayload,
+              records: [
+                ...newRecords,
+                ...prev.records.filter((r) => !newRecords.some((nr) => nr.id === r.id)),
+              ],
+              warehouses: latestPayload.warehouses?.length ? latestPayload.warehouses : prev.warehouses,
+            };
+          }
+
+          return {
+            ...latestPayload,
+            warehouses: latestPayload.warehouses?.length ? latestPayload.warehouses : prev.warehouses,
+          };
+        });
+      }
+    } catch (err) {
+      console.error('[HistoryView] Error refreshing audit history:', err);
+    } finally {
+      isRefreshingRef.current = false;
+      setIsRefreshing(false);
+    }
+  };
+
+  // Setup Supabase Realtime subscription on custody_ledger table + 15s fallback auto-polling
+  useEffect(() => {
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    try {
+      channel = supabase
+        .channel('realtime-custody-ledger')
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'custody_ledger',
+          },
+          async (_payload) => {
+            // Automatically refetch or prepend the latest movement to the history list
+            await refreshHistoryData();
+          }
+        )
+        .subscribe();
+    } catch (err) {
+      console.warn('[Realtime] Failed to subscribe to custody_ledger channel:', err);
+    }
+
+    // Fallback auto-polling interval (every 15 seconds) for cellular/offline resilience
+    const pollInterval = setInterval(() => {
+      refreshHistoryData({ isBackgroundPoll: true });
+    }, 15000);
+
+    // Clean up channel and intervals on component unmount
+    return () => {
+      if (channel) {
+        try {
+          supabase.removeChannel(channel);
+        } catch (e) {
+          console.warn('[Realtime] Failed to remove channel:', e);
+        }
+      }
+      clearInterval(pollInterval);
+    };
+  }, [currentOrganization?.id]);
+
   // Search & 300ms Debounce State
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState<boolean>(false);
@@ -278,7 +391,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
           condition: (record.condition || 'good') as any,
           warehouseName: record.warehouseName,
           warehouseCode: record.warehouseCode,
-          currentWarehouseId: record.warehouseId || initialData.warehouses[0]?.id || '',
+          currentWarehouseId: record.warehouseId || historyData.warehouses[0]?.id || '',
           currentAssignedWorker: record.targetWorker,
           organizationId: record.organizationId,
           version: 1,
@@ -298,7 +411,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
         condition: (record.condition || 'good') as any,
         warehouseName: record.warehouseName,
         warehouseCode: record.warehouseCode,
-        currentWarehouseId: record.warehouseId || initialData.warehouses[0]?.id || '',
+        currentWarehouseId: record.warehouseId || historyData.warehouses[0]?.id || '',
         currentAssignedWorker: record.targetWorker,
         organizationId: record.organizationId,
         version: 1,
@@ -332,9 +445,9 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
     setIsDebouncing(false);
   };
 
-  // Pre-calculate Quick Chip Counts across initial dataset
+  // Pre-calculate Quick Chip Counts across history dataset
   const chipCounts = useMemo(() => {
-    const records = initialData.records;
+    const records = historyData.records;
     return {
       all: records.length,
       CHECKOUT: records.filter((r) => r.action === 'CHECKOUT').length,
@@ -347,7 +460,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
       signed: records.filter((r) => Boolean(r.signatureData)).length,
       today: records.filter((r) => isWithinDateRange(r.createdAt, 'today')).length,
     };
-  }, [initialData.records]);
+  }, [historyData.records]);
 
   // Quick Chips Configuration aligned with exact DB enum values
   const quickChips: Array<{
@@ -417,7 +530,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
 
   // Filter records in-memory combining all criteria
   const filteredRecords = useMemo(() => {
-    let list: AuditHistoryRecord[] = initialData.records;
+    let list: AuditHistoryRecord[] = historyData.records;
 
     // 1. Action Filter from quick chips or action dropdown
     const effectiveAction =
@@ -462,7 +575,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
 
     return list;
   }, [
-    initialData.records,
+    historyData.records,
     activeChip,
     selectedAction,
     selectedWarehouseId,
@@ -578,11 +691,34 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
         {/* HEADER BAR: TITLE, ACTIONS & EXPORT */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3.5 sm:p-4 rounded-2xl border border-blue-100 shadow-sm">
           <div>
-            <h1 className="text-base sm:text-lg font-black text-blue-950 flex items-center gap-2">
-              <HistoryIcon className="w-5 h-5 text-blue-600" />
-              <span>יומן תנועות ואישורי מסירה</span>
-            </h1>
-            <p className="hidden sm:block text-xs text-slate-500 mt-0.5">
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <h1 className="text-base sm:text-lg font-black text-blue-950 flex items-center gap-2">
+                <HistoryIcon className="w-5 h-5 text-blue-600" />
+                <span>יומן תנועות ואישורי מסירה</span>
+              </h1>
+
+              {/* Visual Live Indicator Badge */}
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black bg-emerald-50 text-emerald-800 border border-emerald-300 shadow-2xs">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                <span>שידור חי (Live Sync)</span>
+              </span>
+
+              {/* Quick "רענן עכשיו" Button with spinning icon during fetch */}
+              <button
+                type="button"
+                onClick={() => refreshHistoryData()}
+                disabled={isRefreshing}
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-slate-50 hover:bg-blue-50 text-blue-900 border border-slate-200 hover:border-blue-300 text-xs font-bold transition-all cursor-pointer disabled:opacity-60 active:scale-95 shadow-2xs"
+                title="רענן עכשיו את יומן התנועות"
+              >
+                <RotateCcw className={`w-3.5 h-3.5 text-blue-600 ${isRefreshing ? 'animate-spin' : ''}`} />
+                <span>{isRefreshing ? 'מרענן...' : 'רענן עכשיו'}</span>
+              </button>
+            </div>
+            <p className="hidden sm:block text-xs text-slate-500 mt-1">
               חיפוש מרובה שדות, סינון לפי תגי כלים, עובדים ואימותי חתימות
             </p>
           </div>
@@ -668,9 +804,15 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
                 <Filter className="w-3.5 h-3.5 text-blue-500" />
                 <span>סינון מהיר לפי סוג אירוע:</span>
               </span>
-              <span className="font-mono text-blue-900 font-bold">
-                {filteredRecords.length} / {initialData.records.length} רשומות
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span>סנכרון בזמן אמת</span>
+                </span>
+                <span className="font-mono text-blue-900 font-bold">
+                  {filteredRecords.length} / {historyData.records.length} רשומות
+                </span>
+              </div>
             </div>
 
             <div className="flex flex-nowrap items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
@@ -757,7 +899,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
                   className="w-full min-h-[44px] bg-white text-blue-950 font-bold text-xs pr-9 pl-7 py-2 rounded-xl border border-slate-200 focus:border-blue-600 focus:outline-none appearance-none cursor-pointer shadow-2xs"
                 >
                   <option value="all">כל האתרים והמחסנים</option>
-                  {initialData.warehouses.map((wh) => (
+                  {historyData.warehouses.map((wh) => (
                     <option key={wh.id} value={wh.id}>
                       {wh.code ? `[${wh.code}] ` : ''}
                       {wh.name}
@@ -916,7 +1058,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
                     className="w-full min-h-[46px] bg-slate-50 text-blue-950 font-bold text-xs pr-10 pl-8 py-2.5 rounded-xl border border-slate-200 focus:border-blue-600 focus:outline-none appearance-none cursor-pointer"
                   >
                     <option value="all">כל האתרים והמחסנים</option>
-                    {initialData.warehouses.map((wh) => (
+                    {historyData.warehouses.map((wh) => (
                       <option key={wh.id} value={wh.id}>
                         {wh.code ? `[${wh.code}] ` : ''}
                         {wh.name}
@@ -1039,7 +1181,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
                 <span className="inline-flex items-center gap-1 bg-white border border-blue-200 text-blue-950 px-2.5 py-1 rounded-lg font-bold shadow-2xs">
                   <span>
                     אתר:{' '}
-                    {initialData.warehouses.find(
+                    {historyData.warehouses.find(
                       (w) => w.id === selectedWarehouseId
                     )?.name || selectedWarehouseId}
                   </span>
@@ -1138,15 +1280,27 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
         ) : (
           <div className="space-y-3">
             <div className="max-h-[500px] overflow-y-auto space-y-3 pr-1">
-            {paginatedRecords.map((item) => (
+            {paginatedRecords.map((item) => {
+              const isNew = newMovementIds.has(item.id);
+              return (
               <div
                 key={item.id}
-                className="rounded-2xl border-2 border-blue-100 bg-white p-4 shadow-xs shadow-blue-950/5 space-y-3 hover:border-blue-300 transition-colors"
+                className={`rounded-2xl border-2 p-4 shadow-xs space-y-3 transition-all duration-500 ${
+                  isNew
+                    ? 'border-emerald-400 bg-emerald-50/40 ring-2 ring-emerald-400 shadow-md shadow-emerald-500/15 animate-new-movement'
+                    : 'border-blue-100 bg-white hover:border-blue-300'
+                }`}
               >
                 {/* Header: Action Badge & Timestamp */}
                 <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
                   <div className="flex items-center gap-1.5 flex-wrap">
                     {renderActionBadge(item.action)}
+                    {isNew && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-black text-emerald-800 bg-emerald-100/90 px-2 py-0.5 rounded-full border border-emerald-300 shadow-2xs animate-pulse">
+                        <Sparkles className="w-3 h-3 text-emerald-600" />
+                        <span>חדש (Live)</span>
+                      </span>
+                    )}
                     {item.isTagVerified && (
                       <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-300 shadow-2xs">
                         <CheckSquare className="w-3 h-3 text-emerald-600" />
@@ -1438,7 +1592,8 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
                   </button>
                 </div>
               </div>
-            ))}
+              );
+            })}
             </div>
 
             {/* Pagination Controls */}
@@ -1532,7 +1687,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
                 <div>
                   <span className="text-slate-500 block text-[10px]">סה&quot;כ רשומות בדוח:</span>
                   <span className="text-purple-900 font-mono text-sm font-black">
-                    {filteredRecords.length} מתוך {initialData.records.length}
+                    {filteredRecords.length} מתוך {historyData.records.length}
                   </span>
                 </div>
                 <div>
@@ -1805,12 +1960,13 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
       <AssetActionModal
         isOpen={isActionModalOpen}
         asset={actionModalAsset}
-        warehouses={initialData.warehouses}
+        warehouses={historyData.warehouses}
         onClose={() => {
           setIsActionModalOpen(false);
           setActionModalAsset(null);
         }}
         onActionComplete={(_msg, _updated) => {
+          refreshHistoryData();
           router.refresh();
         }}
       />

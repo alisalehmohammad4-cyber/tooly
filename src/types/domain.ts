@@ -129,7 +129,8 @@ export type UserRole =
   | 'chief_operations'
   | 'general_manager'
   | 'supervisor'
-  | 'admin';
+  | 'admin'
+  | 'superadmin';
 
 export interface AppUser {
   id: string;
@@ -142,6 +143,8 @@ export interface AppUser {
   assignedWarehouseId?: string;
   assignedWarehouseName?: string;
   isActive?: boolean;
+  is_superadmin?: boolean;
+  isSuperAdmin?: boolean;
   organizationId?: string;
   organization_id?: string;
   createdAt?: string;

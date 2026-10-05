@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache';
 import type { AppUser, UserRole } from '@/types/domain';
 import { isSupabaseConfigured, getSupabaseServerClient, supabaseAdmin } from '@/lib/supabase';
 import { getServerSessionOrgId } from '@/lib/auth/session';
+import { isPlatformSuperAdmin } from '@/lib/auth/superadmin';
 
 import {
   MOCK_USERS,
@@ -233,12 +234,22 @@ export async function authenticateUserAction(
             organization_id: effectiveOrg || DEFAULT_ORGANIZATION_ID,
           };
 
-          const orgStatus = await checkOrganizationApprovalStatus(effectiveOrg);
-          if (!orgStatus.allowed) {
-            return {
-              success: false,
-              error: orgStatus.error || 'חשבון הארגון ממתין לאישור מנהל המערכת. ניצור איתך קשר בהקדם.',
-            };
+          const isSuper =
+            dbUserByPin.is_superadmin === true ||
+            dbUserByPin.role === 'superadmin' ||
+            isPlatformSuperAdmin(returnedUser);
+
+          returnedUser.is_superadmin = isSuper;
+          returnedUser.isSuperAdmin = isSuper;
+
+          if (!isSuper) {
+            const orgStatus = await checkOrganizationApprovalStatus(effectiveOrg);
+            if (!orgStatus.allowed) {
+              return {
+                success: false,
+                error: orgStatus.error || 'חשבון הארגון ממתין לאישור מנהל המערכת. ניצור איתך קשר בהקדם.',
+              };
+            }
           }
 
           await setSessionCookies(returnedUser);
@@ -306,12 +317,22 @@ export async function authenticateUserAction(
           organization_id: effectiveOrg || DEFAULT_ORGANIZATION_ID,
         };
 
-        const orgStatus = await checkOrganizationApprovalStatus(effectiveOrg);
-        if (!orgStatus.allowed) {
-          return {
-            success: false,
-            error: orgStatus.error || 'חשבון הארגון ממתין לאישור מנהל המערכת. ניצור איתך קשר בהקדם.',
-          };
+        const isSuper =
+          dbUserByName.is_superadmin === true ||
+          dbUserByName.role === 'superadmin' ||
+          isPlatformSuperAdmin(returnedUser);
+
+        returnedUser.is_superadmin = isSuper;
+        returnedUser.isSuperAdmin = isSuper;
+
+        if (!isSuper) {
+          const orgStatus = await checkOrganizationApprovalStatus(effectiveOrg);
+          if (!orgStatus.allowed) {
+            return {
+              success: false,
+              error: orgStatus.error || 'חשבון הארגון ממתין לאישור מנהל המערכת. ניצור איתך קשר בהקדם.',
+            };
+          }
         }
 
         await setSessionCookies(returnedUser);
@@ -367,12 +388,23 @@ export async function authenticateUserAction(
         organizationId: effectiveOrg || DEFAULT_ORGANIZATION_ID,
         organization_id: effectiveOrg || DEFAULT_ORGANIZATION_ID,
       };
-      const orgStatus = await checkOrganizationApprovalStatus(effectiveOrg);
-      if (!orgStatus.allowed) {
-        return {
-          success: false,
-          error: orgStatus.error || 'חשבון הארגון ממתין לאישור מנהל המערכת. ניצור איתך קשר בהקדם.',
-        };
+
+      const isSuper =
+        matchedByPin.is_superadmin === true ||
+        matchedByPin.role === 'superadmin' ||
+        isPlatformSuperAdmin(safeUser);
+
+      safeUser.is_superadmin = isSuper;
+      safeUser.isSuperAdmin = isSuper;
+
+      if (!isSuper) {
+        const orgStatus = await checkOrganizationApprovalStatus(effectiveOrg);
+        if (!orgStatus.allowed) {
+          return {
+            success: false,
+            error: orgStatus.error || 'חשבון הארגון ממתין לאישור מנהל המערכת. ניצור איתך קשר בהקדם.',
+          };
+        }
       }
 
       await setSessionCookies(safeUser);
@@ -435,12 +467,23 @@ export async function authenticateUserAction(
     organizationId: effectiveOrg || DEFAULT_ORGANIZATION_ID,
     organization_id: effectiveOrg || DEFAULT_ORGANIZATION_ID,
   };
-  const orgStatus = await checkOrganizationApprovalStatus(effectiveOrg);
-  if (!orgStatus.allowed) {
-    return {
-      success: false,
-      error: orgStatus.error || 'חשבון הארגון ממתין לאישור מנהל המערכת. ניצור איתך קשר בהקדם.',
-    };
+
+  const isSuper =
+    matchedUser.is_superadmin === true ||
+    matchedUser.role === 'superadmin' ||
+    isPlatformSuperAdmin(safeUser);
+
+  safeUser.is_superadmin = isSuper;
+  safeUser.isSuperAdmin = isSuper;
+
+  if (!isSuper) {
+    const orgStatus = await checkOrganizationApprovalStatus(effectiveOrg);
+    if (!orgStatus.allowed) {
+      return {
+        success: false,
+        error: orgStatus.error || 'חשבון הארגון ממתין לאישור מנהל המערכת. ניצור איתך קשר בהקדם.',
+      };
+    }
   }
 
   await setSessionCookies(safeUser);

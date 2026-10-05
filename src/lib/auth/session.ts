@@ -118,16 +118,16 @@ export async function getServerSessionUser(): Promise<AppUser | null> {
           fullName.includes('זעתות') ||
           fullName.includes('סאמי');
 
-        const org =
+        const effectiveOrg =
           (typeof parsed.organizationId === 'string' && parsed.organizationId.trim()) ||
           (typeof parsed.organization_id === 'string' && parsed.organization_id.trim()) ||
           (isZatoutUser ? DEFAULT_ORGANIZATION_ID : undefined);
 
-        if (parsed.id && parsed.id !== 'usr-worker' && org) {
+        if (parsed.id && parsed.id !== 'usr-worker') {
           return {
             ...parsed,
-            organizationId: org,
-            organization_id: org,
+            organizationId: effectiveOrg || parsed.organizationId,
+            organization_id: effectiveOrg || parsed.organization_id,
           } as unknown as AppUser;
         }
       }
@@ -137,3 +137,5 @@ export async function getServerSessionUser(): Promise<AppUser | null> {
   }
   return null;
 }
+
+export { isPlatformSuperAdmin } from './superadmin';

@@ -16,6 +16,7 @@ import {
   clearActiveUserSessionAction,
 } from '@/app/actions/users';
 import { DEFAULT_ORGANIZATION, getMockOrganizationById } from '@/lib/mockStore';
+import { isPlatformSuperAdmin } from '@/lib/auth/superadmin';
 
 export const DEFAULT_WORKER_USER: AppUser = {
   id: 'usr-worker',
@@ -164,17 +165,47 @@ export const PREDEFINED_USERS: Record<string, AppUser> = {
     isActive: true,
   },
 
-  // 4. Legacy Admin Backup
-  '9999': {
-    id: 'usr-admin-legacy',
-    fullName: 'הנהלת מפעל (גיבוי)',
+  // 4. Platform SuperAdmin (בעל המערכת - Tooly SuperAdmin)
+  'admin': {
+    id: 'usr-superadmin-01',
+    fullName: 'עלי סאלח (מנהל על - Platform SuperAdmin)',
     username: 'admin',
-    role: 'general_manager',
+    email: 'alisalehmohammad4@gmail.com',
+    role: 'superadmin',
     pinCode: '9999',
+    is_superadmin: true,
+    isSuperAdmin: true,
     organizationId: DEFAULT_ORGANIZATION.id,
     organization_id: DEFAULT_ORGANIZATION.id,
-    assignedWarehouseId: undefined,
-    assignedWarehouseName: 'כלל המפעל והפרויקטים',
+    assignedWarehouseName: 'כלל המערכת (Platform Master)',
+    isActive: true,
+  },
+  '9999': {
+    id: 'usr-superadmin-01',
+    fullName: 'עלי סאלח (מנהל על - Platform SuperAdmin)',
+    username: 'admin',
+    email: 'alisalehmohammad4@gmail.com',
+    role: 'superadmin',
+    pinCode: '9999',
+    is_superadmin: true,
+    isSuperAdmin: true,
+    organizationId: DEFAULT_ORGANIZATION.id,
+    organization_id: DEFAULT_ORGANIZATION.id,
+    assignedWarehouseName: 'כלל המערכת (Platform Master)',
+    isActive: true,
+  },
+  'alisalehmohammad4@gmail.com': {
+    id: 'usr-superadmin-01',
+    fullName: 'עלי סאלח (מנהל על - Platform SuperAdmin)',
+    username: 'admin',
+    email: 'alisalehmohammad4@gmail.com',
+    role: 'superadmin',
+    pinCode: '9999',
+    is_superadmin: true,
+    isSuperAdmin: true,
+    organizationId: DEFAULT_ORGANIZATION.id,
+    organization_id: DEFAULT_ORGANIZATION.id,
+    assignedWarehouseName: 'כלל המערכת (Platform Master)',
     isActive: true,
   },
 
@@ -197,6 +228,7 @@ interface AuthContextType {
   user: AppUser;
   role: UserRole;
   currentOrganization: Organization;
+  isSuperAdmin: boolean;
   isGeneralManager: boolean;
   isChiefOperations: boolean;
   isStorekeeper: boolean;
@@ -559,7 +591,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value = useMemo<AuthContextType>(() => {
-    const isGeneralManager = user.role === 'general_manager' || user.role === 'admin';
+    const isSuperAdmin = isPlatformSuperAdmin(user);
+    const isGeneralManager = user.role === 'general_manager' || user.role === 'admin' || isSuperAdmin;
     const isChiefOperations = user.role === 'chief_operations';
     const isStorekeeper = user.role === 'storekeeper' || user.role === 'supervisor';
     const isSupervisorOrAdmin = user.role !== 'worker';
@@ -579,6 +612,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user,
       role: user.role,
       currentOrganization,
+      isSuperAdmin,
       isGeneralManager,
       isChiefOperations,
       isStorekeeper,
