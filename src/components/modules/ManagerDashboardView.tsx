@@ -628,8 +628,6 @@ export default function ManagerDashboardView({ data }: ManagerDashboardViewProps
       </div>
 
       <main className="max-w-6xl mx-auto px-4 py-5 space-y-6">
-
-
         {/* Navigation Tab Switcher */}
         <div className="flex flex-nowrap overflow-x-auto no-scrollbar py-1 gap-2 border-b border-slate-200 sm:border sm:border-slate-300 sm:bg-slate-200/80 sm:p-1.5 sm:rounded-2xl print:hidden">
           <button

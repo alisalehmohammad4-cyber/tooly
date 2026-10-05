@@ -382,19 +382,19 @@ export default function SuperAdminDashboardView() {
           <div className="flex flex-wrap items-center justify-between gap-3 mb-6 pb-4 border-b border-slate-700/80">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0">
-                <Clock className="w-5 h-5" />
+                <ShieldCheck className="w-5 h-5" />
               </div>
               <div>
                 <div className="flex items-center gap-2">
                   <h2 className="text-lg font-black text-white">
-                    בקשות הצטרפות חדשות לאישור
+                    אישור ארגונים חדשים (Onboarding Approvals)
                   </h2>
                   <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                    {pendingOrgs.length} ממתינות
+                    {pendingOrgs.length} ממתינות לאישור
                   </span>
                 </div>
                 <p className="text-xs text-slate-400">
-                  סקור ואשר חברות וקבלנים חדשים שנרשמו לפלטפורמת Tooly
+                  בקרת הצטרפות ארגונים וסביבות עבודה עצמאיות למערכת Tooly
                 </p>
               </div>
             </div>
