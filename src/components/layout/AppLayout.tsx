@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
+import { isPlatformSuperAdmin } from '@/lib/auth/superadmin';
 import NetworkSyncPill from '@/components/common/NetworkSyncPill';
 import LanguageSwitcher from '@/components/common/LanguageSwitcher';
 
@@ -163,6 +164,17 @@ export function RoleHeader({
             </button>
           )}
 
+          {/* Master Admin Portal Shortcut */}
+          {(isSuperAdmin || isPlatformSuperAdmin(user)) && (
+            <Link
+              href="/admin"
+              className="p-1.5 rounded-xl bg-slate-900 text-purple-300 border border-purple-500/40 text-xs font-black shrink-0"
+              title="כניסה לפורטל מנהל מערכת ראשי"
+            >
+              ⚡
+            </Link>
+          )}
+
           {/* Station Lock / Exit (Elevated roles) */}
           {!isWorker && (
             <button
@@ -222,6 +234,16 @@ export function RoleHeader({
           >
             <span className="truncate">{desktopUserPillLabel}</span>
           </button>
+
+          {(isSuperAdmin || isPlatformSuperAdmin(user)) && (
+            <Link
+              href="/admin"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-purple-300 hover:text-purple-200 border border-purple-500/40 text-xs font-black transition-all cursor-pointer shadow-sm shrink-0"
+              title="כניסה לפורטל מנהל מערכת ראשי (SuperAdmin Dashboard)"
+            >
+              <span>⚡ Master Admin</span>
+            </Link>
+          )}
 
           {!isWorker && (
             <button

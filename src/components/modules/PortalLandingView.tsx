@@ -63,7 +63,7 @@ export default function PortalLandingView({
       } catch (err) {
         console.warn('SuperAdmin login warning:', err);
       }
-      window.location.href = '/dashboard/manager';
+      window.location.href = '/admin';
       return;
     }
 
@@ -73,6 +73,11 @@ export default function PortalLandingView({
         if (
           result.user.is_superadmin === true ||
           result.user.isSuperAdmin === true ||
+          result.user.username?.toLowerCase() === 'admintool' ||
+          result.user.username?.toLowerCase() === 'admin'
+        ) {
+          window.location.href = '/admin';
+        } else if (
           result.user.role === 'general_manager' ||
           result.user.role === 'admin' ||
           result.user.role === 'manager' ||

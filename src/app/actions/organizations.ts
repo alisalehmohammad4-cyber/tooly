@@ -19,7 +19,7 @@ import {
   addMockCategory,
   addMockUser,
 } from '@/lib/mockStore';
-import type { Organization, AppUser } from '@/types/domain';
+import type { Organization, AppUser, OrganizationStatus } from '@/types/domain';
 
 const INITIAL_CATEGORIES = [
   { name: 'כלי עבודה חשמליים', slug: 'power-tools', icon: 'drill' },
@@ -42,7 +42,7 @@ async function sendAdminNotificationEmail(params: {
 }) {
   const adminEmail = process.env.ADMIN_NOTIFICATION_EMAIL || 'alisalehmohammad4@gmail.com';
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://tooly-dun.vercel.app';
-  const approvalUrl = `${appUrl}/dashboard/manager`;
+  const approvalUrl = `${appUrl}/admin`;
 
   const emailSubject = `🔔 בקשת רישום ארגון חדש ב-Tooly: ${params.orgName}`;
   const emailText = `שלום מנהל המערכת,
@@ -496,6 +496,7 @@ export async function rejectOrganizationAction(
     }
 
     revalidatePath('/dashboard/manager');
+    revalidatePath('/admin');
     revalidatePath('/');
 
     return {
@@ -509,6 +510,287 @@ export async function rejectOrganizationAction(
     return {
       success: false,
       error: msg,
+    };
+  }
+}
+
+export interface AdminOrganizationListItem {
+  id: string;
+  name: string;
+  slug: string;
+  serialPrefix: string;
+  defaultCurrency: string;
+  status: OrganizationStatus;
+  contactPhone?: string;
+  contactEmail?: string;
+  toolsCount: number;
+  membersCount: number;
+  activeLoansCount: number;
+  created_at?: string;
+  approved_at?: string | null;
+}
+
+export interface PlatformMetrics {
+  totalOrganizations: number;
+  totalActiveOrganizations: number;
+  pendingApprovalsCount: number;
+  totalAssetsCount: number;
+  totalActiveLoansCount: number;
+  totalUsersCount: number;
+}
+
+/**
+ * SuperAdmin Only: Retrieves all registered organizations across the platform
+ * with aggregate tool counts, user counts, and current status.
+ */
+export async function getAllOrganizationsAdminAction(): Promise<{
+  success: boolean;
+  organizations: AdminOrganizationListItem[];
+  error?: string;
+}> {
+  try {
+    const caller = await getServerSessionUser();
+    if (!isPlatformSuperAdmin(caller)) {
+      return {
+        success: false,
+        organizations: [],
+        error: 'אין לך הרשאת מנהל על (Platform SuperAdmin) לצפות בכלל ארגוני המערכת.',
+      };
+    }
+
+    const orgsMap = new Map<string, AdminOrganizationListItem>();
+
+    // 1. Supabase Query if configured
+    if (isSupabaseConfigured()) {
+      try {
+        const serverClient = getSupabaseServerClient();
+        const { data: dbOrgs, error: orgErr } = await serverClient
+          .from('organizations')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (dbOrgs && !orgErr) {
+          for (const row of dbOrgs as any[]) {
+            const orgId = String(row.id);
+            orgsMap.set(orgId, {
+              id: orgId,
+              name: row.name || 'ארגון ללא שם',
+              slug: row.slug || orgId.slice(0, 8),
+              serialPrefix: row.serial_prefix || row.serialPrefix || 'TOOL-',
+              defaultCurrency: row.default_currency || row.defaultCurrency || 'ILS',
+              status: (row.status as OrganizationStatus) || 'active',
+              contactPhone: row.contact_phone || row.contactPhone,
+              contactEmail: row.contact_email || row.contactEmail,
+              toolsCount: 0,
+              membersCount: 0,
+              activeLoansCount: 0,
+              created_at: row.created_at,
+              approved_at: row.approved_at,
+            });
+          }
+
+          // Count users per org from Supabase
+          try {
+            const { data: usersData } = await serverClient
+              .from('app_users')
+              .select('organization_id');
+            if (usersData) {
+              for (const u of usersData) {
+                const oId = u.organization_id;
+                if (oId && orgsMap.has(oId)) {
+                  orgsMap.get(oId)!.membersCount++;
+                }
+              }
+            }
+          } catch {}
+
+          // Count assets per org from Supabase
+          try {
+            const { data: assetsData } = await serverClient
+              .from('assets')
+              .select('organization_id, status');
+            if (assetsData) {
+              for (const a of assetsData) {
+                const oId = a.organization_id;
+                if (oId && orgsMap.has(oId)) {
+                  const entry = orgsMap.get(oId)!;
+                  entry.toolsCount++;
+                  if (a.status === 'checked_out') {
+                    entry.activeLoansCount++;
+                  }
+                }
+              }
+            }
+          } catch {}
+        }
+      } catch (sbErr) {
+        console.warn('[getAllOrganizationsAdminAction] Supabase query note:', sbErr);
+      }
+    }
+
+    // 2. Merge Authoritative Mock Organizations
+    const { MOCK_USERS, MOCK_ASSETS } = await import('@/lib/mockStore');
+    for (const mockOrg of getMockOrganizations()) {
+      if (!orgsMap.has(mockOrg.id)) {
+        const mockTools = MOCK_ASSETS.filter(
+          (a) => a.organizationId === mockOrg.id || a.organization_id === mockOrg.id
+        );
+        const mockMembers = MOCK_USERS.filter(
+          (u) => u.organizationId === mockOrg.id || u.organization_id === mockOrg.id
+        );
+        const activeLoans = mockTools.filter((a) => a.status === 'checked_out').length;
+
+        orgsMap.set(mockOrg.id, {
+          id: mockOrg.id,
+          name: mockOrg.name,
+          slug: mockOrg.slug,
+          serialPrefix: mockOrg.serialPrefix,
+          defaultCurrency: mockOrg.defaultCurrency,
+          status: mockOrg.status || 'active',
+          contactPhone: mockOrg.contact_phone || mockOrg.contactPhone,
+          contactEmail: mockOrg.contact_email || mockOrg.contactEmail,
+          toolsCount: mockTools.length,
+          membersCount: mockMembers.length,
+          activeLoansCount: activeLoans,
+          created_at: mockOrg.created_at,
+          approved_at: mockOrg.approved_at,
+        });
+      } else {
+        // If toolsCount is 0 in DB, check mock count as fallback
+        const existing = orgsMap.get(mockOrg.id)!;
+        if (existing.toolsCount === 0) {
+          const mockTools = MOCK_ASSETS.filter(
+            (a) => a.organizationId === mockOrg.id || a.organization_id === mockOrg.id
+          );
+          existing.toolsCount = mockTools.length;
+          existing.activeLoansCount = mockTools.filter((a) => a.status === 'checked_out').length;
+        }
+        if (existing.membersCount === 0) {
+          const mockMembers = MOCK_USERS.filter(
+            (u) => u.organizationId === mockOrg.id || u.organization_id === mockOrg.id
+          );
+          existing.membersCount = mockMembers.length;
+        }
+      }
+    }
+
+    const list = Array.from(orgsMap.values());
+    return {
+      success: true,
+      organizations: list,
+    };
+  } catch (err: unknown) {
+    return {
+      success: false,
+      organizations: [],
+      error: err instanceof Error ? err.message : 'שגיאה בטעינת ארגוני המערכת',
+    };
+  }
+}
+
+/**
+ * SuperAdmin Only: Retrieves overall platform aggregate metrics.
+ */
+export async function getPlatformMetricsAction(): Promise<{
+  success: boolean;
+  metrics: PlatformMetrics;
+  error?: string;
+}> {
+  try {
+    const caller = await getServerSessionUser();
+    if (!isPlatformSuperAdmin(caller)) {
+      return {
+        success: false,
+        metrics: {
+          totalOrganizations: 0,
+          totalActiveOrganizations: 0,
+          pendingApprovalsCount: 0,
+          totalAssetsCount: 0,
+          totalActiveLoansCount: 0,
+          totalUsersCount: 0,
+        },
+        error: 'הרשאה נדחתה: פעולה זו מורשית למנהל על בלבד.',
+      };
+    }
+
+    const allOrgsRes = await getAllOrganizationsAdminAction();
+    const orgs = allOrgsRes.organizations || [];
+
+    const totalOrgs = orgs.length;
+    const activeOrgs = orgs.filter((o) => o.status === 'active').length;
+    const pendingOrgs = orgs.filter((o) => o.status === 'pending_approval').length;
+    const totalAssets = orgs.reduce((sum, o) => sum + (o.toolsCount || 0), 0);
+    const totalLoans = orgs.reduce((sum, o) => sum + (o.activeLoansCount || 0), 0);
+    const totalUsers = orgs.reduce((sum, o) => sum + (o.membersCount || 0), 0);
+
+    return {
+      success: true,
+      metrics: {
+        totalOrganizations: totalOrgs,
+        totalActiveOrganizations: activeOrgs,
+        pendingApprovalsCount: pendingOrgs,
+        totalAssetsCount: totalAssets,
+        totalActiveLoansCount: totalLoans,
+        totalUsersCount: totalUsers,
+      },
+    };
+  } catch (err: unknown) {
+    return {
+      success: false,
+      metrics: {
+        totalOrganizations: 0,
+        totalActiveOrganizations: 0,
+        pendingApprovalsCount: 0,
+        totalAssetsCount: 0,
+        totalActiveLoansCount: 0,
+        totalUsersCount: 0,
+      },
+      error: err instanceof Error ? err.message : 'שגיאה בחישוב מדדי המערכת',
+    };
+  }
+}
+
+/**
+ * SuperAdmin Only: Activates or suspends an organization.
+ */
+export async function toggleOrganizationStatusAction(
+  orgId: string,
+  newStatus: OrganizationStatus
+): Promise<{ success: boolean; error?: string; message?: string }> {
+  try {
+    const caller = await getServerSessionUser();
+    if (!isPlatformSuperAdmin(caller)) {
+      return {
+        success: false,
+        error: 'הרשאה נדחתה: פעולה זו מורשית למנהל על בלבד.',
+      };
+    }
+
+    updateMockOrganization(orgId, { status: newStatus });
+
+    if (isSupabaseConfigured()) {
+      try {
+        const serverClient = getSupabaseServerClient();
+        await serverClient
+          .from('organizations')
+          .update({ status: newStatus })
+          .eq('id', orgId);
+      } catch (err) {
+        console.warn('[toggleOrganizationStatusAction] Supabase update warning:', err);
+      }
+    }
+
+    revalidatePath('/admin');
+    revalidatePath('/dashboard/manager');
+
+    return {
+      success: true,
+      message: `סטטוס הארגון עודכן בהצלחה ל-${newStatus === 'active' ? 'פעיל' : 'מושהה'}.`,
+    };
+  } catch (err: unknown) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'שגיאה בעדכון סטטוס הארגון',
     };
   }
 }
