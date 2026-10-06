@@ -519,16 +519,24 @@ export async function decideTransferRequestAction(
           return { success: false, error: "העדכון נכשל: הכלי לא נמצא או שנחסם עקב הרשאות (0 שורות עודכנו)." };
         }
 
-        // 2. Log TRANSFER_INIT in custody_ledger
-        await supabaseAdmin.from('custody_ledger').insert({
+        // 2. Log TRANSFER in custody_ledger
+        const { error: ledgerError } = await supabaseAdmin.from('custody_ledger').insert({
           asset_id: targetRecord.asset_id,
-          action: 'TRANSFER_INIT',
+          action: 'TRANSFER',
           performed_by: decidedBy,
           organization_id: orgId,
           warehouse_id: targetRecord.target_warehouse_id,
+          target_warehouse_id: targetRecord.target_warehouse_id,
+          from_warehouse_id: targetRecord.source_warehouse_id,
+          to_warehouse_id: targetRecord.target_warehouse_id,
           notes: `אושרה בקשת העברה בין אתרים (${requestId})`,
           created_at: now,
         });
+
+        if (ledgerError) {
+          console.error('CRITICAL: Failed to write transfer approval to custody_ledger:', ledgerError);
+          return { success: false, error: 'שגיאה ברישום תנועת השינוע ביומן: ' + ledgerError.message };
+        }
       } catch (err) {
         console.warn('[decideTransferRequestAction] Supabase error during approval:', err);
         const msg = err instanceof Error ? err.message : 'Database error';
@@ -616,6 +624,36 @@ function isValidUuid(id?: string | null): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id.trim());
 }
 
+async function resolveVerifiedWarehouse(
+  warehouseIdOrCode: string | undefined | null,
+  orgId: string
+): Promise<{ id: string; name: string } | null> {
+  if (!warehouseIdOrCode) return null;
+  const clean = warehouseIdOrCode.trim();
+
+  // 1. If valid UUID, look up by id
+  if (isValidUuid(clean)) {
+    const { data: byId } = await supabaseAdmin
+      .from('warehouses')
+      .select('id, name')
+      .eq('id', clean)
+      .eq('organization_id', orgId)
+      .maybeSingle();
+    if (byId) return { id: byId.id, name: byId.name };
+  }
+
+  // 2. Look up by code or name
+  const { data: byCodeOrName } = await supabaseAdmin
+    .from('warehouses')
+    .select('id, name')
+    .eq('organization_id', orgId)
+    .or(`code.eq.${clean},name.eq.${clean}`)
+    .maybeSingle();
+  if (byCodeOrName) return { id: byCodeOrName.id, name: byCodeOrName.name };
+
+  return null;
+}
+
 export interface CompleteTransferParams {
   assetId: string;
   targetWarehouseId?: string;
@@ -670,7 +708,7 @@ export async function completeTransferReceptionAction(
     return { success: false, error: 'לא נמצא מזהה ארגון מורשה' };
   }
   const user = await getServerSessionUser();
-  const receivedBy = user?.fullName || 'מחסנאי קולט';
+  const receivedBy = user?.fullName || (user as unknown as { name?: string })?.name || 'מחסנאי קולט';
   const now = new Date().toISOString();
 
   let finalTargetWarehouseId: string | null = null;
@@ -693,33 +731,11 @@ export async function completeTransferReceptionAction(
       const activeOrg = asset.organization_id || orgId;
 
       // Check if provided targetWarehouseId is a valid UUID and exists in warehouses
-      if (isValidUuid(targetWarehouseId)) {
-        const { data: wh } = await supabaseAdmin
-          .from('warehouses')
-          .select('id, name')
-          .eq('id', targetWarehouseId)
-          .maybeSingle();
-        if (wh) {
-          finalTargetWarehouseId = wh.id;
-          finalTargetWarehouseName = wh.name;
-        }
+      let targetWh = await resolveVerifiedWarehouse(targetWarehouseId, activeOrg);
+      if (!targetWh) {
+        targetWh = await resolveVerifiedWarehouse(asset.current_warehouse_id, activeOrg);
       }
-
-      // If targetWarehouseId was not verified, check asset's current_warehouse_id
-      if (!finalTargetWarehouseId && isValidUuid(asset.current_warehouse_id)) {
-        const { data: curWh } = await supabaseAdmin
-          .from('warehouses')
-          .select('id, name')
-          .eq('id', asset.current_warehouse_id)
-          .maybeSingle();
-        if (curWh) {
-          finalTargetWarehouseId = curWh.id;
-          finalTargetWarehouseName = curWh.name;
-        }
-      }
-
-      // If still not resolved, query the first warehouse belonging to the organization
-      if (!finalTargetWarehouseId) {
+      if (!targetWh) {
         const { data: fallbackWh } = await supabaseAdmin
           .from('warehouses')
           .select('id, name')
@@ -728,14 +744,57 @@ export async function completeTransferReceptionAction(
           .limit(1)
           .maybeSingle();
         if (fallbackWh) {
-          finalTargetWarehouseId = fallbackWh.id;
-          finalTargetWarehouseName = fallbackWh.name;
+          targetWh = { id: fallbackWh.id, name: fallbackWh.name };
         }
       }
 
-      if (!finalTargetWarehouseId) {
+      if (!targetWh) {
         return { success: false, error: 'לא נמצא מזהה מחסן יעד תקין (UUID) לקליטת הציוד' };
       }
+
+      finalTargetWarehouseId = targetWh.id;
+      finalTargetWarehouseName = targetWh.name;
+
+      // Resolve source warehouse UUID (from transfer_requests or custody_ledger)
+      let sourceWh: { id: string; name: string } | null = null;
+      if (requestId) {
+        const { data: tr } = await supabaseAdmin
+          .from('transfer_requests')
+          .select('source_warehouse_id')
+          .eq('id', requestId)
+          .maybeSingle();
+        if (tr?.source_warehouse_id) {
+          sourceWh = await resolveVerifiedWarehouse(tr.source_warehouse_id, activeOrg);
+        }
+      }
+      if (!sourceWh) {
+        const { data: tr } = await supabaseAdmin
+          .from('transfer_requests')
+          .select('source_warehouse_id')
+          .eq('asset_id', assetId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (tr?.source_warehouse_id) {
+          sourceWh = await resolveVerifiedWarehouse(tr.source_warehouse_id, activeOrg);
+        }
+      }
+      if (!sourceWh) {
+        const { data: ledgerPrev } = await supabaseAdmin
+          .from('custody_ledger')
+          .select('from_warehouse_id, warehouse_id')
+          .eq('asset_id', assetId)
+          .order('created_at', { ascending: false })
+          .limit(3);
+        if (ledgerPrev && ledgerPrev.length > 0) {
+          const prevId = ledgerPrev[0]?.from_warehouse_id || ledgerPrev[0]?.warehouse_id;
+          if (prevId) {
+            sourceWh = await resolveVerifiedWarehouse(prevId, activeOrg);
+          }
+        }
+      }
+
+      const sourceWarehouseUuid = sourceWh?.id || null;
 
       // 2. Update asset in Supabase:
       // Updates asset status from 'in_transit' to 'in_stock'
@@ -765,6 +824,10 @@ export async function completeTransferReceptionAction(
         asset_id: assetId,
         action: 'RECEIVE_TRANSFER',
         warehouse_id: finalTargetWarehouseId,
+        target_warehouse_id: finalTargetWarehouseId,
+        from_warehouse_id: sourceWarehouseUuid,
+        to_warehouse_id: finalTargetWarehouseId,
+        target_site_name: finalTargetWarehouseName,
         performed_by: receivedBy,
         organization_id: activeOrg,
         notes: notes?.trim() || `אישור הגעה וקליטת ציוד במחסן היעד (${finalTargetWarehouseName})`,
@@ -772,7 +835,8 @@ export async function completeTransferReceptionAction(
       });
 
       if (ledgerErr) {
-        console.warn('[completeTransferReceptionAction] Error inserting custody_ledger:', ledgerErr);
+        console.error('CRITICAL: Failed to write transfer reception to custody_ledger:', ledgerErr);
+        return { success: false, error: 'שגיאה ברישום תנועת קליטת השינוע ביומן: ' + ledgerErr.message };
       }
 
       // 4. Update transfer_requests record if present
@@ -1017,6 +1081,10 @@ export async function cancelTransferRollbackAction(
         asset_id: assetId,
         action: 'CANCEL_TRANSFER',
         warehouse_id: finalSourceWarehouseId,
+        target_warehouse_id: finalSourceWarehouseId,
+        from_warehouse_id: finalSourceWarehouseId,
+        to_warehouse_id: finalSourceWarehouseId,
+        target_site_name: finalSourceWarehouseName,
         performed_by: performedBy,
         organization_id: activeOrg,
         notes: notes?.trim() || `ביטול שינוע והחזרה למחסן מקור (${finalSourceWarehouseName})`,
@@ -1024,7 +1092,8 @@ export async function cancelTransferRollbackAction(
       });
 
       if (ledgerErr) {
-        console.warn('[cancelTransferRollbackAction] Error inserting custody_ledger:', ledgerErr);
+        console.error('CRITICAL: Failed to write cancel transfer to custody_ledger:', ledgerErr);
+        return { success: false, error: 'שגיאה ברישום ביטול השינוע ביומן: ' + ledgerErr.message };
       }
 
       // 5. Update transfer_requests record if present
@@ -1360,9 +1429,20 @@ export async function directStorekeeperTransferAction(data: {
 
   // 1. Fetch current asset details to check availability and find source warehouse
   let sourceWhId = data.sourceWarehouseId || '';
+  let sourceWhName = 'מחסן מקור';
+  let targetWarehouseUuid = targetWarehouseId;
+  let targetWarehouseName = 'מחסן יעד';
 
   if (isSupabaseConfigured()) {
     try {
+      // Resolve target warehouse strictly as verified UUID
+      const targetWh = await resolveVerifiedWarehouse(targetWarehouseId, orgId);
+      if (!targetWh) {
+        return { success: false, error: 'לא נמצא מחסן יעד מורשה בארגון זה (UUID לא תקין)' };
+      }
+      targetWarehouseUuid = targetWh.id;
+      targetWarehouseName = targetWh.name;
+
       const { data: asset, error: fetchErr } = await supabaseAdmin
         .from('assets')
         .select('id, current_warehouse_id, status, name, qr_code, organization_id')
@@ -1376,10 +1456,29 @@ export async function directStorekeeperTransferAction(data: {
       if (!asset) {
         return { success: false, error: 'כלי העבודה לא נמצא במערכת הארגון' };
       }
-      if (asset.status !== 'available') {
+      if (asset.status !== 'available' && asset.status !== 'in_stock') {
         return { success: false, error: 'לא ניתן לשנע כלי שאינו במצב זמין במחסן (Available)' };
       }
-      sourceWhId = asset.current_warehouse_id || sourceWhId;
+
+      // Resolve source warehouse strictly as verified UUID
+      let sourceWh = await resolveVerifiedWarehouse(data.sourceWarehouseId || asset.current_warehouse_id, orgId);
+      if (!sourceWh) {
+        const { data: firstOrgWh } = await supabaseAdmin
+          .from('warehouses')
+          .select('id, name')
+          .eq('organization_id', orgId)
+          .order('created_at', { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        if (firstOrgWh) {
+          sourceWh = { id: firstOrgWh.id, name: firstOrgWh.name };
+        }
+      }
+
+      if (sourceWh) {
+        sourceWhId = sourceWh.id;
+        sourceWhName = sourceWh.name;
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Database error';
       return { success: false, error: msg };
@@ -1389,26 +1488,27 @@ export async function directStorekeeperTransferAction(data: {
     if (!m) {
       return { success: false, error: 'כלי העבודה לא נמצא במערכת' };
     }
-    if (m.status !== 'available') {
+    if (m.status !== 'available' && m.status !== 'in_stock') {
       return { success: false, error: 'לא ניתן לשנע כלי שאינו במצב זמין במחסן (Available)' };
     }
     sourceWhId = m.warehouseId || m.currentWarehouseId || sourceWhId;
   }
 
-  if (sourceWhId && sourceWhId === targetWarehouseId) {
+  if (sourceWhId && sourceWhId === targetWarehouseUuid) {
     return { success: false, error: 'מחסן המקור ומחסן היעד חייבים להיות שונים' };
   }
 
   const requestId = `trans-dir-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
-  // 2. Update asset to in_transit and log TRANSFER_INIT in Supabase
+  // 2. Step A: Update assets table and Step B: Atomically INSERT an audit movement record into custody_ledger
   if (isSupabaseConfigured()) {
     try {
       const updateQuery = supabaseAdmin
         .from('assets')
         .update({
-          current_warehouse_id: targetWarehouseId,
+          current_warehouse_id: targetWarehouseUuid,
           status: 'in_transit',
+          current_assigned_worker: null,
           organization_id: orgId,
           updated_at: now,
         })
@@ -1430,18 +1530,25 @@ export async function directStorekeeperTransferAction(data: {
         return { success: false, error: "העדכון נכשל: הכלי לא נמצא או שנחסם עקב הרשאות (0 שורות עודכנו)." };
       }
 
-      const { error: ledgerErr } = await supabaseAdmin.from('custody_ledger').insert({
-        asset_id: assetId,
+      const { error: ledgerError } = await supabaseAdmin.from('custody_ledger').insert({
         organization_id: orgId,
-        warehouse_id: targetWarehouseId,
-        action: 'TRANSFER_INIT',
+        asset_id: assetId,
+        action: 'TRANSFER',
+        warehouse_id: targetWarehouseUuid,
+        target_warehouse_id: targetWarehouseUuid,
+        from_warehouse_id: sourceWhId || null,
+        to_warehouse_id: targetWarehouseUuid,
+        target_site_name: targetWarehouseName,
         performed_by: performedBy,
-        notes: `העברה ישירה ע"י מחסנאי לאתר יעד. הערות: ${transporterNotes || 'ללא'}`,
+        notes: transporterNotes
+          ? `שינוע מ-${sourceWhName} אל ${targetWarehouseName}. הערות: ${transporterNotes}`
+          : `שינוע מ-${sourceWhName} אל ${targetWarehouseName}`,
         created_at: now,
       });
 
-      if (ledgerErr) {
-        return { success: false, error: `שגיאה ברישום תנועה: ${ledgerErr.message}` };
+      if (ledgerError) {
+        console.error('CRITICAL: Failed to write transfer to custody_ledger:', ledgerError);
+        return { success: false, error: 'שגיאה ברישום תנועת השינוע ביומן: ' + ledgerError.message };
       }
 
       // Insert pre-approved transfer_requests record so receiving site & chief tracker see the route
@@ -1449,8 +1556,8 @@ export async function directStorekeeperTransferAction(data: {
         id: requestId,
         organization_id: orgId,
         asset_id: assetId,
-        source_warehouse_id: sourceWhId || targetWarehouseId,
-        target_warehouse_id: targetWarehouseId,
+        source_warehouse_id: sourceWhId || targetWarehouseUuid,
+        target_warehouse_id: targetWarehouseUuid,
         requested_by: performedBy,
         requested_by_user_id: sessionUser?.id || null,
         decided_by: performedBy,
@@ -1462,6 +1569,7 @@ export async function directStorekeeperTransferAction(data: {
       });
 
       if (trErr) {
+        console.error('Failed to create transfer_requests record:', trErr);
         return { success: false, error: `שגיאה ברישום בקשת שינוע: ${trErr.message}` };
       }
     } catch (err: unknown) {
@@ -1475,8 +1583,8 @@ export async function directStorekeeperTransferAction(data: {
     id: requestId,
     organization_id: orgId,
     asset_id: assetId,
-    source_warehouse_id: sourceWhId || 'wh-salehali-main',
-    target_warehouse_id: targetWarehouseId,
+    source_warehouse_id: sourceWhId || targetWarehouseUuid,
+    target_warehouse_id: targetWarehouseUuid,
     requested_by: performedBy,
     requested_by_user_id: sessionUser?.id || null,
     reason: transporterNotes ? `העברה ישירה ע"י מחסנאי: ${transporterNotes}` : 'העברה ישירה ע"י מחסנאי',

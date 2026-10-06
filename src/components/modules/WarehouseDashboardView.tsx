@@ -158,8 +158,8 @@ export default function WarehouseDashboardView({
   const [transferQrCode, setTransferQrCode] = useState<string>('');
   const [transferTargetWhId, setTransferTargetWhId] = useState<string>(() => {
     const whList = propWarehouses || initialData.warehouses || initialData.allWarehouses || [];
-    const firstOther = whList.find((w) => w.id !== initialData.warehouse.id);
-    return firstOther ? firstOther.id : (whList[0]?.id || 'wh-site-02');
+    const firstOther = whList.find((w) => w.id && w.id !== initialData.warehouse?.id && w.id !== 'all');
+    return firstOther ? firstOther.id : (whList.find((w) => w.id && w.id !== 'all')?.id || '');
   });
   const [transferNotes, setTransferNotes] = useState<string>('');
   const [isTransferring, setIsTransferring] = useState<boolean>(false);
@@ -183,7 +183,7 @@ export default function WarehouseDashboardView({
   const [isLoadingAvailableAssets, setIsLoadingAvailableAssets] = useState<boolean>(false);
   const [selectedAssetToTransfer, setSelectedAssetToTransfer] = useState<AvailableTransferAssetItem | null>(null);
   const [transferRequestTargetWhId, setTransferRequestTargetWhId] = useState<string>(() => {
-    return selectedWarehouseId !== 'all' ? selectedWarehouseId : (assignedWarehouseId || 'wh-salehali-main');
+    return selectedWarehouseId !== 'all' ? selectedWarehouseId : (assignedWarehouseId || '');
   });
   const [transferRequestReason, setTransferRequestReason] = useState<string>('');
   const [isSubmittingTransferRequest, setIsSubmittingTransferRequest] = useState<boolean>(false);
@@ -668,8 +668,8 @@ export default function WarehouseDashboardView({
   const [isTagVerified, setIsTagVerified] = useState<boolean>(false);
   const [dispatchTargetWhId, setDispatchTargetWhId] = useState<string>(() => {
     const whList = propWarehouses || initialData.warehouses || initialData.allWarehouses || [];
-    const firstOther = whList.find((w) => w.id !== initialData.warehouse.id);
-    return firstOther ? firstOther.id : (whList[0]?.id || 'wh-site-02');
+    const firstOther = whList.find((w) => w.id && w.id !== initialData.warehouse?.id && w.id !== 'all');
+    return firstOther ? firstOther.id : (whList.find((w) => w.id && w.id !== 'all')?.id || '');
   });
   const [dispatchWorkerName, setDispatchWorkerName] = useState<string>('');
   const [dispatchWorkerPhone, setDispatchWorkerPhone] = useState<string>('');
@@ -789,8 +789,12 @@ export default function WarehouseDashboardView({
   React.useEffect(() => {
     if (isDirectTransferModalOpen) {
       void loadLocalAvailableAssets(selectedWarehouseId);
+      const validOther = warehouses.find((w) => w.id && w.id !== 'all' && w.id !== selectedWarehouseId);
+      if (validOther && (!directTargetWarehouseId || directTargetWarehouseId === selectedWarehouseId)) {
+        setDirectTargetWarehouseId(validOther.id);
+      }
     }
-  }, [isDirectTransferModalOpen, selectedWarehouseId, loadLocalAvailableAssets]);
+  }, [isDirectTransferModalOpen, selectedWarehouseId, loadLocalAvailableAssets, warehouses, directTargetWarehouseId]);
 
   // Submit direct outbound equipment transfer
   const handleDirectTransferSubmit = async (e: React.FormEvent) => {

@@ -190,11 +190,12 @@ function renderActionBadge(action: AuditActionType) {
           <span>החזרת כלי למחסן</span>
         </span>
       );
+    case 'TRANSFER':
     case 'TRANSFER_INIT':
       return (
         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black bg-indigo-50 text-indigo-900 border border-indigo-300 shadow-sm">
           <Truck className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-          <span>יציאה לשינוע (בין אתרים)</span>
+          <span>שינוע בין אתרים</span>
         </span>
       );
     case 'TRANSFER_RECEIVE':
@@ -461,7 +462,13 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
       CHECKOUT: records.filter((r) => r.action === 'CHECKOUT').length,
       CHECKIN: records.filter((r) => r.action === 'CHECKIN').length,
       TRANSFER_INIT: records.filter(
-        (r) => r.action === 'TRANSFER_INIT' || r.action === 'TRANSFER_RECEIVE'
+        (r) =>
+          r.action === 'TRANSFER' ||
+          r.action === 'DIRECT_TRANSFER' ||
+          r.action === 'RECEIVE_TRANSFER' ||
+          r.action === 'TRANSFER_INIT' ||
+          r.action === 'TRANSFER_RECEIVE' ||
+          r.action === 'CANCEL_TRANSFER'
       ).length,
       MAINTENANCE_FLAG: records.filter((r) => r.action === 'MAINTENANCE_FLAG').length,
       ONBOARD: records.filter((r) => r.action === 'ONBOARD').length,
@@ -549,9 +556,15 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
         : 'all';
 
     if (effectiveAction !== 'all') {
-      if (effectiveAction === 'TRANSFER_INIT') {
+      if (effectiveAction === 'TRANSFER_INIT' || effectiveAction === 'TRANSFER') {
         list = list.filter(
-          (r) => r.action === 'TRANSFER_INIT' || r.action === 'TRANSFER_RECEIVE'
+          (r) =>
+            r.action === 'TRANSFER' ||
+            r.action === 'DIRECT_TRANSFER' ||
+            r.action === 'RECEIVE_TRANSFER' ||
+            r.action === 'TRANSFER_INIT' ||
+            r.action === 'TRANSFER_RECEIVE' ||
+            r.action === 'CANCEL_TRANSFER'
         );
       } else {
         list = list.filter((r) => r.action === effectiveAction);

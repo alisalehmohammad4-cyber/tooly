@@ -3,6 +3,7 @@ import type { DamageReport, GpsCoordinates } from '@/types/domain';
 export type AuditActionType =
   | 'CHECKOUT'
   | 'CHECKIN'
+  | 'TRANSFER'
   | 'TRANSFER_INIT'
   | 'TRANSFER_RECEIVE'
   | 'RECEIVE_TRANSFER'

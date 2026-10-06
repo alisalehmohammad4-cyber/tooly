@@ -1352,6 +1352,41 @@ export async function getCheckedOutAssetsForReturnAction(
     });
 }
 
+function isValidUuid(id?: string | null): boolean {
+  if (!id || typeof id !== 'string') return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id.trim());
+}
+
+async function resolveVerifiedWarehouse(
+  warehouseIdOrCode: string | undefined | null,
+  orgId: string
+): Promise<{ id: string; name: string } | null> {
+  if (!warehouseIdOrCode) return null;
+  const clean = warehouseIdOrCode.trim();
+
+  // 1. If valid UUID, look up by id
+  if (isValidUuid(clean)) {
+    const { data: byId } = await supabaseAdmin
+      .from('warehouses')
+      .select('id, name')
+      .eq('id', clean)
+      .eq('organization_id', orgId)
+      .maybeSingle();
+    if (byId) return { id: byId.id, name: byId.name };
+  }
+
+  // 2. Look up by code or name
+  const { data: byCodeOrName } = await supabaseAdmin
+    .from('warehouses')
+    .select('id, name')
+    .eq('organization_id', orgId)
+    .or(`code.eq.${clean},name.eq.${clean}`)
+    .maybeSingle();
+  if (byCodeOrName) return { id: byCodeOrName.id, name: byCodeOrName.name };
+
+  return null;
+}
+
 /**
  * Transfers an asset to a different warehouse/site container.
  */
@@ -1372,49 +1407,8 @@ export async function transferAssetAction(
     return { success: false, error: 'לא נמצא מזהה ארגון מורשה' };
   }
 
-  // 1. Verify destination warehouse belongs to active organization
-  const mockWh = getMockWarehouses(true, orgId).find((w) => w.id === targetWarehouseId || w.code === targetWarehouseId);
-  let isWhValid = Boolean(mockWh);
-
-  if (isSupabaseConfigured()) {
-    try {
-      const { data: dbWh } = await supabaseAdmin
-        .from('warehouses')
-        .select('id, organization_id')
-        .eq('id', targetWarehouseId)
-        .maybeSingle();
-
-      if (dbWh) {
-        const whOrg = dbWh.organization_id as string;
-        isWhValid = whOrg === orgId;
-      }
-    } catch {}
-  }
-
-  if (!isWhValid) {
-    return {
-      success: false,
-      error: 'לא ניתן להעביר ציוד למתקן שאינו שייך לארגון זה',
-    };
-  }
-
-  // 2. Verify asset belongs to active organization
-  let isAssetValid = false;
-  const mockAsset = getMockAssets().find((a) => a.id === assetId && a.organizationId === orgId);
-  if (mockAsset) {
-    isAssetValid = true;
-  }
-  for (const key of Object.keys(FALLBACK_CUSTODY_ASSETS)) {
-    const fAsset = FALLBACK_CUSTODY_ASSETS[key];
-    if (fAsset.id === assetId && fAsset.organizationId === orgId) {
-      isAssetValid = true;
-      break;
-    }
-  }
-
-  const targetWhMeta = getWarehouseMeta(targetWarehouseId);
   const sessionUser = await getServerSessionUser();
-  const performedBy = sessionUser?.fullName || 'מחסנאי שטח';
+  const performedBy = sessionUser?.fullName || (sessionUser as unknown as { name?: string })?.name || 'מחסנאי שטח';
   const isDirect = Boolean(
     parsed.data.isDirectTransfer ||
     sessionUser?.role === 'chief_operations' ||
@@ -1424,6 +1418,16 @@ export async function transferAssetAction(
 
   if (isSupabaseConfigured()) {
     try {
+      // 1. Resolve destination warehouse strictly as verified UUID
+      const targetWh = await resolveVerifiedWarehouse(targetWarehouseId, orgId);
+      if (!targetWh) {
+        return {
+          success: false,
+          error: 'לא ניתן להעביר ציוד למתקן שאינו שייך לארגון זה או שמזהה המחסן אינו תקין',
+        };
+      }
+
+      // 2. Fetch current asset
       const { data: currentAsset, error: fetchErr } = await supabaseAdmin
         .from('assets')
         .select('id, version, organization_id, qr_code, nfc_uid, condition, current_assigned_worker, current_warehouse_id, status, tool_models(name, brand, model_number)')
@@ -1434,38 +1438,54 @@ export async function transferAssetAction(
         return { success: false, error: fetchErr.message };
       }
       if (!currentAsset) {
-        return { success: false, error: 'Asset not found in database.' };
+        return { success: false, error: 'כלי העבודה לא נמצא במסד הנתונים' };
       }
 
       const assetOrg = currentAsset.organization_id as string;
-      const isAssetOwner = assetOrg === orgId;
-
-      if (!isAssetOwner) {
+      if (assetOrg !== orgId) {
         return {
           success: false,
           error: 'לא ניתן להעביר ציוד למתקן שאינו שייך לארגון זה',
         };
       }
 
-      const nextVersion = (currentAsset.version || 1) + 1;
-      const targetStatus = isDirect
-        ? (currentAsset.status === 'in_transit' ? 'available' : (currentAsset.status || 'available'))
-        : 'in_transit';
+      // 3. Resolve source warehouse
+      let sourceWh = await resolveVerifiedWarehouse(currentAsset.current_warehouse_id, orgId);
+      if (!sourceWh) {
+        const { data: firstOrgWh } = await supabaseAdmin
+          .from('warehouses')
+          .select('id, name')
+          .eq('organization_id', orgId)
+          .order('created_at', { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        if (firstOrgWh) {
+          sourceWh = { id: firstOrgWh.id, name: firstOrgWh.name };
+        }
+      }
 
+      const sourceWarehouseUuid = sourceWh?.id || null;
+      const sourceSiteName = sourceWh?.name || 'מחסן מקור';
+      const targetWarehouseUuid = targetWh.id;
+      const targetSiteName = targetWh.name;
+
+      const nextVersion = (currentAsset.version || 1) + 1;
+      const newStatus = isDirect ? 'in_stock' : 'in_transit';
+      const now = new Date().toISOString();
+
+      // Step A: Update the assets table
       const updateQuery = supabaseAdmin
         .from('assets')
         .update({
-          current_warehouse_id: targetWarehouseId,
-          status: targetStatus,
+          current_warehouse_id: targetWarehouseUuid,
+          status: newStatus,
+          current_assigned_worker: null,
           version: nextVersion,
           organization_id: orgId,
-          updated_at: new Date().toISOString(),
+          updated_at: now,
         })
-        .eq('id', assetId);
-
-      if (orgId) {
-        updateQuery.eq('organization_id', orgId);
-      }
+        .eq('id', assetId)
+        .eq('organization_id', orgId);
 
       const { data: updatedRows, error: updateErr } = await updateQuery.select();
 
@@ -1479,21 +1499,26 @@ export async function transferAssetAction(
         return { success: false, error: "העדכון נכשל: הכלי לא נמצא או שנחסם עקב הרשאות (0 שורות עודכנו)." };
       }
 
-      // Record audit in custody_ledger
-      const { error: ledgerErr } = await supabaseAdmin.from('custody_ledger').insert({
-        asset_id: assetId,
-        action: isDirect ? 'DIRECT_TRANSFER' : 'TRANSFER_INIT',
-        performed_by: performedBy,
+      // Step B: Atomically INSERT an audit movement record into custody_ledger
+      const { error: ledgerError } = await supabaseAdmin.from('custody_ledger').insert({
         organization_id: orgId,
-        warehouse_id: targetWarehouseId,
+        asset_id: assetId,
+        action: 'TRANSFER',
+        warehouse_id: targetWarehouseUuid,
+        target_warehouse_id: targetWarehouseUuid,
+        from_warehouse_id: sourceWarehouseUuid,
+        to_warehouse_id: targetWarehouseUuid,
+        target_site_name: targetSiteName,
+        performed_by: performedBy,
         gps_lat: gps?.lat ?? null,
         gps_lng: gps?.lng ?? null,
-        notes: notes || (isDirect ? `העברה ישירה למחסן ${targetWhMeta.name}` : `שינוע למחסן ${targetWhMeta.name}`),
-        created_at: new Date().toISOString(),
+        notes: notes || `שינוע מ-${sourceSiteName} אל ${targetSiteName}`,
+        created_at: now,
       });
 
-      if (ledgerErr) {
-        console.warn('Custody ledger log error on transfer:', ledgerErr);
+      if (ledgerError) {
+        console.error('CRITICAL: Failed to write transfer to custody_ledger:', ledgerError);
+        return { success: false, error: 'שגיאה ברישום תנועת השינוע ביומן: ' + ledgerError.message };
       }
 
       const tm = (currentAsset as unknown as { tool_models?: { name?: string; brand?: string; model_number?: string | null } }).tool_models;
@@ -1501,12 +1526,12 @@ export async function transferAssetAction(
         id: currentAsset.id,
         qrCode: currentAsset.qr_code,
         nfcUid: currentAsset.nfc_uid || undefined,
-        status: targetStatus as ScannedAssetDetails['status'],
+        status: newStatus as ScannedAssetDetails['status'],
         condition: (currentAsset.condition as 'excellent' | 'good' | 'needs_repair' | 'retired') || 'good',
-        currentAssignedWorker: currentAsset.current_assigned_worker || null,
-        currentWarehouseId: targetWarehouseId,
-        warehouseName: targetWhMeta.name,
-        warehouseCode: targetWhMeta.code,
+        currentAssignedWorker: null,
+        currentWarehouseId: targetWarehouseUuid,
+        warehouseName: targetSiteName,
+        warehouseCode: targetWh.name,
         toolName: tm?.name || 'כלי עבודה',
         brand: tm?.brand || 'Standard',
         modelNumber: tm?.model_number || null,
@@ -1516,15 +1541,14 @@ export async function transferAssetAction(
       mutateMockAsset(
         currentAsset.qr_code,
         {
-          warehouseId: targetWarehouseId,
-          warehouseName: targetWhMeta.name,
-          warehouseCode: targetWhMeta.code,
-          status: targetStatus as ScannedAssetDetails['status'],
+          warehouseId: targetWarehouseUuid,
+          warehouseName: targetSiteName,
+          status: newStatus as ScannedAssetDetails['status'],
         },
         {
-          action: isDirect ? 'DIRECT_TRANSFER' : 'TRANSFER_INIT',
+          action: 'TRANSFER',
           performedBy,
-          notes: notes || (isDirect ? `העברה ישירה למחסן: ${targetWhMeta.name}` : `שינוע למחסן ${targetWhMeta.name}`),
+          notes: notes || (isDirect ? `העברה ישירה למחסן: ${targetSiteName}` : `שינוע למחסן ${targetSiteName}`),
         }
       );
 
@@ -1542,15 +1566,41 @@ export async function transferAssetAction(
       return {
         success: true,
         message: isDirect
-          ? `הכלי הועבר ישירות אל ${targetWhMeta.name}`
-          : `מיקום הכלי עודכן לשינוע אל ${targetWhMeta.name}`,
+          ? `הכלי הועבר ישירות אל ${targetSiteName}`
+          : `מיקום הכלי עודכן לשינוע אל ${targetSiteName}`,
         asset: dbUpdatedAsset,
       };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Database error';
       return { success: false, error: msg };
     }
-  } else if (!isAssetValid) {
+  }
+
+  // 1. Verify destination warehouse belongs to active organization (offline mock fallback only)
+  const mockWh = getMockWarehouses(true, orgId).find((w) => w.id === targetWarehouseId || w.code === targetWarehouseId);
+  if (!mockWh) {
+    return {
+      success: false,
+      error: 'לא ניתן להעביר ציוד למתקן שאינו שייך לארגון זה',
+    };
+  }
+
+  // 2. Verify asset belongs to active organization (offline mock fallback only)
+  let isAssetValid = false;
+  const mockAsset = getMockAssets().find((a) => a.id === assetId && a.organizationId === orgId);
+  if (mockAsset) {
+    isAssetValid = true;
+  }
+  for (const key of Object.keys(FALLBACK_CUSTODY_ASSETS)) {
+    const fAsset = FALLBACK_CUSTODY_ASSETS[key];
+    if (fAsset.id === assetId && fAsset.organizationId === orgId) {
+      isAssetValid = true;
+      break;
+    }
+  }
+
+  const targetWhMeta = getWarehouseMeta(targetWarehouseId);
+  if (!isAssetValid) {
     return {
       success: false,
       error: 'לא ניתן להעביר ציוד למתקן שאינו שייך לארגון זה',

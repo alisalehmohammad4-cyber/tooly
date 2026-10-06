@@ -90,11 +90,12 @@ function renderTimelineActionBadge(action: AuditActionType) {
           <span>החזרה למחסן</span>
         </span>
       );
+    case 'TRANSFER':
     case 'TRANSFER_INIT':
       return (
         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-black bg-indigo-50 text-indigo-900 border border-indigo-300">
           <Truck className="w-3.5 h-3.5 text-indigo-600" />
-          <span>יציאה לשינוע</span>
+          <span>שינוע בין אתרים</span>
         </span>
       );
     case 'TRANSFER_RECEIVE':

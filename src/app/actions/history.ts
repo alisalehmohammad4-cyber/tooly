@@ -92,8 +92,8 @@ export async function getAuditHistory(
 
     const actionType = filters?.actionType || filters?.action;
     if (actionType && actionType.toUpperCase() !== 'ALL') {
-      if (actionType === 'TRANSFERS') {
-        query = query.in('action', ['TRANSFER_INIT', 'TRANSFER_RECEIVE', 'DIRECT_TRANSFER']);
+      if (actionType === 'TRANSFERS' || actionType === 'TRANSFER' || actionType === 'TRANSFER_INIT') {
+        query = query.in('action', ['TRANSFER', 'DIRECT_TRANSFER', 'RECEIVE_TRANSFER', 'TRANSFER_INIT', 'TRANSFER_RECEIVE', 'CANCEL_TRANSFER']);
       } else {
         query = query.eq('action', actionType);
       }
@@ -613,8 +613,8 @@ export async function getFleetNotesFeedAction(
 
     const actionFilter = filters?.type;
     if (actionFilter && actionFilter !== 'ALL' && actionFilter !== 'all') {
-      if (actionFilter === 'TRANSFERS') {
-        query = query.in('action', ['TRANSFER_INIT', 'TRANSFER_RECEIVE']);
+      if (actionFilter === 'TRANSFERS' || actionFilter === 'TRANSFER' || actionFilter === 'TRANSFER_INIT') {
+        query = query.in('action', ['TRANSFER', 'DIRECT_TRANSFER', 'RECEIVE_TRANSFER', 'TRANSFER_INIT', 'TRANSFER_RECEIVE', 'CANCEL_TRANSFER']);
       } else if (actionFilter === 'MAINTENANCE') {
         query = query.eq('action', 'MAINTENANCE_FLAG');
       } else {
