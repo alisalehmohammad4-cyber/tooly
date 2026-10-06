@@ -198,10 +198,18 @@ function renderActionBadge(action: AuditActionType) {
         </span>
       );
     case 'TRANSFER_RECEIVE':
+    case 'RECEIVE_TRANSFER':
       return (
         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black bg-blue-50 text-blue-900 border border-blue-300 shadow-sm">
           <Truck className="w-3.5 h-3.5 text-blue-600 shrink-0" />
           <span>קליטת ציוד משינוע</span>
+        </span>
+      );
+    case 'CANCEL_TRANSFER':
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black bg-rose-50 text-rose-900 border border-rose-300 shadow-sm">
+          <RotateCcw className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+          <span>ביטול שינוע והחזרה</span>
         </span>
       );
     case 'DIRECT_TRANSFER':

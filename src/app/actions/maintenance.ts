@@ -177,13 +177,25 @@ export async function getInTransitFleetAction(
           }
         }
 
+        const { data: allOrgWhs } = await supabaseAdmin
+          .from('warehouses')
+          .select('id, name')
+          .eq('organization_id', orgId);
+        const orgWhMap = new Map<string, string>();
+        if (allOrgWhs) {
+          allOrgWhs.forEach((w: any) => orgWhMap.set(w.id, w.name));
+        }
+
         return assetRows.map((row: any) => {
           const req = reqMap.get(row.id);
           const toolName = row.tool_models?.name || row.name || 'כלי בשינוע';
           const brand = row.tool_models?.brand || row.brand || '';
           const modelNumber = row.tool_models?.model_number || row.model_number || null;
-          const originWarehouseName = req?.source_warehouse?.name || 'מחסן שטח ראשי';
-          const destinationWarehouseName = req?.target_warehouse?.name || row.warehouses?.name || 'אתר יעד מבוקש';
+          const defaultOriginWh = allOrgWhs?.find((w: any) => w.id !== row.current_warehouse_id) || allOrgWhs?.[0];
+          const originWarehouseId = req?.source_warehouse_id || defaultOriginWh?.id || '';
+          const originWarehouseName = req?.source_warehouse?.name || (originWarehouseId ? orgWhMap.get(originWarehouseId) : null) || 'מחסן שטח ראשי';
+          const destinationWarehouseId = req?.target_warehouse_id || row.current_warehouse_id || '';
+          const destinationWarehouseName = req?.target_warehouse?.name || row.warehouses?.name || (destinationWarehouseId ? orgWhMap.get(destinationWarehouseId) : null) || 'אתר יעד מבוקש';
           const dispatchedAt = req?.updated_at || row.updated_at || row.created_at;
           const dispatchedBy = req?.decided_by || req?.requested_by || 'מנהל תפעול';
           const transporterNotes = req?.reason || ledgerNoteMap.get(row.id) || null;
@@ -196,9 +208,9 @@ export async function getInTransitFleetAction(
             brand,
             modelNumber,
             serialNumber: row.serial_number || null,
-            originWarehouseId: req?.source_warehouse_id || '',
+            originWarehouseId,
             originWarehouseName,
-            destinationWarehouseId: req?.target_warehouse_id || row.current_warehouse_id || '',
+            destinationWarehouseId,
             destinationWarehouseName,
             dispatchedAt,
             elapsedTransitTimeText: formatElapsedHebrew(dispatchedAt),

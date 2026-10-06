@@ -440,7 +440,7 @@ export async function getPlantManagerAnalytics(
           (r: Record<string, unknown>) => r.status === 'checked_out'
         ).length;
         const available = matchedAssets.filter(
-          (r: Record<string, unknown>) => r.status === 'available'
+          (r: Record<string, unknown>) => r.status === 'available' || r.status === 'in_stock'
         ).length;
         const maintenance = matchedAssets.filter(
           (r: Record<string, unknown>) =>
@@ -643,7 +643,7 @@ export async function getStorekeeperOperations(
     }
 
     whAssets.forEach((row: Record<string, unknown>) => {
-      if (row.status === 'available') availableCount++;
+      if (row.status === 'available' || row.status === 'in_stock') availableCount++;
       if (row.status === 'checked_out') checkedOutCount++;
       if (row.status === 'maintenance' || row.is_locked) quarantinedCount++;
 

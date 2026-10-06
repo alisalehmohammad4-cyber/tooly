@@ -66,6 +66,7 @@ import {
   getAvailableAssetsForTransferAction,
   getIncomingInTransitTransfersAction,
   completeTransferReceptionAction,
+  cancelTransferRollbackAction,
   getPendingTransfersAction,
   decideTransferRequestAction,
   getLocalAvailableAssetsForTransferAction,
@@ -363,6 +364,8 @@ export default function WarehouseDashboardView({
   // =========================================================================
   const [inTransitFleet, setInTransitFleet] = useState<InTransitFleetItem[]>([]);
   const [isLoadingInTransit, setIsLoadingInTransit] = useState<boolean>(false);
+  const [operatingFleetAssetId, setOperatingFleetAssetId] = useState<string | null>(null);
+  const [fleetOperationType, setFleetOperationType] = useState<'receive' | 'cancel' | null>(null);
 
   const [maintenanceAssets, setMaintenanceAssets] = useState<MaintenanceAssetItem[]>([]);
   const [isLoadingMaintenance, setIsLoadingMaintenance] = useState<boolean>(false);
@@ -888,6 +891,86 @@ export default function WarehouseDashboardView({
     }
   };
 
+  // In-Transit Fleet Operations: Primary Action - Confirm Arrival & Receive
+  const handleConfirmArrivalFleet = async (item: InTransitFleetItem) => {
+    setOperatingFleetAssetId(item.assetId);
+    setFleetOperationType('receive');
+
+    // Optimistically remove card from In-Transit view and refresh local state immediately
+    setInTransitFleet((prev) => prev.filter((f) => f.assetId !== item.assetId && f.id !== item.id));
+    setData((prev) => ({
+      ...prev,
+      availableCount: (prev.availableCount || 0) + 1,
+    }));
+
+    try {
+      const res = await completeTransferReceptionAction({
+        assetId: item.assetId,
+        targetWarehouseId: item.destinationWarehouseId,
+        notes: `אישור הגעה וקליטת ציוד ${item.toolName} (${item.qrCode})`,
+        requestId: item.requestId,
+      });
+
+      if (!res.success) {
+        alert(`שגיאה בקליטת הציוד: ${res.error || 'שגיאה לא ידועה'}`);
+        await loadInTransitFleet();
+        return;
+      }
+
+      router.refresh();
+      await loadInTransitFleet();
+      await loadIncomingTransfers(selectedWarehouseId);
+      await handleWarehouseChange(selectedWarehouseId);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'שגיאה לא ידועה';
+      alert(`שגיאה בקליטת הציוד: ${msg}`);
+      await loadInTransitFleet();
+    } finally {
+      setOperatingFleetAssetId(null);
+      setFleetOperationType(null);
+    }
+  };
+
+  // In-Transit Fleet Operations: Secondary Action - Cancel Transfer & Rollback
+  const handleCancelTransferFleet = async (item: InTransitFleetItem) => {
+    setOperatingFleetAssetId(item.assetId);
+    setFleetOperationType('cancel');
+
+    // Optimistically remove card from In-Transit view and refresh local state immediately
+    setInTransitFleet((prev) => prev.filter((f) => f.assetId !== item.assetId && f.id !== item.id));
+    setData((prev) => ({
+      ...prev,
+      availableCount: (prev.availableCount || 0) + 1,
+    }));
+
+    try {
+      const res = await cancelTransferRollbackAction({
+        assetId: item.assetId,
+        sourceWarehouseId: item.originWarehouseId,
+        notes: `ביטול שינוע והחזרת כלי ${item.toolName} (${item.qrCode}) למחסן מקור`,
+        requestId: item.requestId,
+      });
+
+      if (!res.success) {
+        alert(`שגיאה בביטול השינוע: ${res.error || 'שגיאה לא ידועה'}`);
+        await loadInTransitFleet();
+        return;
+      }
+
+      router.refresh();
+      await loadInTransitFleet();
+      await loadIncomingTransfers(selectedWarehouseId);
+      await handleWarehouseChange(selectedWarehouseId);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'שגיאה לא ידועה';
+      alert(`שגיאה בביטול השינוע: ${msg}`);
+      await loadInTransitFleet();
+    } finally {
+      setOperatingFleetAssetId(null);
+      setFleetOperationType(null);
+    }
+  };
+
   // Search tool by Tag/QR for quick worker checkout
   const handleSearchCheckoutAsset = async (overrideTerm?: string) => {
     const term = (overrideTerm !== undefined ? overrideTerm : checkoutAssetInput).trim();
@@ -903,7 +986,7 @@ export default function WarehouseDashboardView({
         activeOrgId
       );
       if (asset) {
-        if (asset.status !== 'available') {
+        if (asset.status !== 'available' && asset.status !== 'in_stock') {
           setCheckoutFeedback({
             text: `הכלי שנמצא אינו זמין לניפוק (סטטוס נוכחי: ${asset.status})`,
             type: 'error',
@@ -2308,6 +2391,51 @@ export default function WarehouseDashboardView({
                           </span>
                         </div>
                       </div>
+                    </div>
+
+                    {/* Operational Action Buttons: Confirm Arrival & Receive (Primary) / Cancel Transfer & Rollback (Secondary) */}
+                    <div className="pt-3 border-t border-sky-100 flex items-center justify-between gap-2">
+                      {/* Primary Action: אשר הגעה וקליטה [Green Button] */}
+                      <button
+                        type="button"
+                        disabled={operatingFleetAssetId === item.assetId}
+                        onClick={() => void handleConfirmArrivalFleet(item)}
+                        className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 disabled:opacity-50 text-white text-xs font-black flex items-center justify-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                        title="אשר הגעה וקליטה של הכלי במחסן היעד"
+                      >
+                        {operatingFleetAssetId === item.assetId && fleetOperationType === 'receive' ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>קולט כלי...</span>
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>אשר הגעה וקליטה</span>
+                          </>
+                        )}
+                      </button>
+
+                      {/* Secondary Action: ביטול שינוע והחזרה [Outline/Cancel Button] */}
+                      <button
+                        type="button"
+                        disabled={operatingFleetAssetId === item.assetId}
+                        onClick={() => void handleCancelTransferFleet(item)}
+                        className="py-2 px-3 rounded-xl border border-rose-300 hover:bg-rose-50 hover:border-rose-400 active:scale-95 disabled:opacity-50 text-rose-700 text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                        title="ביטול שינוע והחזרה של הכלי למחסן המקור"
+                      >
+                        {operatingFleetAssetId === item.assetId && fleetOperationType === 'cancel' ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>מבטל שינוע...</span>
+                          </>
+                        ) : (
+                          <>
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>ביטול שינוע והחזרה</span>
+                          </>
+                        )}
+                      </button>
                     </div>
                   </div>
                 ))}

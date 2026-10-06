@@ -741,7 +741,7 @@ export async function updateAssetStatusAction(
     return { success: false, error: 'מזהה כלי חסר' };
   }
 
-  const validStatuses = ['available', 'checked_out', 'maintenance', 'retired', 'in_transit'];
+  const validStatuses = ['available', 'in_stock', 'checked_out', 'maintenance', 'retired', 'in_transit'];
   if (!validStatuses.includes(newStatus)) {
     return { success: false, error: `סטטוס לא חוקי: ${newStatus}` };
   }
@@ -759,7 +759,7 @@ export async function updateAssetStatusAction(
     updated_at: now,
   };
 
-  if (newStatus === 'available') {
+  if (newStatus === 'available' || newStatus === 'in_stock') {
     updateData.current_assigned_worker = null;
   }
   if (newStatus === 'retired') {

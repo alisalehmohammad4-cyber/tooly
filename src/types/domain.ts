@@ -51,6 +51,7 @@ export interface ToolModel {
 
 export type AssetStatus =
   | 'available'
+  | 'in_stock'
   | 'checked_out'
   | 'in_transit'
   | 'maintenance'
