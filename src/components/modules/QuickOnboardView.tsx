@@ -1891,8 +1891,7 @@ export default function QuickOnboardView({
           handleBarcodeDetected(asset.qrCode);
         }}
         warehouseId={selectedWarehouseId}
-        title="סורק שטח מוקשח (Industrial OCR)"
-        description="סריקה מוקשחת לפנס שטח, סינון השתקפויות מתכת ותגיות שחוקות"
+        title="סריקת כלי"
       />
 
       {/* 5. ROLE-ISOLATED BOTTOM NAVIGATION BAR */}

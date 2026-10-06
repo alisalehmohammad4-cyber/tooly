@@ -879,8 +879,7 @@ export default function ManualCheckinModal({
           setIsOcrScannerOpen(false);
         }}
         warehouseId={warehouseId}
-        title="קליטת ציוד - סורק OCR שטח"
-        description="סריקה מוקשחת לתנאי אבק וסנוור (תגיות ZR, MOHA, TOOL)"
+        title="סריקת כלי"
       />
     </div>
   );

@@ -1629,7 +1629,7 @@ export default function WarehouseDashboardView({
                 className="min-h-[56px] sm:min-h-[64px] p-3 rounded-2xl bg-gradient-to-br from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white font-black text-xs sm:text-sm flex flex-col items-center justify-center text-center gap-1.5 shadow-md shadow-emerald-600/20 active:scale-95 transition-all cursor-pointer"
               >
                 <Sparkles className="w-5 h-5 sm:w-6 sm:h-6 text-amber-300 stroke-[2.5]" />
-                <span>🔦 סורק שטח (QR / OCR)</span>
+                <span>🔦 סריקת כלי</span>
               </button>
             </div>
 
@@ -3988,10 +3988,10 @@ export default function WarehouseDashboardView({
                         type="button"
                         onClick={() => setIsDirectTransferOcrOpen(true)}
                         className="py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer shrink-0 shadow-sm transition-all"
-                        title="סריקה מקבילית (QR + OCR)"
+                        title="סריקת כלי"
                       >
                         <Camera className="w-3.5 h-3.5" />
-                        <span>סרוק (QR/OCR)</span>
+                        <span>סרוק כלי</span>
                       </button>
                     </div>
 
@@ -4236,10 +4236,10 @@ export default function WarehouseDashboardView({
                     type="button"
                     onClick={() => setIsDispatchOcrOpen(true)}
                     className="py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer shrink-0 shadow-sm transition-all"
-                    title="סריקה מקבילית (QR + OCR)"
+                    title="סריקת כלי"
                   >
                     <Camera className="w-3.5 h-3.5" />
-                    <span>סרוק (QR/OCR)</span>
+                    <span>סרוק כלי</span>
                   </button>
                 </div>
 
@@ -4924,8 +4924,7 @@ export default function WarehouseDashboardView({
           setIsDirectTransferOcrOpen(false);
         }}
         warehouseId={selectedWarehouseId !== 'all' ? selectedWarehouseId : undefined}
-        title="שילוח ציוד ישיר - סריקה מקבילית (QR + OCR)"
-        description="זיהוי אוטומטי של קודי QR, ברקודים ותגיות שטח שחוקות ללא החלפת מצבים"
+        title="שילוח ציוד"
       />
 
       {/* OCR SCANNER 2: SITE DISPATCH VERIFICATION */}
@@ -4939,8 +4938,7 @@ export default function WarehouseDashboardView({
           setIsDispatchOcrOpen(false);
         }}
         warehouseId={selectedWarehouseId !== 'all' ? selectedWarehouseId : undefined}
-        title="הוצאת ציוד לאתר - אימות כלי (QR + OCR)"
-        description="סריקה מקבילית מוקשחת לאימות פיזי מיידי של הכלי המנופק"
+        title="הוצאת ציוד"
       />
 
       {/* OCR SCANNER 3: PROMINENT FIELD SCANNER & PASSPORT LOCK */}
@@ -4953,8 +4951,7 @@ export default function WarehouseDashboardView({
           setIsPassportOpen(true);
         }}
         warehouseId={selectedWarehouseId !== 'all' ? selectedWarehouseId : undefined}
-        title="סורק שטח תעשייתי דו-מנועי (QR + OCR)"
-        description="זיהוי מהיר ומקבילי של קודי QR ותגיות שטח שחוקות - נעילה מיידית ופתיחת דרכון כלי"
+        title="סריקת כלי"
       />
     </AppLayout>
   );
