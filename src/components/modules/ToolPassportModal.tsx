@@ -120,11 +120,40 @@ function renderTimelineActionBadge(action: AuditActionType) {
           <span>העברה ישירה (מנהל תפעול)</span>
         </span>
       );
+    case 'MAINTENANCE':
     case 'MAINTENANCE_FLAG':
       return (
         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-black bg-rose-50 text-rose-900 border border-rose-300">
           <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
-          <span>קריאת תיקון</span>
+          <span>בתיקון / בדיקה</span>
+        </span>
+      );
+    case 'STATUS_CHANGE':
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-black bg-amber-50 text-amber-900 border border-amber-300">
+          <Clock className="w-3.5 h-3.5 text-amber-600" />
+          <span>עדכון סטטוס כלי</span>
+        </span>
+      );
+    case 'SAFETY_INSPECTION':
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-black bg-teal-50 text-teal-900 border border-teal-300">
+          <CheckCircle2 className="w-3.5 h-3.5 text-teal-600" />
+          <span>בדיקת בטיחות תקופתית</span>
+        </span>
+      );
+    case 'LOCK_STATUS':
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-black bg-orange-50 text-orange-900 border border-orange-300">
+          <AlertTriangle className="w-3.5 h-3.5 text-orange-600" />
+          <span>נעילה מנהלית</span>
+        </span>
+      );
+    case 'RETIRE':
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-black bg-neutral-100 text-neutral-800 border border-neutral-300">
+          <AlertTriangle className="w-3.5 h-3.5 text-neutral-600" />
+          <span>השבתה / גריטה</span>
         </span>
       );
     case 'ONBOARD':
@@ -195,35 +224,29 @@ export default function ToolPassportModal({
     type: 'success' | 'error';
   } | null>(null);
 
-  // Load Lifecycle History whenever modal is opened
-  useEffect(() => {
-    if (!isOpen) return;
-    const targetTagOrId = asset?.qrCode || asset?.id || assetTag;
+  // Load Lifecycle History callback
+  const loadLifecycleData = React.useCallback(async () => {
+    const targetTagOrId = updatedAsset?.qrCode || updatedAsset?.id || asset?.qrCode || asset?.id || assetTag;
     if (!targetTagOrId) return;
 
-    let isMounted = true;
     setIsLoadingLifecycle(true);
+    try {
+      const payload = await getToolLifecycleHistory(targetTagOrId, currentOrganization?.id);
+      setLifecycleData(payload);
+      if (payload.asset && !asset) {
+        setUpdatedAsset(payload.asset);
+      }
+    } catch (err) {
+      console.warn('Error loading tool passport lifecycle:', err);
+    } finally {
+      setIsLoadingLifecycle(false);
+    }
+  }, [asset, assetTag, updatedAsset, currentOrganization?.id]);
 
-    getToolLifecycleHistory(targetTagOrId, currentOrganization?.id)
-      .then((payload) => {
-        if (isMounted) {
-          setLifecycleData(payload);
-          if (payload.asset && !asset) {
-            setUpdatedAsset(payload.asset);
-          }
-        }
-      })
-      .catch((err) => {
-        console.warn('Error loading tool passport lifecycle:', err);
-      })
-      .finally(() => {
-        if (isMounted) setIsLoadingLifecycle(false);
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [isOpen, asset, assetTag, currentOrganization?.id]);
+  useEffect(() => {
+    if (!isOpen) return;
+    loadLifecycleData();
+  }, [isOpen, loadLifecycleData]);
 
   if (!isOpen) return null;
 
@@ -308,6 +331,7 @@ export default function ToolPassportModal({
       setLockReason('');
       setFeedbackMessage({ text: res.message, type: 'success' });
       if (onAssetUpdated) onAssetUpdated(res.asset);
+      loadLifecycleData();
     } else {
       setFeedbackMessage({ text: res.error, type: 'error' });
     }
@@ -340,6 +364,7 @@ export default function ToolPassportModal({
       setUpdatedAsset(res.asset);
       setFeedbackMessage({ text: res.message, type: 'success' });
       if (onAssetUpdated) onAssetUpdated(res.asset);
+      loadLifecycleData();
     } else {
       setFeedbackMessage({ text: res.error, type: 'error' });
     }
@@ -375,6 +400,7 @@ export default function ToolPassportModal({
       setShowReserveForm(false);
       setFeedbackMessage({ text: res.message, type: 'success' });
       if (onAssetUpdated) onAssetUpdated(res.asset);
+      loadLifecycleData();
     } else {
       setFeedbackMessage({ text: res.error, type: 'error' });
     }
@@ -399,6 +425,7 @@ export default function ToolPassportModal({
       setUpdatedAsset(res.asset);
       setFeedbackMessage({ text: res.message, type: 'success' });
       if (onAssetUpdated) onAssetUpdated(res.asset);
+      loadLifecycleData();
     } else {
       setFeedbackMessage({ text: res.error, type: 'error' });
     }
@@ -457,6 +484,7 @@ export default function ToolPassportModal({
                   const updated = { ...currentAsset, status: newSt };
                   setUpdatedAsset(updated);
                   if (onAssetUpdated) onAssetUpdated(updated);
+                  loadLifecycleData();
                 }}
               />
             ) : (

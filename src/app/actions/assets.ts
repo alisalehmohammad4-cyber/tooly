@@ -30,6 +30,11 @@ async function resolveActiveOrganizationId(providedOrgId?: string): Promise<stri
   return getServerSessionOrgId(providedOrgId);
 }
 
+function isValidUuid(id?: string | null): boolean {
+  if (!id || typeof id !== 'string') return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id.trim());
+}
+
 export type OnboardAssetResult =
   | { success: true; assetId: string }
   | { success: false; error: string };
@@ -798,22 +803,38 @@ export async function updateAssetStatusAction(
         newStatus === 'retired'
           ? 'RETIRE'
           : newStatus === 'maintenance'
-          ? 'MAINTENANCE_FLAG'
-          : newStatus === 'available'
+          ? 'MAINTENANCE'
+          : newStatus === 'available' || newStatus === 'in_stock'
           ? 'CHECKIN'
           : 'STATUS_CHANGE';
+
+      let targetWarehouseId = updatedRows[0]?.current_warehouse_id;
+      if (!targetWarehouseId || !isValidUuid(targetWarehouseId)) {
+        const { data: fallbackWh } = await supabaseAdmin
+          .from('warehouses')
+          .select('id')
+          .eq('organization_id', orgId)
+          .limit(1)
+          .maybeSingle();
+        targetWarehouseId = fallbackWh?.id || null;
+      }
 
       const { error: ledgerErr } = await supabaseAdmin.from('custody_ledger').insert({
         asset_id: assetId,
         organization_id: orgId,
         action: actionType,
+        warehouse_id: targetWarehouseId,
+        to_warehouse_id: targetWarehouseId,
+        from_warehouse_id: targetWarehouseId,
         performed_by: performedBy,
+        condition_at_return: (updatedRows[0] as any)?.condition || null,
         notes: reason || `שינוי סטטוס כלי ישיר ל-${newStatus}`,
         created_at: now,
       });
 
       if (ledgerErr) {
-        console.warn('Custody ledger log warning:', ledgerErr);
+        console.error('LEDGER INSERT FAILED:', ledgerErr);
+        return { success: false, error: 'שגיאה ברישום ביומן התנועות: ' + ledgerErr.message };
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Database error';

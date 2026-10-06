@@ -43,16 +43,26 @@ export async function getAuditHistory(
   }
 
   try {
-    let query = supabase
+    const client = supabaseAdmin || supabase;
+    let query = client
       .from('custody_ledger')
       .select(`
         id,
         action,
         performed_by,
         target_worker,
+        worker_name,
         worker_phone,
+        worker_id,
         expected_return_date,
         signature_data,
+        signature_svg,
+        is_tag_verified,
+        signed_at,
+        target_site_name,
+        condition_at_return,
+        from_warehouse_id,
+        to_warehouse_id,
         accessories_snapshot,
         damage_report,
         gps_lat,
@@ -92,15 +102,25 @@ export async function getAuditHistory(
 
     const actionType = filters?.actionType || filters?.action;
     if (actionType && actionType.toUpperCase() !== 'ALL') {
-      if (actionType === 'TRANSFERS' || actionType === 'TRANSFER' || actionType === 'TRANSFER_INIT') {
+      if (
+        actionType === 'TRANSFERS' ||
+        actionType === 'TRANSFER' ||
+        actionType === 'TRANSFER_INIT' ||
+        actionType === 'TRANSFER_RECEIVE' ||
+        actionType === 'RECEIVE_TRANSFER' ||
+        actionType === 'CANCEL_TRANSFER' ||
+        actionType === 'DIRECT_TRANSFER'
+      ) {
         query = query.in('action', ['TRANSFER', 'DIRECT_TRANSFER', 'RECEIVE_TRANSFER', 'TRANSFER_INIT', 'TRANSFER_RECEIVE', 'CANCEL_TRANSFER']);
+      } else if (actionType === 'MAINTENANCE' || actionType === 'MAINTENANCE_FLAG') {
+        query = query.in('action', ['MAINTENANCE', 'MAINTENANCE_FLAG', 'MAINTENANCE_IN', 'MAINTENANCE_OUT']);
       } else {
         query = query.eq('action', actionType);
       }
     }
 
     if (filters?.hasSignature === true) {
-      query = query.not('signature_data', 'is', null);
+      query = query.or('signature_data.not.is.null,signature_svg.not.is.null');
     }
 
     const { data: rawRows, error } = await query;
@@ -157,6 +177,12 @@ export async function getAuditHistory(
       signature_svg?: string | null;
       is_tag_verified?: boolean | null;
       signed_at?: string | null;
+      target_site_name?: string | null;
+      worker_name?: string | null;
+      worker_id?: string | null;
+      condition_at_return?: string | null;
+      from_warehouse_id?: string | null;
+      to_warehouse_id?: string | null;
       accessories_snapshot?: AuditHistoryRecord['accessoriesSnapshot'];
       damage_report?: DamageReport | null;
       gps_lat?: number | null;
@@ -201,14 +227,16 @@ export async function getAuditHistory(
         const raw = (row.action || '').toUpperCase();
         if (raw === 'CHECKOUT') normalizedAction = 'CHECKOUT';
         else if (raw === 'CHECKIN') normalizedAction = 'CHECKIN';
-        else if (raw === 'TRANSFER_INIT') normalizedAction = 'TRANSFER_INIT';
-        else if (raw === 'TRANSFER_RECEIVE') normalizedAction = 'TRANSFER_RECEIVE';
+        else if (raw === 'TRANSFER' || raw === 'TRANSFER_INIT') normalizedAction = 'TRANSFER';
+        else if (raw === 'TRANSFER_RECEIVE' || raw === 'RECEIVE_TRANSFER') normalizedAction = 'RECEIVE_TRANSFER';
+        else if (raw === 'CANCEL_TRANSFER') normalizedAction = 'CANCEL_TRANSFER';
         else if (raw === 'DIRECT_TRANSFER') normalizedAction = 'DIRECT_TRANSFER';
-        else if (raw === 'MAINTENANCE_FLAG') normalizedAction = 'MAINTENANCE_FLAG';
+        else if (raw === 'MAINTENANCE' || raw === 'MAINTENANCE_FLAG' || raw === 'MAINTENANCE_IN' || raw === 'MAINTENANCE_OUT') normalizedAction = 'MAINTENANCE_FLAG';
+        else if (raw === 'STATUS_CHANGE') normalizedAction = 'STATUS_CHANGE';
         else if (raw === 'ONBOARD') normalizedAction = 'ONBOARD';
         else if (raw === 'LOCK_STATUS') normalizedAction = 'LOCK_STATUS';
         else if (raw === 'SAFETY_INSPECTION') normalizedAction = 'SAFETY_INSPECTION';
-        else if (raw === 'RETIRE') normalizedAction = 'RETIRE';
+        else if (raw === 'RETIRE' || raw === 'DECOMMISSION') normalizedAction = 'RETIRE';
 
         const liveWh = row.assets?.current_warehouse || row.assets?.warehouses;
         const liveWhName = liveWh?.name || row.warehouses?.name || 'מתקן';
@@ -217,7 +245,7 @@ export async function getAuditHistory(
 
         // Resolve transfer route
         let sourceWhName = row.warehouses?.name || 'מחסן מקור';
-        let targetWhName = liveWhName;
+        let targetWhName = row.target_site_name || liveWhName;
 
         const matchedRoute = row.assets?.id ? transferRouteMap[row.assets.id] : null;
         if (matchedRoute?.sourceName) sourceWhName = matchedRoute.sourceName;
@@ -240,9 +268,9 @@ export async function getAuditHistory(
           modelNumber: row.assets?.tool_models?.model_number || null,
           action: normalizedAction,
           performedBy: row.performed_by || 'System',
-          targetWorker: row.target_worker || (normalizedAction === 'CHECKOUT' ? row.performed_by : null),
+          targetWorker: row.target_worker || row.worker_name || (normalizedAction === 'CHECKOUT' ? row.performed_by : null),
           workerPhone: row.worker_phone || null,
-          condition: row.assets?.condition || 'good',
+          condition: (row.condition_at_return as any) || row.assets?.condition || 'good',
           warehouseId: liveWhId,
           warehouseName: liveWhName,
           warehouseCode: liveWhCode,
@@ -355,16 +383,25 @@ export async function getToolLifecycleHistory(
 
   if (isSupabaseConfigured() && asset?.id) {
     try {
-      const { data: rawRows, error } = await supabase
+      const client = supabaseAdmin || supabase;
+      const { data: rawRows, error } = await client
         .from('custody_ledger')
         .select(`
           id,
           action,
           performed_by,
           target_worker,
+          worker_name,
           worker_phone,
           expected_return_date,
           signature_data,
+          signature_svg,
+          is_tag_verified,
+          signed_at,
+          target_site_name,
+          condition_at_return,
+          from_warehouse_id,
+          to_warehouse_id,
           accessories_snapshot,
           damage_report,
           gps_lat,
@@ -395,31 +432,49 @@ export async function getToolLifecycleHistory(
         .order('created_at', { ascending: false });
 
       if (!error && rawRows && rawRows.length > 0) {
-        historyRecords = (rawRows as any[]).map((row) => ({
-          id: row.id,
-          assetId: row.assets?.id || asset.id,
-          qrCode: row.assets?.qr_code || asset.qrCode,
-          toolName: row.assets?.tool_models?.name || asset.toolName,
-          brand: row.assets?.tool_models?.brand || asset.brand,
-          modelNumber: row.assets?.tool_models?.model_number || asset.modelNumber || null,
-          action: row.action,
-          performedBy: row.performed_by || 'System',
-          targetWorker: row.target_worker || null,
-          workerPhone: row.worker_phone || null,
-          condition: row.assets?.condition || 'good',
-          warehouseId: row.assets?.current_warehouse_id || null,
-          warehouseName: row.assets?.warehouses?.name || asset.warehouseName,
-          warehouseCode: row.assets?.warehouses?.code || asset.warehouseCode,
-          notes: row.notes,
-          createdAt: row.created_at,
-          organizationId: row.organization_id || orgId,
-          expectedReturnDate: row.expected_return_date || null,
-          signatureData: row.signature_data || null,
-          signedAt: row.signature_data ? row.created_at : null,
-          accessoriesSnapshot: row.accessories_snapshot || null,
-          damageReport: row.damage_report || null,
-          gps: row.gps_lat != null && row.gps_lng != null ? { lat: row.gps_lat, lng: row.gps_lng } : null,
-        }));
+        historyRecords = (rawRows as any[]).map((row) => {
+          let normalizedAction: AuditActionType = 'CHECKIN';
+          const raw = (row.action || '').toUpperCase();
+          if (raw === 'CHECKOUT') normalizedAction = 'CHECKOUT';
+          else if (raw === 'CHECKIN') normalizedAction = 'CHECKIN';
+          else if (raw === 'TRANSFER' || raw === 'TRANSFER_INIT') normalizedAction = 'TRANSFER';
+          else if (raw === 'TRANSFER_RECEIVE' || raw === 'RECEIVE_TRANSFER') normalizedAction = 'RECEIVE_TRANSFER';
+          else if (raw === 'CANCEL_TRANSFER') normalizedAction = 'CANCEL_TRANSFER';
+          else if (raw === 'DIRECT_TRANSFER') normalizedAction = 'DIRECT_TRANSFER';
+          else if (raw === 'MAINTENANCE' || raw === 'MAINTENANCE_FLAG' || raw === 'MAINTENANCE_IN' || raw === 'MAINTENANCE_OUT') normalizedAction = 'MAINTENANCE_FLAG';
+          else if (raw === 'STATUS_CHANGE') normalizedAction = 'STATUS_CHANGE';
+          else if (raw === 'ONBOARD') normalizedAction = 'ONBOARD';
+          else if (raw === 'LOCK_STATUS') normalizedAction = 'LOCK_STATUS';
+          else if (raw === 'SAFETY_INSPECTION') normalizedAction = 'SAFETY_INSPECTION';
+          else if (raw === 'RETIRE' || raw === 'DECOMMISSION') normalizedAction = 'RETIRE';
+
+          return {
+            id: row.id,
+            assetId: row.assets?.id || asset.id,
+            qrCode: row.assets?.qr_code || asset.qrCode,
+            toolName: row.assets?.tool_models?.name || asset.toolName,
+            brand: row.assets?.tool_models?.brand || asset.brand,
+            modelNumber: row.assets?.tool_models?.model_number || asset.modelNumber || null,
+            action: normalizedAction,
+            performedBy: row.performed_by || 'System',
+            targetWorker: row.target_worker || row.worker_name || (normalizedAction === 'CHECKOUT' ? row.performed_by : null),
+            workerPhone: row.worker_phone || null,
+            condition: (row.condition_at_return as any) || row.assets?.condition || 'good',
+            warehouseId: row.assets?.current_warehouse_id || row.warehouse_id || null,
+            warehouseName: row.target_site_name || row.assets?.warehouses?.name || asset.warehouseName,
+            warehouseCode: row.assets?.warehouses?.code || asset.warehouseCode,
+            notes: row.notes,
+            createdAt: row.created_at,
+            organizationId: row.organization_id || orgId,
+            expectedReturnDate: row.expected_return_date || null,
+            signatureData: row.signature_data || row.signature_svg || null,
+            signedAt: row.signed_at || (row.signature_data || row.signature_svg ? row.created_at : null),
+            isTagVerified: Boolean(row.is_tag_verified),
+            accessoriesSnapshot: row.accessories_snapshot || null,
+            damageReport: row.damage_report || null,
+            gps: row.gps_lat != null && row.gps_lng != null ? { lat: row.gps_lat, lng: row.gps_lng } : null,
+          };
+        });
       }
     } catch (err) {
       console.warn('Error fetching Supabase tool lifecycle history:', err);

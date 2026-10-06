@@ -9,7 +9,9 @@ export type AuditActionType =
   | 'RECEIVE_TRANSFER'
   | 'CANCEL_TRANSFER'
   | 'DIRECT_TRANSFER'
+  | 'MAINTENANCE'
   | 'MAINTENANCE_FLAG'
+  | 'STATUS_CHANGE'
   | 'ONBOARD'
   | 'LOCK_STATUS'
   | 'SAFETY_INSPECTION'
@@ -210,9 +212,27 @@ export function filterAuditHistoryRecords(
       : undefined;
 
   if (targetAction) {
-    if (targetAction === 'TRANSFERS' || targetAction === 'TRANSFER_INIT' || targetAction === 'TRANSFER_RECEIVE') {
+    if (
+      targetAction === 'TRANSFERS' ||
+      targetAction === 'TRANSFER' ||
+      targetAction === 'TRANSFER_INIT' ||
+      targetAction === 'TRANSFER_RECEIVE' ||
+      targetAction === 'RECEIVE_TRANSFER' ||
+      targetAction === 'CANCEL_TRANSFER' ||
+      targetAction === 'DIRECT_TRANSFER'
+    ) {
       result = result.filter(
-        (r) => r.action === 'TRANSFER_INIT' || r.action === 'TRANSFER_RECEIVE'
+        (r) =>
+          r.action === 'TRANSFER' ||
+          r.action === 'TRANSFER_INIT' ||
+          r.action === 'TRANSFER_RECEIVE' ||
+          r.action === 'RECEIVE_TRANSFER' ||
+          r.action === 'CANCEL_TRANSFER' ||
+          r.action === 'DIRECT_TRANSFER'
+      );
+    } else if (targetAction === 'MAINTENANCE' || targetAction === 'MAINTENANCE_FLAG') {
+      result = result.filter(
+        (r) => r.action === 'MAINTENANCE' || r.action === 'MAINTENANCE_FLAG'
       );
     } else {
       result = result.filter((r) => (r.action || '').toUpperCase() === targetAction);

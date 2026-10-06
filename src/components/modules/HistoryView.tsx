@@ -220,11 +220,40 @@ function renderActionBadge(action: AuditActionType) {
           <span>העברה ישירה (מנהל תפעול)</span>
         </span>
       );
+    case 'MAINTENANCE':
     case 'MAINTENANCE_FLAG':
       return (
         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black bg-rose-50 text-rose-900 border border-rose-300 shadow-sm">
           <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
           <span>בתיקון / בדיקה</span>
+        </span>
+      );
+    case 'STATUS_CHANGE':
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black bg-amber-50 text-amber-900 border border-amber-300 shadow-sm">
+          <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+          <span>עדכון סטטוס כלי</span>
+        </span>
+      );
+    case 'SAFETY_INSPECTION':
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black bg-teal-50 text-teal-900 border border-teal-300 shadow-sm">
+          <CheckCircle2 className="w-3.5 h-3.5 text-teal-600 shrink-0" />
+          <span>בדיקת בטיחות תקופתית</span>
+        </span>
+      );
+    case 'LOCK_STATUS':
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black bg-orange-50 text-orange-900 border border-orange-300 shadow-sm">
+          <AlertTriangle className="w-3.5 h-3.5 text-orange-600 shrink-0" />
+          <span>נעילה מנהלית</span>
+        </span>
+      );
+    case 'RETIRE':
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black bg-neutral-100 text-neutral-800 border border-neutral-300 shadow-sm">
+          <AlertTriangle className="w-3.5 h-3.5 text-neutral-600 shrink-0" />
+          <span>השבתה / גריטה</span>
         </span>
       );
     case 'ONBOARD':

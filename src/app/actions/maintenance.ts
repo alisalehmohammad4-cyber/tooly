@@ -1,12 +1,26 @@
 'use server';
 
+import { revalidatePath } from 'next/cache';
 import { supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase';
 import { getServerSessionOrgId, getServerSessionUser } from '@/lib/auth/session';
+import { clearDashboardCaches } from '@/app/actions/dashboard';
 import {
   getMockWarehouses,
   getMockAssets,
   mutateMockAsset,
 } from '@/lib/mockStore';
+
+function isValidUuid(id?: string | null): boolean {
+  if (!id || typeof id !== 'string') return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id.trim());
+}
+
+export interface SendToMaintenanceInput {
+  assetId: string;
+  reason: string;
+  warehouseId?: string;
+  technicianOrLab?: string;
+}
 
 export interface InTransitFleetItem {
   id: string;
@@ -473,6 +487,136 @@ export async function getMaintenanceAssetsAction(
 }
 
 /**
+ * 2b. sendToMaintenanceAction
+ * Transfers tool status to 'maintenance' / 'needs_repair', removes assigned worker,
+ * inserts a corresponding movement record into custody_ledger with warehouse_id,
+ * and revalidates all paths.
+ */
+export async function sendToMaintenanceAction(
+  input: SendToMaintenanceInput
+): Promise<{ success: boolean; error?: string; message?: string }> {
+  const orgId = await resolveActiveOrg();
+  if (!orgId || orgId === 'platform-master-superadmin') {
+    return { success: false, error: 'לא נמצא מזהה ארגון מורשה' };
+  }
+  const user = await getServerSessionUser();
+  const performedBy = user?.fullName || (user as unknown as { name?: string })?.name || 'מחסנאי שטח';
+  const now = new Date().toISOString();
+  const { assetId, reason, warehouseId, technicianOrLab } = input;
+
+  if (!assetId || !reason?.trim()) {
+    return { success: false, error: 'יש לציין מזהה כלי וסיבת תקלה' };
+  }
+
+  let targetWhId = warehouseId;
+
+  if (isSupabaseConfigured()) {
+    try {
+      const { data: currentAsset, error: fetchErr } = await supabaseAdmin
+        .from('assets')
+        .select('id, current_warehouse_id, organization_id')
+        .eq('id', assetId)
+        .maybeSingle();
+
+      if (fetchErr || !currentAsset) {
+        return { success: false, error: 'כלי העבודה לא נמצא במערכת' };
+      }
+
+      targetWhId = targetWhId || currentAsset.current_warehouse_id;
+      if (!targetWhId || !isValidUuid(targetWhId)) {
+        const { data: fallbackWh } = await supabaseAdmin
+          .from('warehouses')
+          .select('id')
+          .eq('organization_id', orgId)
+          .limit(1)
+          .maybeSingle();
+        targetWhId = fallbackWh?.id || null;
+      }
+
+      // Step 1: Update assets table
+      const updateQuery = supabaseAdmin
+        .from('assets')
+        .update({
+          status: 'maintenance',
+          condition: 'needs_repair',
+          current_assigned_worker: null,
+          organization_id: orgId,
+          updated_at: now,
+        })
+        .eq('id', assetId)
+        .eq('organization_id', orgId);
+
+      const { data: updatedRows, error: updateErr } = await updateQuery.select();
+
+      if (updateErr) {
+        return { success: false, error: `שגיאה בעדכון כלי: ${updateErr.message}` };
+      }
+
+      if (!updatedRows || updatedRows.length === 0) {
+        return { success: false, error: 'העדכון נכשל: הכלי לא נמצא (0 שורות עודכנו).' };
+      }
+
+      // Step 2: Insert into custody_ledger
+      const notesText = technicianOrLab
+        ? `שליחה לתיקון (${technicianOrLab}): ${reason.trim()}`
+        : `שליחה לתיקון: ${reason.trim()}`;
+
+      const { error: ledgerError } = await supabaseAdmin.from('custody_ledger').insert({
+        organization_id: orgId,
+        asset_id: assetId,
+        action: 'MAINTENANCE',
+        warehouse_id: targetWhId,
+        from_warehouse_id: targetWhId,
+        to_warehouse_id: targetWhId,
+        performed_by: performedBy,
+        condition_at_return: 'needs_repair',
+        notes: notesText,
+        created_at: now,
+      });
+
+      if (ledgerError) {
+        console.error('LEDGER INSERT FAILED:', ledgerError);
+        return { success: false, error: 'שגיאה ברישום ביומן התנועות: ' + ledgerError.message };
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Database error';
+      return { success: false, error: msg };
+    }
+  }
+
+  // Update in-memory fallback
+  mutateMockAsset(
+    assetId,
+    {
+      status: 'maintenance',
+      condition: 'needs_repair',
+      currentAssignedWorker: null,
+    },
+    {
+      action: 'MAINTENANCE_FLAG',
+      performedBy,
+      notes: reason.trim(),
+    }
+  );
+
+  // Step 3: Trigger Next.js cache revalidation
+  try {
+    await clearDashboardCaches();
+    revalidatePath('/history');
+    revalidatePath('/dashboard/warehouse');
+    revalidatePath('/catalog');
+    revalidatePath('/dashboard/manager');
+  } catch (e) {
+    console.warn('[sendToMaintenanceAction] revalidatePath warning:', e);
+  }
+
+  return {
+    success: true,
+    message: 'הכלי הועבר בהצלחה לסטטוס תחזוקה / תיקון.',
+  };
+}
+
+/**
  * 3. returnFromMaintenanceAction
  * Marks asset as available in the selected receiving warehouse with rated condition (excellent / good).
  * Strictly isolated by organization_id.
@@ -502,6 +646,7 @@ export async function returnFromMaintenanceAction(
           status: 'available',
           condition,
           current_warehouse_id: receivingWarehouseId,
+          current_assigned_worker: null,
           organization_id: orgId,
           updated_at: now,
         })
@@ -522,14 +667,23 @@ export async function returnFromMaintenanceAction(
         return { success: false, error: "העדכון נכשל: הכלי לא נמצא או שנחסם עקב הרשאות (0 שורות עודכנו)." };
       }
 
-      await supabaseAdmin.from('custody_ledger').insert({
+      const { error: ledgerError } = await supabaseAdmin.from('custody_ledger').insert({
         asset_id: assetId,
-        action: 'MAINTENANCE_OUT',
+        action: 'CHECKIN',
         performed_by: receivedBy,
         organization_id: orgId,
+        warehouse_id: receivingWarehouseId,
+        to_warehouse_id: receivingWarehouseId,
+        from_warehouse_id: receivingWarehouseId,
+        condition_at_return: condition,
         notes: `קליטה מתיקון והחזרה למלאי (מצב: ${condition === 'excellent' ? 'מעולה' : 'תקין'}): ${notes || 'הכלי נבדק ונמצא תקין לשימוש'}`,
         created_at: now,
       });
+
+      if (ledgerError) {
+        console.error('LEDGER INSERT FAILED:', ledgerError);
+        return { success: false, error: 'שגיאה ברישום ביומן התנועות: ' + ledgerError.message };
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Database error';
       return { success: false, error: msg };
@@ -547,6 +701,7 @@ export async function returnFromMaintenanceAction(
       warehouseId: receivingWarehouseId,
       warehouseName: whMeta?.name || 'מחסן מקבל',
       warehouseCode: whMeta?.code || '',
+      currentAssignedWorker: null,
     },
     {
       action: 'CHECKIN',
@@ -554,6 +709,16 @@ export async function returnFromMaintenanceAction(
       notes: `קליטה מתיקון: ${notes || 'נבדק ותקין'}`,
     }
   );
+
+  try {
+    await clearDashboardCaches();
+    revalidatePath('/history');
+    revalidatePath('/dashboard/warehouse');
+    revalidatePath('/catalog');
+    revalidatePath('/dashboard/manager');
+  } catch (e) {
+    console.warn('[returnFromMaintenanceAction] revalidatePath warning:', e);
+  }
 
   return {
     success: true,
@@ -590,6 +755,7 @@ export async function scrapAndRetireAssetAction(
         .update({
           status: 'maintenance',
           condition: 'retired',
+          current_assigned_worker: null,
           organization_id: orgId,
           updated_at: now,
         })
@@ -610,14 +776,34 @@ export async function scrapAndRetireAssetAction(
         return { success: false, error: "העדכון נכשל: הכלי לא נמצא או שנחסם עקב הרשאות (0 שורות עודכנו)." };
       }
 
-      await supabaseAdmin.from('custody_ledger').insert({
+      let whId = updatedRows[0]?.current_warehouse_id;
+      if (!whId || !isValidUuid(whId)) {
+        const { data: fallbackWh } = await supabaseAdmin
+          .from('warehouses')
+          .select('id')
+          .eq('organization_id', orgId)
+          .limit(1)
+          .maybeSingle();
+        whId = fallbackWh?.id || null;
+      }
+
+      const { error: ledgerError } = await supabaseAdmin.from('custody_ledger').insert({
         asset_id: assetId,
-        action: 'DECOMMISSION',
+        action: 'RETIRE',
         performed_by: retiredBy,
         organization_id: orgId,
+        warehouse_id: whId,
+        from_warehouse_id: whId,
+        to_warehouse_id: whId,
+        condition_at_return: 'retired',
         notes: `גריטת כלי והשבתה לצמיתות: ${reason.trim()}`,
         created_at: now,
       });
+
+      if (ledgerError) {
+        console.error('LEDGER INSERT FAILED:', ledgerError);
+        return { success: false, error: 'שגיאה ברישום ביומן התנועות: ' + ledgerError.message };
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Database error';
       return { success: false, error: msg };
@@ -630,6 +816,7 @@ export async function scrapAndRetireAssetAction(
     {
       status: 'maintenance',
       condition: 'retired',
+      currentAssignedWorker: null,
     },
     {
       action: 'MAINTENANCE_FLAG',
@@ -637,6 +824,16 @@ export async function scrapAndRetireAssetAction(
       notes: `גריטת כלי: ${reason.trim()}`,
     }
   );
+
+  try {
+    await clearDashboardCaches();
+    revalidatePath('/history');
+    revalidatePath('/dashboard/warehouse');
+    revalidatePath('/catalog');
+    revalidatePath('/dashboard/manager');
+  } catch (e) {
+    console.warn('[scrapAndRetireAssetAction] revalidatePath warning:', e);
+  }
 
   return {
     success: true,

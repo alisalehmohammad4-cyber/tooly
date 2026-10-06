@@ -548,10 +548,30 @@ export async function bulkCheckoutAssetAction(
 
   if (isSupabaseConfigured()) {
     try {
-      // 1. Fetch current assets to verify existence, lockout, and tenant isolation
-      const { data: currentAssets, error: fetchErr } = await supabase
+      // 1. Fetch current assets to verify existence, lockout, tenant isolation and facility
+      const client = supabaseAdmin || supabase;
+      const sessionUser = await getServerSessionUser();
+      const performedBy = sessionUser?.fullName || sessionUser?.name || 'מחסנאי ראשי';
+
+      const { data: currentAssets, error: fetchErr } = await client
         .from('assets')
-        .select('id, version, status, is_locked, lock_reason, safety_inspection_due, organization_id')
+        .select(`
+          id,
+          version,
+          status,
+          is_locked,
+          lock_reason,
+          safety_inspection_due,
+          organization_id,
+          current_warehouse_id,
+          qr_code,
+          name,
+          brand,
+          model_number,
+          condition,
+          warehouses:current_warehouse_id ( id, name, code ),
+          tool_models:tool_model_id ( id, name, brand, model_number )
+        `)
         .in('id', assetIds);
 
       if (fetchErr) {
@@ -603,7 +623,6 @@ export async function bulkCheckoutAssetAction(
       }
 
       // 2. Update each asset and insert audit ledger entries
-      const client = supabaseAdmin || supabase;
       for (const item of currentAssets) {
         const nextVersion = (item.version || 1) + 1;
         const itemAccessories = accessories[item.id] || {
@@ -641,24 +660,45 @@ export async function bulkCheckoutAssetAction(
           throw new Error("העדכון נכשל: הכלי לא נמצא או שנחסם עקב הרשאות (0 שורות עודכנו).");
         }
 
+        // Resolve valid warehouse UUID for non-null constraint
+        let targetWarehouseId = item.current_warehouse_id;
+        if (!targetWarehouseId || !isValidUuid(targetWarehouseId)) {
+          const { data: fallbackWh } = await client
+            .from('warehouses')
+            .select('id')
+            .eq('organization_id', orgId)
+            .limit(1)
+            .maybeSingle();
+          targetWarehouseId = fallbackWh?.id || null;
+        }
+
         // Insert into custody_ledger
         const { error: ledgerErr } = await client.from('custody_ledger').insert({
+          organization_id: orgId,
           asset_id: item.id,
           action: 'CHECKOUT',
-          performed_by: workerName,
+          warehouse_id: targetWarehouseId,
+          from_warehouse_id: targetWarehouseId || null,
+          to_warehouse_id: targetWarehouseId || null,
+          performed_by: performedBy,
+          worker_name: workerName,
           target_worker: workerName,
           worker_phone: workerPhone || null,
-          signature_data: signatureData,
+          signature_svg: signatureData || null,
+          signature_data: signatureData || null,
+          is_tag_verified: true,
+          signed_at: new Date().toISOString(),
           expected_return_date: expectedReturnDate,
           accessories_snapshot: itemAccessories,
           gps_lat: gps?.lat ?? null,
           gps_lng: gps?.lng ?? null,
-          notes: notes || `Bulk checkout to ${workerName}`,
-          organization_id: orgId,
+          notes: notes || `ניפוק לעובד ${workerName}`,
+          created_at: new Date().toISOString(),
         });
 
         if (ledgerErr) {
-          throw new Error(`Failed to log custody ledger: ${ledgerErr.message}`);
+          console.error('LEDGER INSERT FAILED:', ledgerErr);
+          throw new Error('שגיאה ברישום ביומן התנועות: ' + ledgerErr.message);
         }
 
         const whRaw = (item as unknown as { warehouses?: unknown }).warehouses;
@@ -780,7 +820,9 @@ export async function bulkCheckoutAssetAction(
 
   try {
     await clearDashboardCaches();
+    revalidatePath('/history');
     revalidatePath('/dashboard/warehouse');
+    revalidatePath('/catalog');
     revalidatePath('/dashboard/manager');
   } catch (e) {
     console.warn('[bulkCheckoutAssetAction] revalidatePath warning:', e);
@@ -843,7 +885,9 @@ export async function checkoutAssetAction(
 
   try {
     await clearDashboardCaches();
+    revalidatePath('/history');
     revalidatePath('/dashboard/warehouse');
+    revalidatePath('/catalog');
     revalidatePath('/dashboard/manager');
   } catch (e) {
     console.warn('[checkoutAssetAction] revalidatePath warning:', e);
@@ -938,20 +982,42 @@ export async function checkinAssetAction(
         return { success: false, error: "העדכון נכשל: הכלי לא נמצא או שנחסם עקב הרשאות (0 שורות עודכנו)." };
       }
 
+      const sessionUser = await getServerSessionUser();
+      const performedBy = sessionUser?.fullName || sessionUser?.name || 'מחסנאי שטח';
+
+      // Resolve valid warehouse UUID for non-null constraint
+      let targetWarehouseId = currentAsset.current_warehouse_id;
+      if (!targetWarehouseId || !isValidUuid(targetWarehouseId)) {
+        const { data: fallbackWh } = await client
+          .from('warehouses')
+          .select('id')
+          .eq('organization_id', orgId)
+          .limit(1)
+          .maybeSingle();
+        targetWarehouseId = fallbackWh?.id || null;
+      }
+
       // Record audit in custody_ledger
+      const actionType = isDamaged ? 'MAINTENANCE' : 'CHECKIN';
       const { error: ledgerErr } = await client.from('custody_ledger').insert({
         asset_id: assetId,
-        action: 'CHECKIN',
-        performed_by: 'Field Agent',
+        action: actionType,
+        warehouse_id: targetWarehouseId,
+        to_warehouse_id: targetWarehouseId,
+        from_warehouse_id: targetWarehouseId,
+        performed_by: performedBy,
         organization_id: orgId,
-        notes: notes || `Field check-in (Condition: ${condition})`,
+        condition_at_return: condition,
+        notes: notes || (isDamaged ? `החזרת כלי (תקלה - מצב: ${condition})` : `החזרת כלי למחסן (מצב: ${condition})`),
         damage_report: damageReport || null,
         gps_lat: gps?.lat ?? null,
         gps_lng: gps?.lng ?? null,
+        created_at: new Date().toISOString(),
       });
 
       if (ledgerErr) {
-        console.warn('Custody ledger checkin warning:', ledgerErr);
+        console.error('LEDGER INSERT FAILED:', ledgerErr);
+        return { success: false, error: 'שגיאה ברישום ביומן התנועות: ' + ledgerErr.message };
       }
 
       const whRaw = (currentAsset as unknown as { warehouses?: unknown }).warehouses;
@@ -964,8 +1030,8 @@ export async function checkinAssetAction(
         condition: condition as any,
         currentAssignedWorker: null,
         current_assigned_worker: null,
-        currentWarehouseId: (currentAsset as any).current_warehouse_id || 'wh-main-01',
-        current_warehouse_id: (currentAsset as any).current_warehouse_id || 'wh-main-01',
+        currentWarehouseId: targetWarehouseId || (currentAsset as any).current_warehouse_id || 'wh-main-01',
+        current_warehouse_id: targetWarehouseId || (currentAsset as any).current_warehouse_id || 'wh-main-01',
         warehouseName: (whObj.name as string) || "מחסן ראשי",
         warehouseCode: (whObj.code as string) || 'CDB-01',
         toolName: (currentAsset as any).name || 'כלי עבודה',
@@ -976,7 +1042,9 @@ export async function checkinAssetAction(
 
       try {
         await clearDashboardCaches();
+        revalidatePath('/history');
         revalidatePath('/dashboard/warehouse');
+        revalidatePath('/catalog');
         revalidatePath('/dashboard/manager');
       } catch (e) {
         console.warn('[checkinAssetAction] revalidatePath warning:', e);
@@ -2035,6 +2103,7 @@ export async function reportAssetDamageAction(
   input: ReportDamageInput
 ): Promise<CustodyActionResult> {
   const { assetId, reportedBy, issueType, notes } = input;
+  const orgId = await resolveActiveOrganizationId();
 
   if (isSupabaseConfigured()) {
     try {
@@ -2047,7 +2116,7 @@ export async function reportAssetDamageAction(
           updated_at: new Date().toISOString(),
         })
         .eq('id', assetId)
-        .select('id, name, brand, model_number, qr_code, status, condition, current_warehouse_id, current_assigned_worker, version, warehouses(name, code)');
+        .select('id, name, brand, model_number, qr_code, status, condition, current_warehouse_id, current_assigned_worker, version, organization_id, warehouses(name, code)');
 
       if (updateErr) {
         console.error("DB Update Failed:", updateErr);
@@ -2059,12 +2128,35 @@ export async function reportAssetDamageAction(
         return { success: false, error: "העדכון נכשל: הכלי לא נמצא או שנחסם עקב הרשאות (0 שורות עודכנו)." };
       }
 
-      await client.from('custody_ledger').insert({
+      const activeOrg = updatedRows[0]?.organization_id || orgId;
+      let targetWarehouseId = updatedRows[0]?.current_warehouse_id;
+      if (!targetWarehouseId || !isValidUuid(targetWarehouseId)) {
+        const { data: fallbackWh } = await client
+          .from('warehouses')
+          .select('id')
+          .eq('organization_id', activeOrg)
+          .limit(1)
+          .maybeSingle();
+        targetWarehouseId = fallbackWh?.id || null;
+      }
+
+      const { error: ledgerErr } = await client.from('custody_ledger').insert({
+        organization_id: activeOrg,
         asset_id: assetId,
-        action: 'MAINTENANCE_IN',
+        action: 'MAINTENANCE',
+        warehouse_id: targetWarehouseId,
+        from_warehouse_id: targetWarehouseId,
+        to_warehouse_id: targetWarehouseId,
         performed_by: reportedBy || 'עובד שטח',
         notes: `דיווח תקלה (${issueType}): ${notes || 'ללא הערות'}`,
+        condition_at_return: 'needs_repair',
+        created_at: new Date().toISOString(),
       });
+
+      if (ledgerErr) {
+        console.error('LEDGER INSERT FAILED:', ledgerErr);
+        return { success: false, error: 'שגיאה ברישום ביומן התנועות: ' + ledgerErr.message };
+      }
 
       const row = updatedRows[0];
       const whRaw = (row as any).warehouses;
@@ -2086,6 +2178,8 @@ export async function reportAssetDamageAction(
 
       try {
         await clearDashboardCaches();
+        revalidatePath('/history');
+        revalidatePath('/catalog');
         revalidatePath('/dashboard/warehouse');
         revalidatePath('/dashboard/manager');
       } catch (e) {
@@ -2147,6 +2241,7 @@ export async function retireAssetAction(
   input: RetireAssetInput
 ): Promise<CustodyActionResult> {
   const { assetId, retiredBy, reason } = input;
+  const orgId = await resolveActiveOrganizationId();
 
   if (isSupabaseConfigured()) {
     try {
@@ -2159,7 +2254,7 @@ export async function retireAssetAction(
           updated_at: new Date().toISOString(),
         })
         .eq('id', assetId)
-        .select('id, name, brand, model_number, qr_code, status, condition, current_warehouse_id, current_assigned_worker, version, warehouses(name, code)');
+        .select('id, name, brand, model_number, qr_code, status, condition, current_warehouse_id, current_assigned_worker, version, organization_id, warehouses(name, code)');
 
       if (updateErr) {
         console.error("DB Update Failed:", updateErr);
@@ -2171,12 +2266,35 @@ export async function retireAssetAction(
         return { success: false, error: "העדכון נכשל: הכלי לא נמצא או שנחסם עקב הרשאות (0 שורות עודכנו)." };
       }
 
-      await client.from('custody_ledger').insert({
+      const activeOrg = updatedRows[0]?.organization_id || orgId;
+      let targetWarehouseId = updatedRows[0]?.current_warehouse_id;
+      if (!targetWarehouseId || !isValidUuid(targetWarehouseId)) {
+        const { data: fallbackWh } = await client
+          .from('warehouses')
+          .select('id')
+          .eq('organization_id', activeOrg)
+          .limit(1)
+          .maybeSingle();
+        targetWarehouseId = fallbackWh?.id || null;
+      }
+
+      const { error: ledgerErr } = await client.from('custody_ledger').insert({
+        organization_id: activeOrg,
         asset_id: assetId,
-        action: 'DECOMMISSION',
+        action: 'RETIRE',
+        warehouse_id: targetWarehouseId,
+        from_warehouse_id: targetWarehouseId,
+        to_warehouse_id: targetWarehouseId,
         performed_by: retiredBy || 'מנהל מערכת',
         notes: `השבתת כלי וגריעה ממלאי: ${reason}`,
+        condition_at_return: 'retired',
+        created_at: new Date().toISOString(),
       });
+
+      if (ledgerErr) {
+        console.error('LEDGER INSERT FAILED:', ledgerErr);
+        return { success: false, error: 'שגיאה ברישום ביומן התנועות: ' + ledgerErr.message };
+      }
 
       const row = updatedRows[0];
       const whRaw = (row as any).warehouses;
@@ -2198,6 +2316,8 @@ export async function retireAssetAction(
 
       try {
         await clearDashboardCaches();
+        revalidatePath('/history');
+        revalidatePath('/catalog');
         revalidatePath('/dashboard/warehouse');
         revalidatePath('/dashboard/manager');
       } catch (e) {
@@ -2289,13 +2409,14 @@ export async function dispatchAssetWithSignatureAction(data: {
   let brand = 'Standard';
   let modelNumber: string | null = null;
   let condition: 'excellent' | 'good' | 'needs_repair' | 'retired' = 'good';
+  let currentAssetWhId: string | null = null;
 
   if (isSupabaseConfigured()) {
     try {
       let assetQuery = supabaseAdmin
         .from('assets')
         .select(
-          'id, name, brand, model_number, qr_code, status, is_locked, lock_reason, safety_inspection_due, condition, organization_id, tool_models(name, brand, model_number)'
+          'id, name, brand, model_number, qr_code, current_warehouse_id, status, is_locked, lock_reason, safety_inspection_due, condition, organization_id, tool_models(name, brand, model_number)'
         )
         .eq('id', assetId);
 
@@ -2311,6 +2432,7 @@ export async function dispatchAssetWithSignatureAction(data: {
       if (!dbAsset) {
         return { success: false, error: 'כלי העבודה אינו שייך לארגון הפעיל' };
       }
+      currentAssetWhId = (dbAsset.current_warehouse_id as string) || null;
       if (dbAsset.is_locked) {
         return {
           success: false,
@@ -2418,6 +2540,10 @@ export async function dispatchAssetWithSignatureAction(data: {
         asset_id: assetId,
         action: 'CHECKOUT',
         organization_id: orgId,
+        warehouse_id: targetWarehouseId,
+        to_warehouse_id: targetWarehouseId,
+        from_warehouse_id: currentAssetWhId || targetWarehouseId,
+        target_site_name: targetWarehouseName,
         performed_by: performedBy,
         target_worker: workerName.trim(),
         worker_name: workerName.trim(),
@@ -2435,25 +2561,8 @@ export async function dispatchAssetWithSignatureAction(data: {
         .insert(fullLedgerRecord);
 
       if (ledgerErr) {
-        // Fallback to standard columns if signature_svg/is_tag_verified/signed_at do not exist as table columns
-        console.warn(
-          '[dispatchAssetWithSignatureAction] Primary ledger insert notice, falling back to standard columns:',
-          ledgerErr.message
-        );
-        const { error: fallbackErr } = await supabaseAdmin.from('custody_ledger').insert({
-          asset_id: assetId,
-          action: 'CHECKOUT',
-          organization_id: orgId,
-          performed_by: performedBy,
-          target_worker: workerName.trim(),
-          worker_phone: workerPhone?.trim() || null,
-          signature_data: signatureData,
-          notes: `ניפוק לאתר ${targetWarehouseName} - תג פיזי מאומת (${isTagVerified ? 'כן' : 'לא'})`,
-          created_at: now,
-        });
-        if (fallbackErr) {
-          return { success: false, error: `שגיאה ברישום תנועה: ${fallbackErr.message}` };
-        }
+        console.error('LEDGER INSERT FAILED:', ledgerErr);
+        return { success: false, error: 'שגיאה ברישום ביומן התנועות: ' + ledgerErr.message };
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Database exception';
@@ -2509,7 +2618,9 @@ export async function dispatchAssetWithSignatureAction(data: {
 
   try {
     await clearDashboardCaches();
+    revalidatePath('/history');
     revalidatePath('/dashboard/warehouse');
+    revalidatePath('/catalog');
     revalidatePath('/dashboard/manager');
   } catch (e) {
     console.warn('[dispatchAssetWithSignatureAction] revalidatePath warning:', e);
