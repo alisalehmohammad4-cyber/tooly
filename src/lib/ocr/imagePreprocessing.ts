@@ -156,14 +156,26 @@ export function preprocessFrameForOcr(
 
   const grayArray = new Uint8Array(pixelCount);
 
-  // Step A: Convert to grayscale and build pixel array
+  // Step A: Convert to grayscale and build pixel array with min/max tracking
+  let minGray = 255;
+  let maxGray = 0;
   for (let i = 0, p = 0; i < data.length; i += 4, p++) {
     // ITU-R BT.601: 0.299 R + 0.587 G + 0.114 B
     const gray = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
     grayArray[p] = gray;
+    if (gray < minGray) minGray = gray;
+    if (gray > maxGray) maxGray = gray;
   }
 
-  // Step B: Calculate optimal Otsu threshold
+  // Step A.2: Dynamic Range Auto-Stretching (enhances faint or dirty numbers under direct sunlight or dim container lighting)
+  const range = maxGray - minGray;
+  if (range > 15 && range < 235) {
+    for (let p = 0; p < pixelCount; p++) {
+      grayArray[p] = Math.round(((grayArray[p] - minGray) / range) * 255);
+    }
+  }
+
+  // Step B: Calculate optimal Otsu threshold on contrast-enhanced grayscale
   const threshold = calculateOtsuThreshold(grayArray);
 
   // Step C: High-contrast binarization (Black text on crisp white background)

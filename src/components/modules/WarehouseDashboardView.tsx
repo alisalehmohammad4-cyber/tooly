@@ -43,6 +43,7 @@ import {
   Sparkles,
   RefreshCw,
   Camera,
+  ScanLine,
 } from 'lucide-react';
 import type { StorekeeperOperationsPayload, WarehouseOption, StorekeeperActiveLoan } from '@/app/actions/dashboard';
 import { getStorekeeperOperations } from '@/app/actions/dashboard';
@@ -1628,7 +1629,7 @@ export default function WarehouseDashboardView({
                 className="min-h-[56px] sm:min-h-[64px] p-3 rounded-2xl bg-gradient-to-br from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white font-black text-xs sm:text-sm flex flex-col items-center justify-center text-center gap-1.5 shadow-md shadow-emerald-600/20 active:scale-95 transition-all cursor-pointer"
               >
                 <Sparkles className="w-5 h-5 sm:w-6 sm:h-6 text-amber-300 stroke-[2.5]" />
-                <span>🔦 סורק שטח / בדיקת כלי</span>
+                <span>🔦 סורק שטח (QR / OCR)</span>
               </button>
             </div>
 
@@ -1678,6 +1679,15 @@ export default function WarehouseDashboardView({
                     </button>
                   )}
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setIsQuickOcrOpen(true)}
+                  className="h-9 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 font-bold text-xs flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0"
+                  title="סריקה דו-מנועית מהירה (QR + OCR)"
+                >
+                  <ScanLine className="w-3.5 h-3.5" />
+                  <span>סרוק</span>
+                </button>
                 <button
                   type="submit"
                   disabled={!passportLookupInput.trim() || isSearchingPassport}
@@ -3978,10 +3988,10 @@ export default function WarehouseDashboardView({
                         type="button"
                         onClick={() => setIsDirectTransferOcrOpen(true)}
                         className="py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer shrink-0 shadow-sm transition-all"
-                        title="סריקת OCR תעשייתי"
+                        title="סריקה מקבילית (QR + OCR)"
                       >
                         <Camera className="w-3.5 h-3.5" />
-                        <span>סרוק OCR</span>
+                        <span>סרוק (QR/OCR)</span>
                       </button>
                     </div>
 
@@ -4226,10 +4236,10 @@ export default function WarehouseDashboardView({
                     type="button"
                     onClick={() => setIsDispatchOcrOpen(true)}
                     className="py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer shrink-0 shadow-sm transition-all"
-                    title="סריקת OCR תעשייתי"
+                    title="סריקה מקבילית (QR + OCR)"
                   >
                     <Camera className="w-3.5 h-3.5" />
-                    <span>סרוק OCR</span>
+                    <span>סרוק (QR/OCR)</span>
                   </button>
                 </div>
 
@@ -4914,8 +4924,8 @@ export default function WarehouseDashboardView({
           setIsDirectTransferOcrOpen(false);
         }}
         warehouseId={selectedWarehouseId !== 'all' ? selectedWarehouseId : undefined}
-        title="שילוח ציוד ישיר - סריקת OCR שטח"
-        description="זיהוי תגית כלי לצורך שילוח ישיר לאתר אחר ללא אישור"
+        title="שילוח ציוד ישיר - סריקה מקבילית (QR + OCR)"
+        description="זיהוי אוטומטי של קודי QR, ברקודים ותגיות שטח שחוקות ללא החלפת מצבים"
       />
 
       {/* OCR SCANNER 2: SITE DISPATCH VERIFICATION */}
@@ -4929,8 +4939,8 @@ export default function WarehouseDashboardView({
           setIsDispatchOcrOpen(false);
         }}
         warehouseId={selectedWarehouseId !== 'all' ? selectedWarehouseId : undefined}
-        title="הוצאת ציוד לאתר - אימות תגית OCR"
-        description="סריקה מוקשחת לאישור תיוג פיזי של הכלי המנופק"
+        title="הוצאת ציוד לאתר - אימות כלי (QR + OCR)"
+        description="סריקה מקבילית מוקשחת לאימות פיזי מיידי של הכלי המנופק"
       />
 
       {/* OCR SCANNER 3: PROMINENT FIELD SCANNER & PASSPORT LOCK */}
@@ -4943,8 +4953,8 @@ export default function WarehouseDashboardView({
           setIsPassportOpen(true);
         }}
         warehouseId={selectedWarehouseId !== 'all' ? selectedWarehouseId : undefined}
-        title="סורק שטח תעשייתי OCR"
-        description="סריקה מוקשחת עם פנס וסינון רעשים - נעילה מיידית על כלי במלאי"
+        title="סורק שטח תעשייתי דו-מנועי (QR + OCR)"
+        description="זיהוי מהיר ומקבילי של קודי QR ותגיות שטח שחוקות - נעילה מיידית ופתיחת דרכון כלי"
       />
     </AppLayout>
   );

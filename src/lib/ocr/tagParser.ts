@@ -72,9 +72,9 @@ export function playOcrBeep(frequency = 880, durationMs = 120): void {
 }
 
 /**
- * Triggers haptic feedback vibration for mobile devices (100ms buzz).
+ * Triggers haptic feedback vibration for mobile devices (50ms pulse).
  */
-export function triggerOcrHaptic(pattern: number | number[] = 100): void {
+export function triggerOcrHaptic(pattern: number | number[] = 50): void {
   if (typeof window === 'undefined' || typeof navigator === 'undefined') return;
 
   if ('vibrate' in navigator && typeof navigator.vibrate === 'function') {
@@ -89,10 +89,10 @@ export function triggerOcrHaptic(pattern: number | number[] = 100): void {
 /**
  * Extracts and fuzzy-corrects candidate tags from raw OCR text output.
  * 
- * Supports:
- * - Specific prefix matcher: /(?:ZR|TOOL|MOHA|ALI|MH)[-_ ]?([0-9]{3,5})/i
+ * Strict construction site filter:
+ * - High-Priority Pattern: /(?:ZR[- ]?)?\d{3,5}/i (handles ZR-1032, ZR 1065, or standalone 3-5 digits)
  * - Optical misreads in numeric part: e.g., "ZR-lO99" -> "ZR-1099"
- * - Generic prefixes: e.g., "WLD-0024" or "BAT-101"
+ * - Secondary organizational prefixes: TOOL, MOHA, ALI, MH (3-5 digits)
  */
 export function parseCandidateTags(rawText: string): string[] {
   if (!rawText) return [];
@@ -100,47 +100,43 @@ export function parseCandidateTags(rawText: string): string[] {
   const candidates: string[] = [];
   const normalized = rawText.trim().replace(/\r?\n/g, ' ');
 
-  // 1. High-Priority Matcher: Known organization prefixes with possible optical misreads in numeric suffix
-  // e.g. "ZR-lO99", "MOHA D001", "TOOL-S02B", "ZR Z099", "MH-105"
-  const knownPrefixRegex =
-    /(?:^|[^A-Za-z0-9])(ZR|TOOL|MOHA|ALI|MH)[-_ ]?([0-9OoDIl|!Ss$BZ]{3,5})(?:$|[^A-Za-z0-9])/gi;
+  // 1. High-Priority Matcher: Strict ZR-XXXX or standalone 3-5 digit tags
+  // Regex strictly enforces: /(?:ZR[- ]?)?\d{3,5}/i with optical misread lookalikes
+  const zrPatternRegex =
+    /(?:^|[^A-Za-z0-9])(?:(ZR)[-_ ]?)?([0-9OoDIl|!Ss$BZ]{3,5})(?:$|[^A-Za-z0-9])/gi;
 
   let match: RegExpExecArray | null;
-  while ((match = knownPrefixRegex.exec(normalized)) !== null) {
-    const prefix = match[1].toUpperCase();
+  while ((match = zrPatternRegex.exec(normalized)) !== null) {
+    const hasZrPrefix = Boolean(match[1]);
     const rawNumber = match[2];
     const correctedNumber = correctNumericOpticalMisreads(rawNumber);
 
     // Verify corrected number is strictly 3 to 5 digits
     if (/^[0-9]{3,5}$/.test(correctedNumber)) {
-      candidates.push(`${prefix}-${correctedNumber}`);
-    }
-  }
-
-  // 2. Secondary Matcher: General uppercase alphanumeric prefixes (2-6 letters)
-  // e.g. "BAT-001", "WLD-102", "PMP-055"
-  const generalPrefixRegex =
-    /(?:^|[^A-Za-z0-9])([A-Z]{2,6})[-_ ]?([0-9OoDIl|!Ss$BZ]{3,6})(?:$|[^A-Za-z0-9])/gi;
-
-  while ((match = generalPrefixRegex.exec(normalized)) !== null) {
-    const prefix = match[1].toUpperCase();
-    const rawNumber = match[2];
-    const correctedNumber = correctNumericOpticalMisreads(rawNumber);
-
-    if (/^[0-9]{3,6}$/.test(correctedNumber)) {
-      const candidate = `${prefix}-${correctedNumber}`;
-      if (!candidates.includes(candidate)) {
-        candidates.push(candidate);
+      const zrTag = `ZR-${correctedNumber}`;
+      if (!candidates.includes(zrTag)) {
+        candidates.push(zrTag);
+      }
+      if (!hasZrPrefix && !candidates.includes(correctedNumber)) {
+        candidates.push(correctedNumber);
       }
     }
   }
 
-  // 3. Fallback Matcher: Standalone numeric tags (3 to 6 digits)
-  const standaloneNumericRegex = /(?:^|[^A-Za-z0-9])([0-9]{3,6})(?:$|[^A-Za-z0-9])/g;
-  while ((match = standaloneNumericRegex.exec(normalized)) !== null) {
-    const num = match[1];
-    if (!candidates.includes(num)) {
-      candidates.push(num);
+  // 2. Secondary Matcher: Other known enterprise fleet prefixes (3-5 digits)
+  const enterprisePrefixRegex =
+    /(?:^|[^A-Za-z0-9])(TOOL|MOHA|ALI|MH)[-_ ]?([0-9OoDIl|!Ss$BZ]{3,5})(?:$|[^A-Za-z0-9])/gi;
+
+  while ((match = enterprisePrefixRegex.exec(normalized)) !== null) {
+    const prefix = match[1].toUpperCase();
+    const rawNumber = match[2];
+    const correctedNumber = correctNumericOpticalMisreads(rawNumber);
+
+    if (/^[0-9]{3,5}$/.test(correctedNumber)) {
+      const candidate = `${prefix}-${correctedNumber}`;
+      if (!candidates.includes(candidate)) {
+        candidates.push(candidate);
+      }
     }
   }
 
@@ -174,8 +170,8 @@ export async function snapTagToAsset(
   try {
     const res = await snapOcrTagToAssetAction(clean, orgId, facilityId);
     if (res.success && res.asset) {
-      // Trigger instant haptic vibration
-      triggerOcrHaptic(100);
+      // Trigger instant haptic vibration (50ms pulse)
+      triggerOcrHaptic(50);
 
       // Play audio beep confirmation
       playOcrBeep();
