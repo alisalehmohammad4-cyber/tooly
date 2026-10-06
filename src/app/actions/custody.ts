@@ -701,25 +701,29 @@ export async function bulkCheckoutAssetAction(
           throw new Error('שגיאה ברישום ביומן התנועות: ' + ledgerErr.message);
         }
 
-        const whRaw = (item as unknown as { warehouses?: unknown }).warehouses;
+        const itemObj = item as Record<string, unknown>;
+        const whRaw = itemObj.warehouses;
         const whObj = (Array.isArray(whRaw) ? whRaw[0] : whRaw) as Record<string, unknown> || {};
-        const tmRaw = (item as unknown as { tool_models?: unknown }).tool_models;
+        const tmRaw = itemObj.tool_models;
         const tmObj = (Array.isArray(tmRaw) ? tmRaw[0] : tmRaw) as Record<string, unknown> || {};
+        const qr = (itemObj.qr_code as string) || `TOOL-${item.id.slice(0, 6).toUpperCase()}`;
+        const itemWhId = (itemObj.current_warehouse_id as string) || 'wh-main-01';
+
         updatedAssets.push({
           id: item.id,
-          qrCode: (item as any).qr_code || `TOOL-${item.id.slice(0, 6).toUpperCase()}`,
-          qr_code: (item as any).qr_code || `TOOL-${item.id.slice(0, 6).toUpperCase()}`,
+          qrCode: qr,
+          qr_code: qr,
           status: 'checked_out',
-          condition: ((item as any).condition as 'excellent' | 'good' | 'needs_repair' | 'retired') || 'good',
+          condition: (itemObj.condition as 'excellent' | 'good' | 'needs_repair' | 'retired') || 'good',
           currentAssignedWorker: workerName,
           current_assigned_worker: workerName,
-          currentWarehouseId: (item as any).current_warehouse_id || 'wh-main-01',
-          current_warehouse_id: (item as any).current_warehouse_id || 'wh-main-01',
+          currentWarehouseId: itemWhId,
+          current_warehouse_id: itemWhId,
           warehouseName: (whObj.name as string) || "מחסן ראשי",
           warehouseCode: (whObj.code as string) || 'CDB-01',
-          toolName: ((item as any).name as string) || (tmObj.name as string) || 'כלי שנופק',
-          brand: ((item as any).brand as string) || (tmObj.brand as string) || 'Standard',
-          modelNumber: ((item as any).model_number as string) || (tmObj.model_number as string) || null,
+          toolName: (itemObj.name as string) || (tmObj.name as string) || 'כלי שנופק',
+          brand: (itemObj.brand as string) || (tmObj.brand as string) || 'Standard',
+          modelNumber: (itemObj.model_number as string) || (tmObj.model_number as string) || null,
           version: nextVersion,
           expectedReturnDate,
           accessories: itemAccessories,
@@ -1020,23 +1024,27 @@ export async function checkinAssetAction(
         return { success: false, error: 'שגיאה ברישום ביומן התנועות: ' + ledgerErr.message };
       }
 
-      const whRaw = (currentAsset as unknown as { warehouses?: unknown }).warehouses;
+      const assetObj = currentAsset as Record<string, unknown>;
+      const whRaw = assetObj.warehouses;
       const whObj = (Array.isArray(whRaw) ? whRaw[0] : whRaw) as Record<string, unknown> || {};
+      const qr = (assetObj.qr_code as string) || `TOOL-${currentAsset.id.slice(0, 6).toUpperCase()}`;
+      const curWh = targetWarehouseId || (assetObj.current_warehouse_id as string) || 'wh-main-01';
+
       const returnedAsset: ScannedAssetDetails = {
         id: currentAsset.id,
-        qrCode: (currentAsset as any).qr_code || `TOOL-${currentAsset.id.slice(0, 6).toUpperCase()}`,
-        qr_code: (currentAsset as any).qr_code || `TOOL-${currentAsset.id.slice(0, 6).toUpperCase()}`,
+        qrCode: qr,
+        qr_code: qr,
         status: newStatus,
-        condition: condition as any,
+        condition: condition as ScannedAssetDetails['condition'],
         currentAssignedWorker: null,
         current_assigned_worker: null,
-        currentWarehouseId: targetWarehouseId || (currentAsset as any).current_warehouse_id || 'wh-main-01',
-        current_warehouse_id: targetWarehouseId || (currentAsset as any).current_warehouse_id || 'wh-main-01',
+        currentWarehouseId: curWh,
+        current_warehouse_id: curWh,
         warehouseName: (whObj.name as string) || "מחסן ראשי",
         warehouseCode: (whObj.code as string) || 'CDB-01',
-        toolName: (currentAsset as any).name || 'כלי עבודה',
-        brand: (currentAsset as any).brand || '',
-        modelNumber: (currentAsset as any).model_number || null,
+        toolName: (assetObj.name as string) || 'כלי עבודה',
+        brand: (assetObj.brand as string) || '',
+        modelNumber: (assetObj.model_number as string) || null,
         version: nextVersion,
       };
 
@@ -1309,7 +1317,7 @@ export async function getCheckedOutAssetsForReturnAction(
       const { data, error } = await query.order('updated_at', { ascending: false });
 
       if (!error && data && data.length > 0) {
-        const assetIds = data.map((d: any) => d.id);
+        const assetIds = (data as Array<{ id: string }>).map((d) => d.id);
 
         // Fetch latest CHECKOUT ledger entries to get worker phone, checkout time, and checkout note
         const { data: ledgerEntries } = await supabase
@@ -1336,7 +1344,31 @@ export async function getCheckedOutAssetsForReturnAction(
           }
         }
 
-        return data.map((row: any) => {
+        interface CheckedOutSupabaseRow {
+          id: string;
+          name?: string;
+          brand?: string;
+          model_number?: string | null;
+          serial_number?: string | null;
+          category_name?: string | null;
+          qr_code: string;
+          condition: ScannedAssetDetails['condition'];
+          current_assigned_worker?: string | null;
+          expected_return_date?: string | null;
+          current_warehouse_id?: string | null;
+          updated_at?: string;
+          created_at?: string;
+          tool_models?: {
+            name?: string;
+            brand?: string;
+            model_number?: string | null;
+          } | null;
+          warehouses?: {
+            name?: string;
+          } | null;
+        }
+
+        return (data as unknown as CheckedOutSupabaseRow[]).map((row) => {
           const toolName = row.tool_models?.name || row.name || 'כלי עבודה';
           const brand = row.tool_models?.brand || row.brand || '';
           const modelNumber = row.tool_models?.model_number || row.model_number || null;
@@ -1379,6 +1411,7 @@ export async function getCheckedOutAssetsForReturnAction(
   const mockAssets = getMockAssets(orgId);
   const { getMockAuditHistory } = await import('@/lib/mockStore');
   const mockHistory = getMockAuditHistory(undefined, orgId).records;
+
   return mockAssets
     .filter((a) => {
       const statusMatch = a.status === 'checked_out';
@@ -1390,22 +1423,23 @@ export async function getCheckedOutAssetsForReturnAction(
       return statusMatch && whMatch;
     })
     .map((a) => {
+      const aRec = a as unknown as Record<string, unknown>;
       const { isOverdue, daysOverdue } = calculateOverdueDetails(a.expectedReturnDate);
-      const checkedOutAt = (a as any).updatedAt || (a as any).updated_at || null;
+      const checkedOutAt = (aRec.updatedAt as string) || (aRec.updated_at as string) || null;
       const latestCheckout = mockHistory.find(
         (r) => (r.assetId === a.id || r.qrCode === a.qrCode) && r.action === 'CHECKOUT'
       );
-      const lastCheckoutNote = latestCheckout?.notes || (a as any).lastCheckoutNote || null;
+      const lastCheckoutNote = latestCheckout?.notes || (aRec.lastCheckoutNote as string) || null;
       return {
         id: a.id,
         qrCode: a.qrCode,
         toolName: a.toolName,
         brand: a.brand,
         modelNumber: a.modelNumber,
-        serialNumber: (a as any).serialNumber || (a as any).serial_number || null,
+        serialNumber: (aRec.serialNumber as string) || (aRec.serial_number as string) || null,
         categoryName: a.categoryName,
         workerName: a.currentAssignedWorker || 'עובד שטח',
-        workerPhone: (a as any).workerPhone || null,
+        workerPhone: (aRec.workerPhone as string) || null,
         warehouseId: a.warehouseId || a.currentWarehouseId || '',
         warehouseName: a.warehouseName || 'מחסן שטח',
         expectedReturnDate: a.expectedReturnDate || null,
@@ -1804,7 +1838,7 @@ export async function toggleAssetLockAction(
       });
 
       const row = updatedRows[0];
-      const whRaw = (row as any).warehouses;
+      const whRaw = (row as Record<string, unknown>).warehouses;
       const whObj = (Array.isArray(whRaw) ? whRaw[0] : whRaw) || {};
       const returnAsset: ScannedAssetDetails = {
         id: row.id,
@@ -1920,7 +1954,7 @@ export async function renewSafetyInspectionAction(
       });
 
       const row = updatedRows[0];
-      const whRaw = (row as any).warehouses;
+      const whRaw = (row as Record<string, unknown>).warehouses;
       const whObj = (Array.isArray(whRaw) ? whRaw[0] : whRaw) || {};
       const returnAsset: ScannedAssetDetails = {
         id: row.id,
@@ -2033,7 +2067,7 @@ export async function reserveAssetAction(
       });
 
       const row = updatedRows[0];
-      const whRaw = (row as any).warehouses;
+      const whRaw = (row as Record<string, unknown>).warehouses;
       const whObj = (Array.isArray(whRaw) ? whRaw[0] : whRaw) || {};
       const returnAsset: ScannedAssetDetails = {
         id: row.id,
@@ -2159,7 +2193,7 @@ export async function reportAssetDamageAction(
       }
 
       const row = updatedRows[0];
-      const whRaw = (row as any).warehouses;
+      const whRaw = (row as Record<string, unknown>).warehouses;
       const whObj = (Array.isArray(whRaw) ? whRaw[0] : whRaw) || {};
       const returnAsset: ScannedAssetDetails = {
         id: row.id,
@@ -2297,7 +2331,7 @@ export async function retireAssetAction(
       }
 
       const row = updatedRows[0];
-      const whRaw = (row as any).warehouses;
+      const whRaw = (row as Record<string, unknown>).warehouses;
       const whObj = (Array.isArray(whRaw) ? whRaw[0] : whRaw) || {};
       const returnAsset: ScannedAssetDetails = {
         id: row.id,

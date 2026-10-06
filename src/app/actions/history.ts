@@ -1,7 +1,7 @@
 'use server';
 
 import { supabase, supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase';
-import type { DamageReport, GpsCoordinates } from '@/types/domain';
+import type { DamageReport } from '@/types/domain';
 import { getMockAuditHistory, getMockWarehouses } from '@/lib/mockStore';
 import {
   type AuditActionType,
@@ -24,6 +24,61 @@ import { getServerSessionOrgId } from '@/lib/auth/session';
 
 export async function resolveActiveOrganizationId(providedOrgId?: string): Promise<string | null> {
   return getServerSessionOrgId(providedOrgId);
+}
+
+interface RawLedgerRow {
+  id: string;
+  action: string;
+  performed_by: string;
+  target_worker?: string | null;
+  worker_phone?: string | null;
+  expected_return_date?: string | null;
+  signature_data?: string | null;
+  signature_svg?: string | null;
+  is_tag_verified?: boolean | null;
+  signed_at?: string | null;
+  target_site_name?: string | null;
+  worker_name?: string | null;
+  worker_id?: string | null;
+  condition_at_return?: string | null;
+  from_warehouse_id?: string | null;
+  to_warehouse_id?: string | null;
+  accessories_snapshot?: AuditHistoryRecord['accessoriesSnapshot'];
+  damage_report?: DamageReport | null;
+  gps_lat?: number | null;
+  gps_lng?: number | null;
+  notes: string | null;
+  created_at: string;
+  organization_id?: string | null;
+  warehouse_id?: string | null;
+  warehouses?: {
+    id: string;
+    name: string;
+    code: string;
+  } | null;
+  assets: {
+    id: string;
+    qr_code: string;
+    tag_number?: string | null;
+    condition: AuditHistoryRecord['condition'];
+    current_warehouse_id: string;
+    organization_id?: string | null;
+    tool_models: {
+      name: string;
+      brand: string;
+      model_number: string | null;
+    } | null;
+    current_warehouse?: {
+      id: string;
+      name: string;
+      code: string;
+    } | null;
+    warehouses?: {
+      id: string;
+      name: string;
+      code: string;
+    } | null;
+  } | null;
 }
 
 /**
@@ -150,8 +205,14 @@ export async function getAuditHistory(
         `)
         .eq('organization_id', orgId);
 
+      interface TransferRouteRow {
+        asset_id?: string;
+        source_warehouse?: { name?: string } | Array<{ name?: string }> | null;
+        target_warehouse?: { name?: string } | Array<{ name?: string }> | null;
+      }
+
       if (trData && Array.isArray(trData)) {
-        (trData as unknown as Array<{ asset_id?: string; source_warehouse?: any; target_warehouse?: any }>).forEach((tr) => {
+        (trData as unknown as TransferRouteRow[]).forEach((tr) => {
           if (tr.asset_id) {
             const srcName = Array.isArray(tr.source_warehouse) ? tr.source_warehouse[0]?.name : tr.source_warehouse?.name;
             const tgtName = Array.isArray(tr.target_warehouse) ? tr.target_warehouse[0]?.name : tr.target_warehouse?.name;
@@ -164,61 +225,6 @@ export async function getAuditHistory(
       }
     } catch {
       // Non-blocking
-    }
-
-    interface RawLedgerRow {
-      id: string;
-      action: string;
-      performed_by: string;
-      target_worker?: string | null;
-      worker_phone?: string | null;
-      expected_return_date?: string | null;
-      signature_data?: string | null;
-      signature_svg?: string | null;
-      is_tag_verified?: boolean | null;
-      signed_at?: string | null;
-      target_site_name?: string | null;
-      worker_name?: string | null;
-      worker_id?: string | null;
-      condition_at_return?: string | null;
-      from_warehouse_id?: string | null;
-      to_warehouse_id?: string | null;
-      accessories_snapshot?: AuditHistoryRecord['accessoriesSnapshot'];
-      damage_report?: DamageReport | null;
-      gps_lat?: number | null;
-      gps_lng?: number | null;
-      notes: string | null;
-      created_at: string;
-      organization_id?: string | null;
-      warehouse_id?: string | null;
-      warehouses?: {
-        id: string;
-        name: string;
-        code: string;
-      } | null;
-      assets: {
-        id: string;
-        qr_code: string;
-        tag_number?: string | null;
-        condition: AuditHistoryRecord['condition'];
-        current_warehouse_id: string;
-        organization_id?: string | null;
-        tool_models: {
-          name: string;
-          brand: string;
-          model_number: string | null;
-        } | null;
-        current_warehouse?: {
-          id: string;
-          name: string;
-          code: string;
-        } | null;
-        warehouses?: {
-          id: string;
-          name: string;
-          code: string;
-        } | null;
-      } | null;
     }
 
     const records: AuditHistoryRecord[] = (rawRows as unknown as RawLedgerRow[]).map(
@@ -270,7 +276,7 @@ export async function getAuditHistory(
           performedBy: row.performed_by || 'System',
           targetWorker: row.target_worker || row.worker_name || (normalizedAction === 'CHECKOUT' ? row.performed_by : null),
           workerPhone: row.worker_phone || null,
-          condition: (row.condition_at_return as any) || row.assets?.condition || 'good',
+          condition: (row.condition_at_return as AuditHistoryRecord['condition']) || row.assets?.condition || 'good',
           warehouseId: liveWhId,
           warehouseName: liveWhName,
           warehouseCode: liveWhCode,
@@ -432,7 +438,7 @@ export async function getToolLifecycleHistory(
         .order('created_at', { ascending: false });
 
       if (!error && rawRows && rawRows.length > 0) {
-        historyRecords = (rawRows as any[]).map((row) => {
+        historyRecords = (rawRows as unknown as RawLedgerRow[]).map((row) => {
           let normalizedAction: AuditActionType = 'CHECKIN';
           const raw = (row.action || '').toUpperCase();
           if (raw === 'CHECKOUT') normalizedAction = 'CHECKOUT';
@@ -459,7 +465,7 @@ export async function getToolLifecycleHistory(
             performedBy: row.performed_by || 'System',
             targetWorker: row.target_worker || row.worker_name || (normalizedAction === 'CHECKOUT' ? row.performed_by : null),
             workerPhone: row.worker_phone || null,
-            condition: (row.condition_at_return as any) || row.assets?.condition || 'good',
+            condition: (row.condition_at_return as AuditHistoryRecord['condition']) || row.assets?.condition || 'good',
             warehouseId: row.assets?.current_warehouse_id || row.warehouse_id || null,
             warehouseName: row.target_site_name || row.assets?.warehouses?.name || asset.warehouseName,
             warehouseCode: row.assets?.warehouses?.code || asset.warehouseCode,
@@ -685,9 +691,34 @@ export async function getFleetNotesFeedAction(
     const { data: rawRows, error } = await query;
 
     if (!error && rawRows && rawRows.length > 0) {
-      let mappedNotes: FleetNoteItem[] = rawRows
-        .filter((r: any) => r.notes && typeof r.notes === 'string' && r.notes.trim().length > 0)
-        .map((row: any) => {
+      interface FleetNoteDbRow {
+        id: string;
+        created_at: string;
+        action: string;
+        notes: string | null;
+        target_worker?: string | null;
+        worker_phone?: string | null;
+        performed_by?: string | null;
+        asset_id?: string | null;
+        assets?: {
+          id?: string;
+          qr_code?: string;
+          tool_models?: {
+            name?: string;
+            brand?: string;
+            model_number?: string | null;
+          } | null;
+          warehouses?: {
+            id?: string;
+            name?: string;
+            code?: string;
+          } | null;
+        } | null;
+      }
+
+      let mappedNotes: FleetNoteItem[] = (rawRows as unknown as FleetNoteDbRow[])
+        .filter((r) => r.notes && typeof r.notes === 'string' && r.notes.trim().length > 0)
+        .map((row) => {
           const assetObj = row.assets || {};
           const toolModel = assetObj.tool_models || {};
           const warehouse = assetObj.warehouses || {};
@@ -696,7 +727,7 @@ export async function getFleetNotesFeedAction(
             id: row.id,
             createdAt: row.created_at,
             action: (row.action as AuditActionType) || 'CHECKOUT',
-            notes: row.notes,
+            notes: row.notes || '',
             workerName: row.target_worker || null,
             workerPhone: row.worker_phone || null,
             performedBy: row.performed_by || 'מחסנאי',

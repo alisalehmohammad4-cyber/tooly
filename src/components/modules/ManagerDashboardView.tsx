@@ -23,7 +23,6 @@ import {
   UserCheck,
   Container,
   Truck,
-  ArrowLeftRight,
   MapPin,
   Pencil,
   Trash2,
@@ -42,11 +41,10 @@ import {
   Factory,
   Scissors,
   PieChart,
-  Mail,
 } from 'lucide-react';
 import Link from 'next/link';
 import type { PlantManagerAnalyticsPayload } from '@/app/actions/dashboard';
-import type { AppUser, Organization } from '@/types/domain';
+import type { AppUser } from '@/types/domain';
 import type { WarehouseAdminItem } from '@/lib/mockStore';
 import {
   getStorekeepersListAction,
