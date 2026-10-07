@@ -1,6 +1,6 @@
 import type { NextConfig } from "next";
 
-const BUILD_ID = `v2.2.0-${Date.now()}`;
+const BUILD_ID = `v2.3.0-${Date.now()}`;
 
 const nextConfig: NextConfig = {
   env: {

@@ -42,7 +42,7 @@ async function getNativeDetector(): Promise<NativeBarcodeDetectorInstance | null
       ).BarcodeDetector;
 
       nativeDetectorInstance = new BD({
-        formats: ['qr_code', 'code_128', 'code_39', 'data_matrix', 'ean_13', 'ean_8'],
+        formats: ['qr_code'],
       });
       return nativeDetectorInstance;
     } catch (err) {
@@ -55,6 +55,7 @@ async function getNativeDetector(): Promise<NativeBarcodeDetectorInstance | null
 
 /**
  * Fallback software decoder using ZXing from html5-qrcode for Safari / Firefox.
+ * Restricts decoding exclusively to QR Codes.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function getZxingDecoder(): Promise<any> {
@@ -69,9 +70,6 @@ async function getZxingDecoder(): Promise<any> {
     );
     const formats = [
       Html5QrcodeSupportedFormats.QR_CODE,
-      Html5QrcodeSupportedFormats.CODE_128,
-      Html5QrcodeSupportedFormats.CODE_39,
-      Html5QrcodeSupportedFormats.DATA_MATRIX,
     ];
 
     zxingDecoderInstance = new ZXingHtml5QrcodeDecoder(formats, false, {
@@ -93,8 +91,8 @@ async function getZxingDecoder(): Promise<any> {
 let sharedCanvas: HTMLCanvasElement | null = null;
 
 /**
- * Detects barcodes or QR codes from a live video element or canvas.
- * Continuously scans for QR, Code 128, Code 39, Data Matrix.
+ * Detects QR codes from a live video element or canvas.
+ * Restricts hardware and software decoding exclusively to QR codes.
  */
 export async function detectBarcodeOrQr(
   source: HTMLVideoElement | HTMLCanvasElement

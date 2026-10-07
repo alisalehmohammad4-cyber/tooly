@@ -31,7 +31,7 @@ export default function OcrScannerModal({
   isOpen,
   onClose,
   onAssetDetected,
-  title = 'סריקת כלי',
+  title = 'סריקת כלי (QR / OCR)',
   warehouseId,
 }: OcrScannerModalProps) {
   const { currentOrganization } = useAuth();
@@ -418,7 +418,7 @@ export default function OcrScannerModal({
           {/* Minimalist Viewfinder Overlay */}
           <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
             <div
-              className={`w-[72%] h-[140px] relative rounded-2xl flex items-center justify-center transition-all duration-200 ${
+              className={`w-[68%] aspect-square max-w-[240px] relative rounded-3xl flex items-center justify-center transition-all duration-200 ${
                 isTargetLocked
                   ? 'border-2 border-emerald-400 bg-emerald-500/20 shadow-[0_0_35px_rgba(16,185,129,0.7)] scale-[1.02]'
                   : 'border border-white/40 bg-white/[0.02]'
@@ -426,24 +426,24 @@ export default function OcrScannerModal({
             >
               {/* 4 Precision Corner Brackets */}
               <div
-                className={`absolute top-0 left-0 w-3 h-3 border-t-2 border-l-2 ${
+                className={`absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 ${
                   isTargetLocked ? 'border-emerald-400' : 'border-white/70'
-                } rounded-tl-sm`}
+                } rounded-tl-lg`}
               />
               <div
-                className={`absolute top-0 right-0 w-3 h-3 border-t-2 border-r-2 ${
+                className={`absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 ${
                   isTargetLocked ? 'border-emerald-400' : 'border-white/70'
-                } rounded-tr-sm`}
+                } rounded-tr-lg`}
               />
               <div
-                className={`absolute bottom-0 left-0 w-3 h-3 border-b-2 border-l-2 ${
+                className={`absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 ${
                   isTargetLocked ? 'border-emerald-400' : 'border-white/70'
-                } rounded-bl-sm`}
+                } rounded-bl-lg`}
               />
               <div
-                className={`absolute bottom-0 right-0 w-3 h-3 border-b-2 border-r-2 ${
+                className={`absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 ${
                   isTargetLocked ? 'border-emerald-400' : 'border-white/70'
-                } rounded-br-sm`}
+                } rounded-br-lg`}
               />
 
               {/* Instant feedback on detection */}

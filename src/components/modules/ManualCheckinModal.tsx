@@ -720,11 +720,11 @@ export default function ManualCheckinModal({
 
                     {/* Viewfinder frame */}
                     <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                      <div className="w-[72%] h-[140px] relative rounded-2xl border border-white/40 bg-white/[0.02] flex items-center justify-center">
-                        <div className="absolute top-0 left-0 w-3 h-3 border-t-2 border-l-2 border-white/70 rounded-tl-sm" />
-                        <div className="absolute top-0 right-0 w-3 h-3 border-t-2 border-r-2 border-white/70 rounded-tr-sm" />
-                        <div className="absolute bottom-0 left-0 w-3 h-3 border-b-2 border-l-2 border-white/70 rounded-bl-sm" />
-                        <div className="absolute bottom-0 right-0 w-3 h-3 border-b-2 border-r-2 border-white/70 rounded-br-sm" />
+                      <div className="w-[68%] aspect-square max-w-[240px] relative rounded-3xl border border-white/40 bg-white/[0.02] flex items-center justify-center">
+                        <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-white/70 rounded-tl-lg" />
+                        <div className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-white/70 rounded-tr-lg" />
+                        <div className="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-white/70 rounded-bl-lg" />
+                        <div className="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-white/70 rounded-br-lg" />
                         <div className="absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-emerald-400/70 to-transparent shadow-[0_0_8px_#34d399] animate-[bounce_2.5s_infinite]" />
                       </div>
                     </div>
@@ -759,7 +759,7 @@ export default function ManualCheckinModal({
                     className="w-full max-w-sm mx-auto py-2.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white text-xs font-black flex items-center justify-center gap-2 shadow-md shadow-emerald-700/25 cursor-pointer transition-all hover:scale-[1.01] active:scale-95"
                   >
                     <Sparkles className="w-4 h-4 text-amber-300" />
-                    <span>סרוק כלי (מצלמה מורחבת / OCR)</span>
+                    <span>סרוק כלי (QR / OCR)</span>
                   </button>
 
                   {scannerError && (
@@ -991,7 +991,7 @@ export default function ManualCheckinModal({
           setIsOcrScannerOpen(false);
         }}
         warehouseId={warehouseId}
-        title="סריקת כלי"
+        title="סריקת כלי (QR / OCR)"
       />
     </div>
   );

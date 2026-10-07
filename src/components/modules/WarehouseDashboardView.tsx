@@ -4924,7 +4924,7 @@ export default function WarehouseDashboardView({
           setIsDirectTransferOcrOpen(false);
         }}
         warehouseId={selectedWarehouseId !== 'all' ? selectedWarehouseId : undefined}
-        title="שילוח ציוד"
+        title="סריקת כלי (QR / OCR)"
       />
 
       {/* OCR SCANNER 2: SITE DISPATCH VERIFICATION */}
@@ -4938,7 +4938,7 @@ export default function WarehouseDashboardView({
           setIsDispatchOcrOpen(false);
         }}
         warehouseId={selectedWarehouseId !== 'all' ? selectedWarehouseId : undefined}
-        title="הוצאת ציוד"
+        title="סריקת כלי (QR / OCR)"
       />
 
       {/* OCR SCANNER 3: PROMINENT FIELD SCANNER & PASSPORT LOCK */}
@@ -4951,7 +4951,7 @@ export default function WarehouseDashboardView({
           setIsPassportOpen(true);
         }}
         warehouseId={selectedWarehouseId !== 'all' ? selectedWarehouseId : undefined}
-        title="סריקת כלי"
+        title="סריקת כלי (QR / OCR)"
       />
     </AppLayout>
   );
