@@ -458,7 +458,29 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
   const router = useRouter();
   const [selectedReceiptRecord, setSelectedReceiptRecord] = useState<AuditHistoryRecord | null>(null);
   const [isPdfExportModalOpen, setIsPdfExportModalOpen] = useState<boolean>(false);
-  const [selectedPassportTag, setSelectedPassportTag] = useState<string | null>(null);
+  const [selectedAsset, setSelectedAsset] = useState<ScannedAssetDetails | any | null>(null);
+  const [isPassportOpen, setIsPassportOpen] = useState<boolean>(false);
+
+  const handleOpenPassport = (item: AuditHistoryRecord) => {
+    const { assetTitle, assetBrand } = resolveAssetIdentity(item);
+    setSelectedAsset({
+      id: item.assetId,
+      asset_id: item.assetId,
+      qrCode: item.qrCode,
+      tag_number: item.qrCode,
+      name: assetTitle,
+      toolName: assetTitle,
+      brand: assetBrand,
+      modelNumber: item.modelNumber,
+      condition: item.condition,
+      warehouseName: item.warehouseName,
+      warehouseId: item.warehouseId,
+      currentWarehouseId: item.warehouseId,
+      currentAssignedWorker: item.targetWorker,
+      status: item.action === 'CHECKOUT' ? 'checked_out' : item.action === 'MAINTENANCE_FLAG' ? 'maintenance' : 'available',
+    });
+    setIsPassportOpen(true);
+  };
 
   // Direct Tool Action Modal State
   const [actionModalAsset, setActionModalAsset] = useState<ScannedAssetDetails | null>(null);
@@ -1432,7 +1454,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
                     {/* Interactive Open Tool Passport & Lifecycle on Tool QR Tag */}
                     <button
                       type="button"
-                      onClick={() => setSelectedPassportTag(item.qrCode)}
+                      onClick={() => handleOpenPassport(item)}
                       className="flex items-center gap-1 font-mono text-xs text-blue-900 bg-slate-50 hover:bg-blue-100 px-2 py-0.5 rounded border border-slate-200 hover:border-blue-300 transition-colors cursor-pointer group shadow-2xs"
                       title={`לחץ לפתיחת תיק כלי מלא והיסטוריית חיים עבור ${item.qrCode}`}
                       dir="ltr"
@@ -1691,7 +1713,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
 
                   <button
                     type="button"
-                    onClick={() => setSelectedPassportTag(item.qrCode)}
+                    onClick={() => handleOpenPassport(item)}
                     className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-800 border border-slate-200 text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer active:scale-95"
                     title="צפה בדרכון הכלי"
                   >
@@ -2067,9 +2089,12 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
       )}
       {/* DIGITAL TOOL PASSPORT & LIFECYCLE MODAL */}
       <ToolPassportModal
-        isOpen={Boolean(selectedPassportTag)}
-        assetTag={selectedPassportTag}
-        onClose={() => setSelectedPassportTag(null)}
+        isOpen={isPassportOpen}
+        asset={selectedAsset}
+        onClose={() => {
+          setIsPassportOpen(false);
+          setSelectedAsset(null);
+        }}
       />
 
       {/* ASSET ACTION MODAL (TRANSFER, CHECKIN, CHECKOUT, MAINTENANCE) */}

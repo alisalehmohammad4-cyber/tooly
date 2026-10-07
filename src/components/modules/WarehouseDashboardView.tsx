@@ -1234,25 +1234,48 @@ export default function WarehouseDashboardView({
   }, [isStorekeeper, assignedWarehouseId, selectedWarehouseId, handleWarehouseChange]);
 
   // Open tool passport modal by QR / Tag
-  const handleOpenPassport = async (qrCode: string) => {
+  const handleOpenPassport = async (qrCode: string, fallbackItem?: any) => {
     const clean = qrCode?.trim();
-    if (!clean) return;
+    if (!clean && !fallbackItem) return;
+
+    if (fallbackItem) {
+      const itemObj = {
+        id: fallbackItem.assetId || fallbackItem.id || '',
+        asset_id: fallbackItem.assetId || fallbackItem.id || '',
+        qrCode: clean || fallbackItem.qrCode || fallbackItem.tag_number || '',
+        tag_number: clean || fallbackItem.qrCode || fallbackItem.tag_number || '',
+        name: fallbackItem.toolName || fallbackItem.name || 'כלי עבודה',
+        toolName: fallbackItem.toolName || fallbackItem.name || 'כלי עבודה',
+        brand: fallbackItem.brand || 'MAGMA',
+        modelNumber: fallbackItem.modelNumber || fallbackItem.model || '',
+        status: fallbackItem.status || 'available',
+        condition: fallbackItem.condition || 'good',
+        warehouseName: fallbackItem.warehouseName || 'מתקן כללי',
+        currentWarehouseId: fallbackItem.currentWarehouseId || fallbackItem.warehouseId || selectedWarehouseId || '',
+        currentAssignedWorker: fallbackItem.workerName || fallbackItem.currentAssignedWorker || null,
+      };
+      setPassportAsset(itemObj as any);
+      setIsPassportOpen(true);
+      setPassportLookupInput('');
+    }
 
     setIsSearchingPassport(true);
     setPassportLookupFeedback(null);
     try {
       const activeOrgId = currentOrganization?.id || user?.organizationId;
-      const asset = await getAssetDetailsByQr(clean, undefined, activeOrgId);
+      const asset = await getAssetDetailsByQr(clean || fallbackItem?.qrCode, undefined, activeOrgId);
       if (asset) {
         setPassportAsset(asset);
         setIsPassportOpen(true);
         setPassportLookupInput('');
-      } else {
+      } else if (!fallbackItem) {
         setPassportLookupFeedback(`לא נמצא כלי עבודה עבור תג / ברקוד "${clean}".`);
       }
     } catch (err) {
       console.warn('Error fetching tool passport:', err);
-      setPassportLookupFeedback('שגיאה באיתור דרכון הכלי.');
+      if (!fallbackItem) {
+        setPassportLookupFeedback('שגיאה באיתור דרכון הכלי.');
+      }
     } finally {
       setIsSearchingPassport(false);
     }
@@ -1742,7 +1765,7 @@ export default function WarehouseDashboardView({
                               </span>
                               <button
                                 type="button"
-                                onClick={() => handleOpenPassport(tool.qrCode)}
+                                onClick={() => handleOpenPassport(tool.qrCode, tool)}
                                 className="font-mono text-[11px] font-black text-rose-950 hover:underline cursor-pointer flex items-center gap-0.5"
                                 dir="ltr"
                               >
@@ -1798,7 +1821,7 @@ export default function WarehouseDashboardView({
                           )}
                           <button
                             type="button"
-                            onClick={() => handleOpenPassport(tool.qrCode)}
+                            onClick={() => handleOpenPassport(tool.qrCode, tool)}
                             className="py-1 px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 text-[11px] font-bold flex items-center gap-1 mr-auto cursor-pointer"
                           >
                             <FileText className="w-3 h-3 text-blue-600" />
@@ -1888,7 +1911,7 @@ export default function WarehouseDashboardView({
                         <div className="flex items-center gap-1">
                           <button
                             type="button"
-                            onClick={() => handleOpenPassport(loan.qrCode)}
+                            onClick={() => handleOpenPassport(loan.qrCode, loan)}
                             className="px-2 py-1 rounded-lg bg-white hover:bg-slate-100 text-slate-700 text-[11px] font-bold border border-slate-200 cursor-pointer"
                             title="דרכון כלי"
                           >
@@ -1960,7 +1983,7 @@ export default function WarehouseDashboardView({
                         <div className="flex items-center gap-1">
                           <button
                             type="button"
-                            onClick={() => handleOpenPassport(item.qrCode)}
+                            onClick={() => handleOpenPassport(item.qrCode, item)}
                             className="px-2 py-0.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-800 text-[10px] font-bold border border-blue-200 cursor-pointer"
                           >
                             דרכון
@@ -2322,7 +2345,7 @@ export default function WarehouseDashboardView({
                           <div className="flex items-center gap-2">
                             <button
                               type="button"
-                              onClick={() => handleOpenPassport(item.qrCode)}
+                              onClick={() => handleOpenPassport(item.qrCode, item)}
                               className="font-mono text-xs font-black text-indigo-900 bg-white hover:bg-indigo-50 px-2.5 py-0.5 rounded-lg border border-slate-300 hover:border-indigo-400 transition-colors cursor-pointer group flex items-center gap-1 shadow-2xs"
                               title={`לחץ לפתיחת תיק כלי מלא עבור ${item.qrCode}`}
                               dir="ltr"
@@ -2738,7 +2761,7 @@ export default function WarehouseDashboardView({
                           <div className="flex items-center gap-1.5">
                             <button
                               type="button"
-                              onClick={() => handleOpenPassport(req.qrCode)}
+                              onClick={() => handleOpenPassport(req.qrCode, req)}
                               className="font-mono text-[11px] font-black text-indigo-900 bg-white hover:bg-indigo-50 px-2 py-0.5 rounded border border-slate-200 hover:border-indigo-400 transition-colors cursor-pointer group flex items-center gap-1 shadow-2xs"
                               title={`לחץ לפתיחת תיק כלי מלא עבור ${req.qrCode}`}
                               dir="ltr"
@@ -3111,7 +3134,7 @@ export default function WarehouseDashboardView({
                           <div className="flex items-center gap-2">
                             <button
                               type="button"
-                              onClick={() => handleOpenPassport(asset.qrCode)}
+                              onClick={() => handleOpenPassport(asset.qrCode, asset)}
                               className="font-mono text-xs font-black text-amber-950 bg-amber-50 hover:bg-amber-100 px-2.5 py-0.5 rounded-lg border border-amber-300 hover:border-amber-500 transition-colors cursor-pointer group flex items-center gap-1 shadow-2xs"
                               title={`לחץ לפתיחת תיק כלי מלא עבור ${asset.qrCode}`}
                               dir="ltr"

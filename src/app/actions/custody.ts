@@ -15,7 +15,8 @@ import {
   type AssetAccessories,
 } from '@/core/assets/custody.schema';
 import type { AssetReservation, AssetStatus } from '@/types/domain';
-import { appendAuditHistoryEntry } from '@/app/actions/history';
+import { appendAuditHistoryEntry, getAssetTimelineAction, getAssetPassportAction } from '@/app/actions/history';
+export { getAssetTimelineAction, getAssetPassportAction };
 import {
   matchesCodeSuffix,
   pickBestAssetMatch,

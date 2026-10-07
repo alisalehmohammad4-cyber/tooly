@@ -41,6 +41,7 @@ import {
 } from '@/app/actions/custody';
 import {
   getAssetTimelineAction,
+  getAssetPassportAction,
   type AuditHistoryRecord,
   type AuditActionType,
 } from '@/app/actions/history';
@@ -48,12 +49,12 @@ import { useAuth } from '@/context/AuthContext';
 import { useWebNfc } from '@/lib/nfc/useWebNfc';
 import StatusSwitcher from '@/components/modules/StatusSwitcher';
 
-interface ToolPassportModalProps {
-  asset?: ScannedAssetDetails | null;
+export interface ToolPassportModalProps {
+  asset?: ScannedAssetDetails | any | null;
   assetTag?: string | null;
   isOpen: boolean;
   onClose: () => void;
-  onAssetUpdated?: (updated: ScannedAssetDetails) => void;
+  onAssetUpdated?: (updated: any) => void;
 }
 
 function formatEventTimestamp(isoString: string): string {
@@ -70,6 +71,16 @@ function formatEventTimestamp(isoString: string): string {
     });
   } catch {
     return isoString;
+  }
+}
+
+function formatSafeDate(d?: string | null): string {
+  if (!d) return 'לא תועד';
+  try {
+    const parsed = new Date(d);
+    return isNaN(parsed.getTime()) ? 'לא תועד' : parsed.toLocaleDateString('he-IL');
+  } catch {
+    return 'לא תועד';
   }
 }
 
@@ -171,13 +182,15 @@ function renderTimelineActionBadge(action: AuditActionType) {
   }
 }
 
-export default function ToolPassportModal({
+/**
+ * Inner component safely rendering modal contents when asset and isOpen are valid.
+ */
+function ToolPassportModalContent({
   asset,
   assetTag,
-  isOpen,
   onClose,
   onAssetUpdated,
-}: ToolPassportModalProps) {
+}: ToolPassportModalProps & { asset: any }) {
   const { role, user, openPinModal, currentOrganization, isAdmin } = useAuth();
   const { isWriting: isNfcWriting, writeNfcTag } = useWebNfc();
   const [nfcWriteStatus, setNfcWriteStatus] = useState<string | null>(null);
@@ -187,7 +200,7 @@ export default function ToolPassportModal({
 
   // Timeline and Loading State
   const [timeline, setTimeline] = useState<AuditHistoryRecord[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
 
   // Selected Signature Preview Modal
   const [inspectSignatureRecord, setInspectSignatureRecord] = useState<AuditHistoryRecord | null>(null);
@@ -196,7 +209,7 @@ export default function ToolPassportModal({
   const [isCopied, setIsCopied] = useState<boolean>(false);
 
   // Optimistic updates state
-  const [updatedAsset, setUpdatedAsset] = useState<ScannedAssetDetails | null>(null);
+  const [updatedAsset, setUpdatedAsset] = useState<any | null>(null);
 
   // Lockout Form State
   const [showLockInput, setShowLockInput] = useState<boolean>(false);
@@ -223,72 +236,109 @@ export default function ToolPassportModal({
     type: 'success' | 'error';
   } | null>(null);
 
-  // Load Asset Timeline callback with strict try/catch/finally and 3.5s safety timeout
-  const loadTimeline = React.useCallback(async () => {
-    const targetId = asset?.id || updatedAsset?.id || null;
-    const targetTag = (asset as { tag_number?: string })?.tag_number || asset?.qrCode || updatedAsset?.qrCode || assetTag || null;
-    if (!targetId && !targetTag) {
-      setIsLoading(false);
-      setTimeline([]);
-      return;
-    }
+  // Safe field extraction with bulletproof fallbacks so it NEVER throws a TypeError
+  const currentAsset = updatedAsset || asset || null;
+  const assetId = currentAsset?.id || currentAsset?.asset_id || asset?.id || asset?.asset_id || '';
+  const tagNumber =
+    currentAsset?.tag_number ||
+    currentAsset?.tagNumber ||
+    currentAsset?.serial_number ||
+    currentAsset?.qrCode ||
+    asset?.tag_number ||
+    asset?.tagNumber ||
+    asset?.serial_number ||
+    asset?.qrCode ||
+    assetTag ||
+    '';
+  const assetTitle =
+    currentAsset?.name ||
+    currentAsset?.toolName ||
+    currentAsset?.model ||
+    currentAsset?.asset_name ||
+    asset?.name ||
+    asset?.toolName ||
+    asset?.model ||
+    asset?.asset_name ||
+    'כלי עבודה';
+  const assetBrand = currentAsset?.brand || asset?.brand || 'MAGMA';
+  const modelNumber =
+    currentAsset?.modelNumber ||
+    currentAsset?.model_number ||
+    currentAsset?.model ||
+    asset?.modelNumber ||
+    asset?.model_number ||
+    asset?.model ||
+    null;
 
-    // 3.5s safety timeout: if data fetching takes longer, automatically set setIsLoading(false) to prevent perpetual spinning
-    const safetyTimer = setTimeout(() => {
-      console.warn('[ToolPassportModal] Safety timeout reached (3.5s) - stopping timeline spinner');
-      setIsLoading(false);
-    }, 3500);
-
-    try {
+  // Timeline loading useEffect with bulletproof null safety and try/catch
+  useEffect(() => {
+    let isMounted = true;
+    async function fetchTimeline() {
+      if (!assetId && !tagNumber) {
+        setIsLoading(false);
+        return;
+      }
       setIsLoading(true);
-      const res = await getAssetTimelineAction(targetId, targetTag, currentOrganization?.id);
+      try {
+        const res = await getAssetTimelineAction(assetId, tagNumber, currentOrganization?.id);
+        if (isMounted && res && res.success && Array.isArray(res.data)) {
+          setTimeline(res.data);
+          if (res.asset && !updatedAsset) {
+            setUpdatedAsset(res.asset);
+          }
+        } else if (isMounted) {
+          setTimeline([]);
+        }
+      } catch (err) {
+        console.error('Timeline error:', err);
+        if (isMounted) setTimeline([]);
+      } finally {
+        if (isMounted) setIsLoading(false);
+      }
+    }
+    fetchTimeline();
+    return () => {
+      isMounted = false;
+    };
+  }, [assetId, tagNumber, currentOrganization?.id]);
+
+  // Refresh timeline helper
+  const refreshTimeline = async () => {
+    if (!assetId && !tagNumber) return;
+    try {
+      const res = await getAssetTimelineAction(assetId, tagNumber, currentOrganization?.id);
       if (res && res.success && Array.isArray(res.data)) {
         setTimeline(res.data);
-        if (res.asset && !asset && !updatedAsset) {
-          setUpdatedAsset(res.asset);
-        }
-      } else {
-        setTimeline([]);
       }
     } catch (err) {
-      console.error('Failed to load asset timeline:', err);
-      setTimeline([]);
-    } finally {
-      clearTimeout(safetyTimer);
-      setIsLoading(false); // MUST ALWAYS STOP SPINNER
+      console.error('Error refreshing timeline:', err);
     }
-  }, [asset, assetTag, updatedAsset, currentOrganization?.id]);
-
-  useEffect(() => {
-    if (!isOpen) {
-      setIsLoading(false);
-      return;
-    }
-    void loadTimeline();
-  }, [isOpen, loadTimeline]);
-
-  if (!isOpen) return null;
-
-  const currentAsset = updatedAsset || asset || null;
+  };
 
   const isSupervisorOrAdmin = role === 'supervisor' || role === 'admin';
 
   // Warranty status calculation
   let warrantyBadge = { label: 'ללא מידע', color: 'bg-slate-100 text-slate-700 border-slate-200' };
   if (currentAsset?.warrantyUntil) {
-    const wDate = new Date(currentAsset.warrantyUntil);
-    const now = new Date();
-    const diffDays = Math.ceil((wDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-    if (diffDays > 0) {
-      warrantyBadge = {
-        label: `בתוקף (עוד ${diffDays} ימים)`,
-        color: 'bg-emerald-50 text-emerald-800 border-emerald-300',
-      };
-    } else {
-      warrantyBadge = {
-        label: `פג תוקף (לפני ${Math.abs(diffDays)} ימים)`,
-        color: 'bg-rose-50 text-rose-800 border-rose-300',
-      };
+    try {
+      const wDate = new Date(currentAsset.warrantyUntil);
+      const now = new Date();
+      const diffDays = Math.ceil((wDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+      if (!isNaN(diffDays)) {
+        if (diffDays > 0) {
+          warrantyBadge = {
+            label: `בתוקף (עוד ${diffDays} ימים)`,
+            color: 'bg-emerald-50 text-emerald-800 border-emerald-300',
+          };
+        } else {
+          warrantyBadge = {
+            label: `פג תוקף (לפני ${Math.abs(diffDays)} ימים)`,
+            color: 'bg-rose-50 text-rose-800 border-rose-300',
+          };
+        }
+      }
+    } catch {
+      // Fallback default
     }
   }
 
@@ -296,27 +346,40 @@ export default function ToolPassportModal({
   let isInspectionOverdue = false;
   let inspectionBadge = { label: 'לא הוגדרה בדיקה', color: 'bg-slate-100 text-slate-700 border-slate-200' };
   if (currentAsset?.safetyInspectionDue) {
-    const sDate = new Date(currentAsset.safetyInspectionDue);
-    const now = new Date();
-    isInspectionOverdue = sDate.getTime() < now.getTime();
-    if (isInspectionOverdue) {
-      inspectionBadge = {
-        label: `⚠️ נדרשת בדיקת בטיחות מיידית (פג ב-${sDate.toLocaleDateString('he-IL')})`,
-        color: 'bg-red-50 text-red-900 border-red-300 font-black',
-      };
-    } else {
-      inspectionBadge = {
-        label: `בתוקף עד ${sDate.toLocaleDateString('he-IL')}`,
-        color: 'bg-emerald-50 text-emerald-800 border-emerald-300 font-bold',
-      };
+    try {
+      const sDate = new Date(currentAsset.safetyInspectionDue);
+      const now = new Date();
+      if (!isNaN(sDate.getTime())) {
+        isInspectionOverdue = sDate.getTime() < now.getTime();
+        if (isInspectionOverdue) {
+          inspectionBadge = {
+            label: `⚠️ נדרשת בדיקת בטיחות מיידית (פג ב-${sDate.toLocaleDateString('he-IL')})`,
+            color: 'bg-red-50 text-red-900 border-red-300 font-black',
+          };
+        } else {
+          inspectionBadge = {
+            label: `בתוקף עד ${sDate.toLocaleDateString('he-IL')}`,
+            color: 'bg-emerald-50 text-emerald-800 border-emerald-300 font-bold',
+          };
+        }
+      }
+    } catch {
+      // Fallback default
     }
   }
 
   const handleCopyTag = () => {
-    if (!currentAsset?.qrCode) return;
-    navigator.clipboard.writeText(currentAsset.qrCode);
-    setIsCopied(true);
-    setTimeout(() => setIsCopied(false), 2000);
+    const code = tagNumber || currentAsset?.qrCode;
+    if (!code) return;
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        navigator.clipboard.writeText(code);
+        setIsCopied(true);
+        setTimeout(() => setIsCopied(false), 2000);
+      }
+    } catch (err) {
+      console.warn('Could not copy to clipboard:', err);
+    }
   };
 
   // Handle Toggle Lockout
@@ -325,9 +388,10 @@ export default function ToolPassportModal({
       openPinModal();
       return;
     }
-    if (!currentAsset) return;
+    const targetId = assetId || currentAsset?.id;
+    if (!targetId) return;
 
-    if (!currentAsset.isLocked && !showLockInput) {
+    if (!currentAsset?.isLocked && !showLockInput) {
       setShowLockInput(true);
       return;
     }
@@ -335,24 +399,29 @@ export default function ToolPassportModal({
     setIsLockSubmitting(true);
     setFeedbackMessage(null);
 
-    const newLockState = !currentAsset.isLocked;
-    const res = await toggleAssetLockAction(
-      currentAsset.id,
-      newLockState,
-      newLockState ? lockReason.trim() || 'נעילה מנהלתית יזומה' : undefined
-    );
+    const newLockState = !currentAsset?.isLocked;
+    try {
+      const res = await toggleAssetLockAction(
+        targetId,
+        newLockState,
+        newLockState ? lockReason.trim() || 'נעילה מנהלתית יזומה' : undefined
+      );
 
-    setIsLockSubmitting(false);
+      setIsLockSubmitting(false);
 
-    if (res.success) {
-      setUpdatedAsset(res.asset);
-      setShowLockInput(false);
-      setLockReason('');
-      setFeedbackMessage({ text: res.message, type: 'success' });
-      if (onAssetUpdated) onAssetUpdated(res.asset);
-      void loadTimeline();
-    } else {
-      setFeedbackMessage({ text: res.error, type: 'error' });
+      if (res.success) {
+        setUpdatedAsset(res.asset);
+        setShowLockInput(false);
+        setLockReason('');
+        setFeedbackMessage({ text: res.message, type: 'success' });
+        if (onAssetUpdated && res.asset) onAssetUpdated(res.asset);
+        void refreshTimeline();
+      } else {
+        setFeedbackMessage({ text: res.error, type: 'error' });
+      }
+    } catch (err) {
+      setIsLockSubmitting(false);
+      setFeedbackMessage({ text: 'שגיאה בעדכון נעילת הכלי', type: 'error' });
     }
   };
 
@@ -362,7 +431,8 @@ export default function ToolPassportModal({
       openPinModal();
       return;
     }
-    if (!currentAsset) return;
+    const targetId = assetId || currentAsset?.id;
+    if (!targetId) return;
 
     setIsRenewSubmitting(true);
     setFeedbackMessage(null);
@@ -371,21 +441,26 @@ export default function ToolPassportModal({
     nextYear.setFullYear(nextYear.getFullYear() + 1);
     const newInspectionDate = nextYear.toISOString();
 
-    const res = await renewSafetyInspectionAction(
-      currentAsset.id,
-      newInspectionDate,
-      user.fullName
-    );
+    try {
+      const res = await renewSafetyInspectionAction(
+        targetId,
+        newInspectionDate,
+        user?.fullName || 'מנהל מערכת'
+      );
 
-    setIsRenewSubmitting(false);
+      setIsRenewSubmitting(false);
 
-    if (res.success) {
-      setUpdatedAsset(res.asset);
-      setFeedbackMessage({ text: res.message, type: 'success' });
-      if (onAssetUpdated) onAssetUpdated(res.asset);
-      void loadTimeline();
-    } else {
-      setFeedbackMessage({ text: res.error, type: 'error' });
+      if (res.success) {
+        setUpdatedAsset(res.asset);
+        setFeedbackMessage({ text: res.message, type: 'success' });
+        if (onAssetUpdated && res.asset) onAssetUpdated(res.asset);
+        void refreshTimeline();
+      } else {
+        setFeedbackMessage({ text: res.error, type: 'error' });
+      }
+    } catch (err) {
+      setIsRenewSubmitting(false);
+      setFeedbackMessage({ text: 'שגיאה בעדכון בדיקת הבטיחות', type: 'error' });
     }
   };
 
@@ -396,7 +471,8 @@ export default function ToolPassportModal({
       openPinModal();
       return;
     }
-    if (!currentAsset) return;
+    const targetId = assetId || currentAsset?.id;
+    if (!targetId) return;
 
     if (!resProjectName.trim()) {
       setFeedbackMessage({ text: 'נא להזין שם פרויקט או אתר', type: 'error' });
@@ -406,22 +482,27 @@ export default function ToolPassportModal({
     setIsReserveSubmitting(true);
     setFeedbackMessage(null);
 
-    const res = await reserveAssetAction(currentAsset.id, {
-      projectName: resProjectName.trim(),
-      reservedForDate: new Date(resDate).toISOString(),
-      reservedBy: resReservedBy.trim() || user.fullName,
-    });
+    try {
+      const res = await reserveAssetAction(targetId, {
+        projectName: resProjectName.trim(),
+        reservedForDate: new Date(resDate).toISOString(),
+        reservedBy: resReservedBy.trim() || user?.fullName || 'מנהל מערכת',
+      });
 
-    setIsReserveSubmitting(false);
+      setIsReserveSubmitting(false);
 
-    if (res.success) {
-      setUpdatedAsset(res.asset);
-      setShowReserveForm(false);
-      setFeedbackMessage({ text: res.message, type: 'success' });
-      if (onAssetUpdated) onAssetUpdated(res.asset);
-      void loadTimeline();
-    } else {
-      setFeedbackMessage({ text: res.error, type: 'error' });
+      if (res.success) {
+        setUpdatedAsset(res.asset);
+        setShowReserveForm(false);
+        setFeedbackMessage({ text: res.message, type: 'success' });
+        if (onAssetUpdated && res.asset) onAssetUpdated(res.asset);
+        void refreshTimeline();
+      } else {
+        setFeedbackMessage({ text: res.error, type: 'error' });
+      }
+    } catch (err) {
+      setIsReserveSubmitting(false);
+      setFeedbackMessage({ text: 'שגיאה בשמירת שריון', type: 'error' });
     }
   };
 
@@ -431,30 +512,37 @@ export default function ToolPassportModal({
       openPinModal();
       return;
     }
-    if (!currentAsset) return;
+    const targetId = assetId || currentAsset?.id;
+    if (!targetId) return;
 
     setIsReserveSubmitting(true);
     setFeedbackMessage(null);
 
-    const res = await reserveAssetAction(currentAsset.id, null);
+    try {
+      const res = await reserveAssetAction(targetId, null);
 
-    setIsReserveSubmitting(false);
+      setIsReserveSubmitting(false);
 
-    if (res.success) {
-      setUpdatedAsset(res.asset);
-      setFeedbackMessage({ text: res.message, type: 'success' });
-      if (onAssetUpdated) onAssetUpdated(res.asset);
-      void loadTimeline();
-    } else {
-      setFeedbackMessage({ text: res.error, type: 'error' });
+      if (res.success) {
+        setUpdatedAsset(res.asset);
+        setFeedbackMessage({ text: res.message, type: 'success' });
+        if (onAssetUpdated && res.asset) onAssetUpdated(res.asset);
+        void refreshTimeline();
+      } else {
+        setFeedbackMessage({ text: res.error, type: 'error' });
+      }
+    } catch (err) {
+      setIsReserveSubmitting(false);
+      setFeedbackMessage({ text: 'שגיאה בביטול שריון', type: 'error' });
     }
   };
 
   // Handle Write NFC Tag
   const handleWriteNfc = async () => {
-    if (!currentAsset) return;
+    const code = tagNumber || currentAsset?.qrCode;
+    if (!code) return;
     setNfcWriteStatus('ממתין להצמדת תגית NFC לגב המכשיר...');
-    const ok = await writeNfcTag(currentAsset.qrCode, currentOrganization?.slug);
+    const ok = await writeNfcTag(code, currentOrganization?.slug);
     if (ok) {
       setNfcWriteStatus('תגית ה-NFC נצרבה בהצלחה! תומכת כעת ב-iPhone וב-Android.');
       setTimeout(() => setNfcWriteStatus(null), 4000);
@@ -464,27 +552,32 @@ export default function ToolPassportModal({
   };
 
   const kpi = React.useMemo(() => {
-    const totalCheckouts = timeline.filter((r) => r.action === 'CHECKOUT').length;
+    const safeList = Array.isArray(timeline) ? timeline : [];
+    const totalCheckouts = safeList.filter((r) => r.action === 'CHECKOUT').length;
     const sitesVisitedSet = new Set(
-      timeline.map((r) => r.warehouseName || r.warehouseId).filter(Boolean)
+      safeList.map((r) => r.warehouseName || r.warehouseId).filter(Boolean)
     );
     if (currentAsset?.warehouseName) sitesVisitedSet.add(currentAsset.warehouseName);
     const totalSitesVisited = Math.max(1, sitesVisitedSet.size);
 
-    const totalRepairs = timeline.filter(
+    const totalRepairs = safeList.filter(
       (r) => r.action === 'MAINTENANCE_FLAG' || r.action === 'MAINTENANCE' || r.condition === 'needs_repair'
     ).length;
 
     const startDateStr =
       currentAsset?.purchaseDate ||
-      (timeline.length > 0 ? timeline[timeline.length - 1].createdAt : null);
+      (safeList.length > 0 ? safeList[safeList.length - 1]?.createdAt : null);
 
     let totalDaysInService = 1;
     if (startDateStr) {
-      const startMs = new Date(startDateStr).getTime();
-      const nowMs = Date.now();
-      if (!isNaN(startMs) && nowMs > startMs) {
-        totalDaysInService = Math.max(1, Math.floor((nowMs - startMs) / (1000 * 60 * 60 * 24)));
+      try {
+        const startMs = new Date(startDateStr).getTime();
+        const nowMs = Date.now();
+        if (!isNaN(startMs) && nowMs > startMs) {
+          totalDaysInService = Math.max(1, Math.floor((nowMs - startMs) / (1000 * 60 * 60 * 24)));
+        }
+      } catch {
+        totalDaysInService = 1;
       }
     }
 
@@ -520,16 +613,16 @@ export default function ToolPassportModal({
               תיק כלי מלא &bull; דרכון דיגיטלי והיסטוריית חיים
             </span>
 
-            {isSupervisorOrAdmin && currentAsset ? (
+            {isSupervisorOrAdmin && assetId ? (
               <StatusSwitcher
-                assetId={currentAsset.id}
-                currentStatus={currentAsset.status}
+                assetId={assetId}
+                currentStatus={currentAsset?.status || 'available'}
                 variant="dropdown"
                 onStatusChanged={(newSt) => {
                   const updated = { ...currentAsset, status: newSt };
                   setUpdatedAsset(updated);
                   if (onAssetUpdated) onAssetUpdated(updated);
-                  void loadTimeline();
+                  void refreshTimeline();
                 }}
               />
             ) : (
@@ -571,29 +664,31 @@ export default function ToolPassportModal({
           <div className="flex items-start justify-between gap-4">
             <div>
               <h2 id="tool-passport-title" className="text-xl font-black text-white leading-tight">
-                {currentAsset?.toolName || 'טוען פרטי כלי...'}
+                {assetTitle}
               </h2>
 
               <div className="flex flex-wrap items-center gap-2.5 mt-2 text-xs text-slate-300">
-                <span className="font-bold text-white uppercase">{currentAsset?.brand}</span>
-                {currentAsset?.modelNumber && (
+                <span className="font-bold text-white uppercase">{assetBrand}</span>
+                {modelNumber && (
                   <span className="font-mono bg-white/10 px-2 py-0.5 rounded border border-white/20" dir="ltr">
-                    דגם: {currentAsset.modelNumber}
+                    דגם: {modelNumber}
                   </span>
                 )}
 
                 {/* Tag number with copy button */}
-                <button
-                  type="button"
-                  onClick={handleCopyTag}
-                  className="inline-flex items-center gap-1 font-mono text-amber-300 bg-amber-400/10 hover:bg-amber-400/20 px-2 py-0.5 rounded border border-amber-300/30 transition-all cursor-pointer"
-                  title="לחץ להעתקת מספר תג"
-                  dir="ltr"
-                >
-                  <QrCode className="w-3.5 h-3.5 text-amber-400" />
-                  <span className="font-bold">{currentAsset?.qrCode || assetTag}</span>
-                  {isCopied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3 text-amber-400" />}
-                </button>
+                {tagNumber && (
+                  <button
+                    type="button"
+                    onClick={handleCopyTag}
+                    className="inline-flex items-center gap-1 font-mono text-amber-300 bg-amber-400/10 hover:bg-amber-400/20 px-2 py-0.5 rounded border border-amber-300/30 transition-all cursor-pointer"
+                    title="לחץ להעתקת מספר תג"
+                    dir="ltr"
+                  >
+                    <QrCode className="w-3.5 h-3.5 text-amber-400" />
+                    <span className="font-bold">{tagNumber}</span>
+                    {isCopied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3 text-amber-400" />}
+                  </button>
+                )}
               </div>
             </div>
 
@@ -616,7 +711,9 @@ export default function ToolPassportModal({
             <div className="flex items-center gap-1.5 text-slate-300">
               <Building2 className="w-3.5 h-3.5 text-indigo-400" />
               <span>מחסן / אתר נוכחי:</span>
-              <strong className="text-white">{currentAsset?.warehouseName || 'מחסן ראשי'}</strong>
+              <strong className="text-white">
+                {currentAsset?.warehouseName || currentAsset?.warehouse_name || 'מחסן ראשי'}
+              </strong>
             </div>
 
             {currentAsset?.currentAssignedWorker && (
@@ -824,7 +921,7 @@ export default function ToolPassportModal({
               )}
             </div>
           ) : (
-            /* TAB 2: SPECS, SAFETY, LOCKOUT & RESERVATION (Existing Management Features) */
+            /* TAB 2: SPECS, SAFETY, LOCKOUT & RESERVATION */
             <div className="space-y-4 text-xs">
               {/* NFC TAG BINDING */}
               <div className="p-3.5 rounded-2xl bg-blue-50/70 border border-blue-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
@@ -886,14 +983,14 @@ export default function ToolPassportModal({
                   <div className="p-2.5 rounded-xl bg-white border border-blue-200 shadow-2xs">
                     <span className="text-slate-500 font-bold block mb-0.5">מספר הזמנה (PO):</span>
                     <span className="text-sm font-mono font-black text-blue-950" dir="ltr">
-                      {currentAsset?.poNumber || (currentAsset as any)?.po_number || 'לא צוין'}
+                      {currentAsset?.poNumber || currentAsset?.po_number || currentAsset?.orderNumber || 'לא צוין'}
                     </span>
                   </div>
 
                   <div className="p-2.5 rounded-xl bg-white border border-blue-200 shadow-2xs">
                     <span className="text-slate-500 font-bold block mb-0.5">מיקום הסיפוק:</span>
                     <span className="text-sm font-bold text-slate-900">
-                      {currentAsset?.supplyLocation || (currentAsset as any)?.supply_location || 'לא צוין'}
+                      {currentAsset?.supplyLocation || currentAsset?.supply_location || 'לא צוין'}
                     </span>
                   </div>
                 </div>
@@ -919,9 +1016,7 @@ export default function ToolPassportModal({
                   <div className={`p-2.5 rounded-xl bg-white border border-slate-200 ${!isAdmin || !(currentAsset?.purchase_cost || currentAsset?.purchaseCost) ? 'col-span-2' : ''}`}>
                     <span className="text-slate-500 font-bold block mb-0.5">תאריך רכישה:</span>
                     <span className="text-sm font-bold text-slate-900">
-                      {currentAsset?.purchaseDate
-                        ? new Date(currentAsset.purchaseDate).toLocaleDateString('he-IL')
-                        : 'לא תועד'}
+                      {formatSafeDate(currentAsset?.purchaseDate)}
                     </span>
                   </div>
                 </div>
@@ -930,9 +1025,7 @@ export default function ToolPassportModal({
                   <div>
                     <span className="text-slate-500 font-bold text-xs block">תוקף אחריות:</span>
                     <span className="text-xs font-semibold text-slate-800">
-                      {currentAsset?.warrantyUntil
-                        ? new Date(currentAsset.warrantyUntil).toLocaleDateString('he-IL')
-                        : 'ללא תאריך'}
+                      {formatSafeDate(currentAsset?.warrantyUntil)}
                     </span>
                   </div>
                   <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full border ${warrantyBadge.color}`}>
@@ -1013,20 +1106,20 @@ export default function ToolPassportModal({
                   </div>
                 )}
 
-                {isSupervisorOrAdmin && currentAsset && (
+                {isSupervisorOrAdmin && (
                   <button
                     type="button"
                     onClick={handleToggleLock}
                     disabled={isLockSubmitting}
                     className={`w-full min-h-[40px] rounded-xl text-xs font-black flex items-center justify-center gap-1.5 shadow-2xs active:scale-95 transition-all cursor-pointer disabled:opacity-60 ${
-                      currentAsset.isLocked
+                      currentAsset?.isLocked
                         ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
                         : 'bg-red-50 hover:bg-red-100 text-red-800 border border-red-300'
                     }`}
                   >
                     {isLockSubmitting ? (
                       <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : currentAsset.isLocked ? (
+                    ) : currentAsset?.isLocked ? (
                       <>
                         <Unlock className="w-4 h-4" />
                         <span>שחרר כלי לשימוש</span>
@@ -1068,7 +1161,7 @@ export default function ToolPassportModal({
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-slate-500 font-bold">תאריך יעד:</span>
                       <span className="font-bold text-blue-900">
-                        {new Date(currentAsset.reservation.reservedForDate).toLocaleDateString('he-IL')}
+                        {formatSafeDate(currentAsset.reservation.reservedForDate)}
                       </span>
                     </div>
                     {isSupervisorOrAdmin && (
@@ -1222,3 +1315,45 @@ export default function ToolPassportModal({
     </div>
   );
 }
+
+/**
+ * ToolPassportModal component with bulletproof null safety:
+ * If !asset or isOpen === false, return null immediately.
+ */
+export default function ToolPassportModal({
+  asset,
+  assetTag,
+  isOpen,
+  onClose,
+  onAssetUpdated,
+}: ToolPassportModalProps) {
+  // If asset is null/undefined and no tag is provided, or modal is closed, return null
+  const resolvedAsset =
+    asset ||
+    (assetTag
+      ? {
+          id: '',
+          qrCode: assetTag,
+          tag_number: assetTag,
+          name: 'כלי עבודה',
+          toolName: 'כלי עבודה',
+          brand: 'MAGMA',
+        }
+      : null);
+
+  if (!resolvedAsset || isOpen === false) {
+    return null;
+  }
+
+  return (
+    <ToolPassportModalContent
+      asset={resolvedAsset}
+      assetTag={assetTag}
+      isOpen={isOpen}
+      onClose={onClose}
+      onAssetUpdated={onAssetUpdated}
+    />
+  );
+}
+
+export { ToolPassportModal };

@@ -1105,3 +1105,4 @@ export async function getAssetTimelineAction(
   }
 }
 
+export const getAssetPassportAction = getAssetTimelineAction;

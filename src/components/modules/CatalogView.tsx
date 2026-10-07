@@ -851,9 +851,12 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
                         <button
                           type="button"
                           onClick={() => {
-                            setPassportAsset({
+                            (setPassportAsset as (val: any) => void)({
                               id: asset.id,
+                              asset_id: asset.id,
                               qrCode: asset.qrCode,
+                              tag_number: asset.qrCode,
+                              name: asset.toolName,
                               status: asset.status,
                               condition: asset.condition,
                               currentAssignedWorker: asset.currentAssignedWorker,
