@@ -178,6 +178,11 @@ interface JoinedAssetData {
   reservation?: AssetReservation | null;
   po_number?: string | null;
   supply_location?: string | null;
+  name?: string | null;
+  brand?: string | null;
+  model_number?: string | null;
+  model?: string | null;
+  tag_number?: string | null;
   tool_models: {
     id: string;
     name: string;
@@ -202,9 +207,9 @@ function mapJoinedRowToScannedAsset(row: JoinedAssetData): ScannedAssetDetails {
     currentWarehouseId: row.current_warehouse_id,
     warehouseName: row.warehouses?.name || 'Assigned Facility',
     warehouseCode: row.warehouses?.code || 'FAC',
-    toolName: row.tool_models?.name || 'Registered Tool',
-    brand: row.tool_models?.brand || 'Standard',
-    modelNumber: row.tool_models?.model_number || null,
+    toolName: row.name || row.tool_models?.name || 'כלי עבודה',
+    brand: row.brand || row.tool_models?.brand || 'כלי',
+    modelNumber: row.model_number || row.model || row.tool_models?.model_number || null,
     version: row.version || 1,
     purchaseDate: row.purchase_date,
     purchaseCost: row.purchase_cost,
@@ -302,6 +307,10 @@ export async function getAssetDetailsByQr(
           reservation,
           po_number,
           supply_location,
+          name,
+          brand,
+          model_number,
+          tag_number,
           tool_models:tool_model_id (
             id,
             name,
@@ -348,6 +357,10 @@ export async function getAssetDetailsByQr(
           reservation,
           po_number,
           supply_location,
+          name,
+          brand,
+          model_number,
+          tag_number,
           tool_models:tool_model_id (
             id,
             name,
@@ -722,7 +735,7 @@ export async function bulkCheckoutAssetAction(
           warehouseName: (whObj.name as string) || "מחסן ראשי",
           warehouseCode: (whObj.code as string) || 'CDB-01',
           toolName: (itemObj.name as string) || (tmObj.name as string) || 'כלי שנופק',
-          brand: (itemObj.brand as string) || (tmObj.brand as string) || 'Standard',
+          brand: (itemObj.brand as string) || (tmObj.brand as string) || 'כלי',
           modelNumber: (itemObj.model_number as string) || (tmObj.model_number as string) || null,
           version: nextVersion,
           expectedReturnDate,
@@ -784,7 +797,7 @@ export async function bulkCheckoutAssetAction(
         warehouseName: "מחסן מרכזי - אגף א'",
         warehouseCode: 'CDB-01',
         toolName: 'כלי שנופק',
-        brand: 'Standard',
+        brand: 'כלי',
         modelNumber: null,
         version: 2,
         expectedReturnDate,
@@ -1145,7 +1158,7 @@ export async function checkinAssetAction(
     warehouseName: "מחסן מרכזי - אגף א'",
     warehouseCode: 'CDB-01',
     toolName: 'כלי שהוחזר',
-    brand: 'Standard',
+    brand: 'כלי',
     modelNumber: null,
     version: 2,
   };
@@ -1634,9 +1647,9 @@ export async function transferAssetAction(
         currentWarehouseId: targetWarehouseUuid,
         warehouseName: targetSiteName,
         warehouseCode: targetWh.name,
-        toolName: tm?.name || 'כלי עבודה',
-        brand: tm?.brand || 'Standard',
-        modelNumber: tm?.model_number || null,
+        toolName: (currentAsset as unknown as { name?: string }).name || tm?.name || 'כלי עבודה',
+        brand: (currentAsset as unknown as { brand?: string }).brand || tm?.brand || 'כלי',
+        modelNumber: (currentAsset as unknown as { model_number?: string }).model_number || tm?.model_number || null,
         version: nextVersion,
       };
 
@@ -1792,7 +1805,7 @@ export async function transferAssetAction(
       warehouseName: targetWhMeta.name,
       warehouseCode: targetWhMeta.code,
       toolName: mockAsset?.toolName || 'כלי עבודה',
-      brand: mockAsset?.brand || 'Standard',
+      brand: mockAsset?.brand || 'כלי',
       modelNumber: mockAsset?.modelNumber || null,
       version: (mockAsset?.version || 1) + 1,
     },
@@ -2258,7 +2271,7 @@ export async function reportAssetDamageAction(
       warehouseName: 'מחסן מרכזי - תל אביב',
       warehouseCode: 'TLV-01',
       toolName: 'כלי בבדיקה',
-      brand: 'Standard',
+      brand: 'כלי',
       modelNumber: null,
       version: 2,
     },
@@ -2396,7 +2409,7 @@ export async function retireAssetAction(
       warehouseName: 'מחסן מרכזי - תל אביב',
       warehouseCode: 'TLV-01',
       toolName: 'כלי שהושבת',
-      brand: 'Standard',
+      brand: 'כלי',
       modelNumber: null,
       version: 2,
     },
@@ -2440,7 +2453,7 @@ export async function dispatchAssetWithSignatureAction(data: {
   // 1. Verify asset belongs to active tenant and is not locked
   let assetName = 'כלי עבודה';
   let qrCode = '';
-  let brand = 'Standard';
+  let brand = 'כלי';
   let modelNumber: string | null = null;
   let condition: 'excellent' | 'good' | 'needs_repair' | 'retired' = 'good';
   let currentAssetWhId: string | null = null;
@@ -2486,7 +2499,7 @@ export async function dispatchAssetWithSignatureAction(data: {
       const tm = (Array.isArray(tmRaw) ? tmRaw[0] : tmRaw) as Record<string, unknown> || {};
       assetName = (dbAsset.name as string) || (tm.name as string) || 'כלי עבודה';
       qrCode = (dbAsset.qr_code as string) || '';
-      brand = (dbAsset.brand as string) || (tm.brand as string) || 'Standard';
+      brand = (dbAsset.brand as string) || (tm.brand as string) || 'כלי';
       modelNumber = (dbAsset.model_number as string) || (tm.model_number as string) || null;
       condition = (dbAsset.condition as 'excellent' | 'good' | 'needs_repair' | 'retired') || 'good';
     } catch (err) {

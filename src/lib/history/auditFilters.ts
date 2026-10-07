@@ -52,9 +52,14 @@ export interface AuditHistoryRecord {
   currentWarehouseCode?: string | null;
   sourceWarehouseName?: string | null;
   targetWarehouseName?: string | null;
+  asset_name?: string | null;
   assets?: {
     id: string;
-    qr_code: string;
+    name?: string | null;
+    model?: string | null;
+    model_number?: string | null;
+    brand?: string | null;
+    qr_code?: string;
     tag_number?: string | null;
     current_warehouse_id?: string | null;
     current_warehouse?: {
@@ -181,9 +186,16 @@ export function matchesSmartSearch(record: AuditHistoryRecord, query?: string): 
   if (record.notes && record.notes.toLowerCase().includes(q)) return true;
 
   // 5. Tool Model, Name & Brand
+  const rawAsset = Array.isArray(record.assets) ? record.assets[0] : record.assets;
   if (record.toolName && record.toolName.toLowerCase().includes(q)) return true;
+  if (record.asset_name && record.asset_name.toLowerCase().includes(q)) return true;
+  if (rawAsset?.name && rawAsset.name.toLowerCase().includes(q)) return true;
   if (record.brand && record.brand.toLowerCase().includes(q)) return true;
+  if (rawAsset?.brand && rawAsset.brand.toLowerCase().includes(q)) return true;
   if (record.modelNumber && record.modelNumber.toLowerCase().includes(q)) return true;
+  if (rawAsset?.model && rawAsset.model.toLowerCase().includes(q)) return true;
+  if (rawAsset?.model_number && rawAsset.model_number.toLowerCase().includes(q)) return true;
+  if (rawAsset?.tag_number && rawAsset.tag_number.toLowerCase().includes(q)) return true;
 
   // 6. Facility / Warehouse name & code
   if (record.warehouseName && record.warehouseName.toLowerCase().includes(q)) return true;

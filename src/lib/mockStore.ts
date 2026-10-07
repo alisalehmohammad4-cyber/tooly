@@ -43251,9 +43251,12 @@ export function getMockAuditHistory(filters?: AuditHistoryFilters, organizationI
       currentWarehouseId: liveWhId,
       currentWarehouseCode: liveWhCode,
       sourceWarehouseName: sourceWhName,
-      targetWarehouseName: targetWhName,
+      asset_name: liveAsset?.toolName || rec.toolName || 'כלי עבודה',
       assets: {
         id: rec.assetId,
+        name: liveAsset?.toolName || rec.toolName || 'כלי עבודה',
+        brand: liveAsset?.brand || rec.brand || 'כלי',
+        model: liveAsset?.modelNumber || rec.modelNumber || null,
         qr_code: rec.qrCode,
         tag_number: liveAsset?.tagNumber || null,
         current_warehouse_id: liveWhId,

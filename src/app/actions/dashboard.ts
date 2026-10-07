@@ -377,7 +377,7 @@ export async function getPlantManagerAnalytics(
           overdueList.push({
             assetId: row.id as string,
             toolName,
-            brand: (row.brand as string) || (model.brand as string) || 'Standard',
+            brand: (row.brand as string) || (model.brand as string) || 'כלי',
             modelNumber: (row.model_number as string) || (model.model_number as string) || null,
             qrCode: row.qr_code as string,
             workerName: (row.current_assigned_worker as string) || 'עובד שטח',
@@ -655,7 +655,7 @@ export async function getStorekeeperOperations(
         activeLoans.push({
           assetId: assetIdStr,
           toolName: (row.name as string) || (model.name as string) || 'כלי עבודה',
-          brand: (row.brand as string) || (model.brand as string) || 'Standard',
+          brand: (row.brand as string) || (model.brand as string) || 'כלי',
           modelNumber: (row.model_number as string) || (model.model_number as string) || null,
           qrCode: row.qr_code as string,
           workerName: (row.current_assigned_worker as string) || 'עובד שטח',
@@ -672,7 +672,7 @@ export async function getStorekeeperOperations(
             overdueAssets.push({
               assetId: assetIdStr,
               toolName: (row.name as string) || (model.name as string) || 'כלי עבודה',
-              brand: (row.brand as string) || (model.brand as string) || 'Standard',
+              brand: (row.brand as string) || (model.brand as string) || 'כלי',
               modelNumber: (row.model_number as string) || (model.model_number as string) || null,
               qrCode: row.qr_code as string,
               workerName: (row.current_assigned_worker as string) || 'עובד שטח',
@@ -686,7 +686,7 @@ export async function getStorekeeperOperations(
             returnsDueToday.push({
               assetId: assetIdStr,
               toolName: (row.name as string) || (model.name as string) || 'כלי עבודה',
-              brand: (row.brand as string) || (model.brand as string) || 'Standard',
+              brand: (row.brand as string) || (model.brand as string) || 'כלי',
               modelNumber: (row.model_number as string) || (model.model_number as string) || null,
               qrCode: row.qr_code as string,
               workerName: (row.current_assigned_worker as string) || 'עובד שטח',

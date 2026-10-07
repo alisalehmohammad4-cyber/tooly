@@ -55,30 +55,60 @@ interface RawLedgerRow {
     id: string;
     name: string;
     code: string;
-  } | null;
-  assets: {
+  } | Array<{ id: string; name: string; code: string }> | null;
+  assets?: {
     id: string;
-    qr_code: string;
+    name?: string | null;
+    model?: string | null;
+    model_number?: string | null;
+    brand?: string | null;
     tag_number?: string | null;
-    condition: AuditHistoryRecord['condition'];
-    current_warehouse_id: string;
+    qr_code?: string;
+    condition?: AuditHistoryRecord['condition'];
+    current_warehouse_id?: string | null;
     organization_id?: string | null;
-    tool_models: {
-      name: string;
-      brand: string;
-      model_number: string | null;
-    } | null;
+    tool_models?: {
+      name?: string | null;
+      brand?: string | null;
+      model_number?: string | null;
+    } | Array<{ name?: string | null; brand?: string | null; model_number?: string | null }> | null;
     current_warehouse?: {
       id: string;
       name: string;
       code: string;
-    } | null;
+    } | Array<{ id: string; name: string; code: string }> | null;
     warehouses?: {
       id: string;
       name: string;
       code: string;
-    } | null;
-  } | null;
+    } | Array<{ id: string; name: string; code: string }> | null;
+  } | Array<{
+    id: string;
+    name?: string | null;
+    model?: string | null;
+    model_number?: string | null;
+    brand?: string | null;
+    tag_number?: string | null;
+    qr_code?: string;
+    condition?: AuditHistoryRecord['condition'];
+    current_warehouse_id?: string | null;
+    organization_id?: string | null;
+    tool_models?: {
+      name?: string | null;
+      brand?: string | null;
+      model_number?: string | null;
+    } | Array<{ name?: string | null; brand?: string | null; model_number?: string | null }> | null;
+    current_warehouse?: {
+      id: string;
+      name: string;
+      code: string;
+    } | Array<{ id: string; name: string; code: string }> | null;
+    warehouses?: {
+      id: string;
+      name: string;
+      code: string;
+    } | Array<{ id: string; name: string; code: string }> | null;
+  }> | null;
 }
 
 /**
@@ -133,8 +163,12 @@ export async function getAuditHistory(
         ),
         assets:asset_id (
           id,
-          qr_code,
+          name,
+          model:model_number,
+          model_number,
+          brand,
           tag_number,
+          qr_code,
           condition,
           current_warehouse_id,
           organization_id,
@@ -144,6 +178,11 @@ export async function getAuditHistory(
             model_number
           ),
           current_warehouse:current_warehouse_id (
+            id,
+            name,
+            code
+          ),
+          warehouses:current_warehouse_id (
             id,
             name,
             code
@@ -244,16 +283,25 @@ export async function getAuditHistory(
         else if (raw === 'SAFETY_INSPECTION') normalizedAction = 'SAFETY_INSPECTION';
         else if (raw === 'RETIRE' || raw === 'DECOMMISSION') normalizedAction = 'RETIRE';
 
-        const liveWh = row.assets?.current_warehouse || row.assets?.warehouses;
-        const liveWhName = liveWh?.name || row.warehouses?.name || 'מתקן';
-        const liveWhId = row.assets?.current_warehouse_id || row.warehouse_id || null;
-        const liveWhCode = liveWh?.code || row.warehouses?.code || 'FAC';
+        const rawAsset = Array.isArray(row.assets) ? row.assets[0] : row.assets;
+        const rawToolModel = Array.isArray(rawAsset?.tool_models) ? rawAsset.tool_models[0] : rawAsset?.tool_models;
+        const rawWarehouse = Array.isArray(row.warehouses) ? row.warehouses[0] : row.warehouses;
+        const rawCurrentWh = Array.isArray(rawAsset?.current_warehouse)
+          ? rawAsset.current_warehouse[0]
+          : Array.isArray(rawAsset?.warehouses)
+          ? rawAsset.warehouses[0]
+          : rawAsset?.current_warehouse || rawAsset?.warehouses;
+
+        const liveWh = rawCurrentWh;
+        const liveWhName = liveWh?.name || rawWarehouse?.name || 'מתקן';
+        const liveWhId = rawAsset?.current_warehouse_id || row.warehouse_id || null;
+        const liveWhCode = liveWh?.code || rawWarehouse?.code || 'FAC';
 
         // Resolve transfer route
-        let sourceWhName = row.warehouses?.name || 'מחסן מקור';
+        let sourceWhName = rawWarehouse?.name || 'מחסן מקור';
         let targetWhName = row.target_site_name || liveWhName;
 
-        const matchedRoute = row.assets?.id ? transferRouteMap[row.assets.id] : null;
+        const matchedRoute = rawAsset?.id ? transferRouteMap[rawAsset.id] : null;
         if (matchedRoute?.sourceName) sourceWhName = matchedRoute.sourceName;
         if (matchedRoute?.targetName) targetWhName = matchedRoute.targetName;
 
@@ -265,18 +313,33 @@ export async function getAuditHistory(
           if (sourceMatch && sourceMatch[1]) sourceWhName = sourceMatch[1].trim();
         }
 
+        // Resolve accurate tool title
+        const assetTitle = 
+          rawAsset?.name || 
+          rawAsset?.model || 
+          rawAsset?.model_number || 
+          rawToolModel?.name || 
+          (row.notes?.match(/ציוד\s+([^(]+)/)?.[1]?.trim()) || 
+          'כלי עבודה';
+
+        // Resolve accurate brand
+        const assetBrand = rawAsset?.brand || rawToolModel?.brand || 'כלי';
+        const modelNumber = rawAsset?.model || rawAsset?.model_number || rawToolModel?.model_number || null;
+        const qrCode = rawAsset?.qr_code || rawAsset?.tag_number || 'N/A';
+
         return {
           id: row.id,
-          assetId: row.assets?.id || '',
-          qrCode: row.assets?.qr_code || 'N/A',
-          toolName: row.assets?.tool_models?.name || 'Tool Asset',
-          brand: row.assets?.tool_models?.brand || 'Standard',
-          modelNumber: row.assets?.tool_models?.model_number || null,
+          assetId: rawAsset?.id || '',
+          qrCode,
+          toolName: assetTitle,
+          asset_name: assetTitle,
+          brand: assetBrand,
+          modelNumber,
           action: normalizedAction,
           performedBy: row.performed_by || 'System',
           targetWorker: row.target_worker || row.worker_name || (normalizedAction === 'CHECKOUT' ? row.performed_by : null),
           workerPhone: row.worker_phone || null,
-          condition: (row.condition_at_return as AuditHistoryRecord['condition']) || row.assets?.condition || 'good',
+          condition: (row.condition_at_return as AuditHistoryRecord['condition']) || rawAsset?.condition || 'good',
           warehouseId: liveWhId,
           warehouseName: liveWhName,
           warehouseCode: liveWhCode,
@@ -285,12 +348,15 @@ export async function getAuditHistory(
           currentWarehouseCode: liveWhCode,
           sourceWarehouseName: sourceWhName,
           targetWarehouseName: targetWhName,
-          assets: row.assets
+          assets: rawAsset
             ? {
-                id: row.assets.id,
-                qr_code: row.assets.qr_code,
-                tag_number: row.assets.tag_number || null,
-                current_warehouse_id: row.assets.current_warehouse_id,
+                id: rawAsset.id,
+                name: rawAsset.name || assetTitle,
+                model: rawAsset.model || rawAsset.model_number || null,
+                brand: rawAsset.brand || assetBrand,
+                qr_code: rawAsset.qr_code || qrCode,
+                tag_number: rawAsset.tag_number || null,
+                current_warehouse_id: rawAsset.current_warehouse_id,
                 current_warehouse: liveWh
                   ? {
                       id: liveWh.id,
@@ -300,7 +366,7 @@ export async function getAuditHistory(
                   : null,
               }
             : null,
-          warehouses: row.warehouses || (liveWh ? { id: liveWh.id, name: liveWh.name, code: liveWh.code } : null),
+          warehouses: rawWarehouse || (liveWh ? { id: liveWh.id, name: liveWh.name, code: liveWh.code } : null),
           source_warehouse: {
             name: sourceWhName,
           },
@@ -417,6 +483,11 @@ export async function getToolLifecycleHistory(
           organization_id,
           assets:asset_id (
             id,
+            name,
+            model:model_number,
+            model_number,
+            brand,
+            tag_number,
             qr_code,
             condition,
             current_warehouse_id,
@@ -454,21 +525,38 @@ export async function getToolLifecycleHistory(
           else if (raw === 'SAFETY_INSPECTION') normalizedAction = 'SAFETY_INSPECTION';
           else if (raw === 'RETIRE' || raw === 'DECOMMISSION') normalizedAction = 'RETIRE';
 
+          const rawAsset = Array.isArray(row.assets) ? row.assets[0] : row.assets;
+          const rawToolModel = Array.isArray(rawAsset?.tool_models) ? rawAsset.tool_models[0] : rawAsset?.tool_models;
+
+          const toolTitle = 
+            rawAsset?.name || 
+            rawAsset?.model || 
+            rawAsset?.model_number || 
+            rawToolModel?.name || 
+            asset.toolName || 
+            (row.notes?.match(/ציוד\s+([^(]+)/)?.[1]?.trim()) || 
+            'כלי עבודה';
+
+          const assetBrand = rawAsset?.brand || rawToolModel?.brand || asset.brand || 'כלי';
+          const modelNumber = rawAsset?.model || rawAsset?.model_number || rawToolModel?.model_number || asset.modelNumber || null;
+          const qrCode = rawAsset?.qr_code || rawAsset?.tag_number || asset.qrCode || 'N/A';
+
           return {
             id: row.id,
-            assetId: row.assets?.id || asset.id,
-            qrCode: row.assets?.qr_code || asset.qrCode,
-            toolName: row.assets?.tool_models?.name || asset.toolName,
-            brand: row.assets?.tool_models?.brand || asset.brand,
-            modelNumber: row.assets?.tool_models?.model_number || asset.modelNumber || null,
+            assetId: rawAsset?.id || asset.id,
+            qrCode,
+            toolName: toolTitle,
+            asset_name: toolTitle,
+            brand: assetBrand,
+            modelNumber,
             action: normalizedAction,
             performedBy: row.performed_by || 'System',
             targetWorker: row.target_worker || row.worker_name || (normalizedAction === 'CHECKOUT' ? row.performed_by : null),
             workerPhone: row.worker_phone || null,
-            condition: (row.condition_at_return as AuditHistoryRecord['condition']) || row.assets?.condition || 'good',
-            warehouseId: row.assets?.current_warehouse_id || row.warehouse_id || null,
-            warehouseName: row.target_site_name || row.assets?.warehouses?.name || asset.warehouseName,
-            warehouseCode: row.assets?.warehouses?.code || asset.warehouseCode,
+            condition: (row.condition_at_return as AuditHistoryRecord['condition']) || rawAsset?.condition || 'good',
+            warehouseId: rawAsset?.current_warehouse_id || row.warehouse_id || null,
+            warehouseName: row.target_site_name || (Array.isArray(rawAsset?.warehouses) ? rawAsset?.warehouses[0]?.name : rawAsset?.warehouses?.name) || asset.warehouseName,
+            warehouseCode: (Array.isArray(rawAsset?.warehouses) ? rawAsset?.warehouses[0]?.code : rawAsset?.warehouses?.code) || asset.warehouseCode,
             notes: row.notes,
             createdAt: row.created_at,
             organizationId: row.organization_id || orgId,
@@ -653,6 +741,11 @@ export async function getFleetNotesFeedAction(
         organization_id,
         assets:asset_id (
           id,
+          name,
+          model:model_number,
+          model_number,
+          brand,
+          tag_number,
           qr_code,
           current_warehouse_id,
           tool_models:tool_model_id (
@@ -702,26 +795,76 @@ export async function getFleetNotesFeedAction(
         asset_id?: string | null;
         assets?: {
           id?: string;
+          name?: string | null;
+          model?: string | null;
+          model_number?: string | null;
+          brand?: string | null;
+          tag_number?: string | null;
           qr_code?: string;
           tool_models?: {
             name?: string;
             brand?: string;
             model_number?: string | null;
-          } | null;
+          } | Array<{
+            name?: string;
+            brand?: string;
+            model_number?: string | null;
+          }> | null;
           warehouses?: {
             id?: string;
             name?: string;
             code?: string;
-          } | null;
-        } | null;
+          } | Array<{
+            id?: string;
+            name?: string;
+            code?: string;
+          }> | null;
+        } | Array<{
+          id?: string;
+          name?: string | null;
+          model?: string | null;
+          model_number?: string | null;
+          brand?: string | null;
+          tag_number?: string | null;
+          qr_code?: string;
+          tool_models?: {
+            name?: string;
+            brand?: string;
+            model_number?: string | null;
+          } | Array<{
+            name?: string;
+            brand?: string;
+            model_number?: string | null;
+          }> | null;
+          warehouses?: {
+            id?: string;
+            name?: string;
+            code?: string;
+          } | Array<{
+            id?: string;
+            name?: string;
+            code?: string;
+          }> | null;
+        }> | null;
       }
 
       let mappedNotes: FleetNoteItem[] = (rawRows as unknown as FleetNoteDbRow[])
         .filter((r) => r.notes && typeof r.notes === 'string' && r.notes.trim().length > 0)
         .map((row) => {
-          const assetObj = row.assets || {};
-          const toolModel = assetObj.tool_models || {};
-          const warehouse = assetObj.warehouses || {};
+          const rawAssetObj = Array.isArray(row.assets) ? row.assets[0] : row.assets;
+          const assetObj = rawAssetObj || {};
+          const toolModel = (Array.isArray(assetObj.tool_models) ? assetObj.tool_models[0] : assetObj.tool_models) || {};
+          const warehouse = (Array.isArray(assetObj.warehouses) ? assetObj.warehouses[0] : assetObj.warehouses) || {};
+
+          const toolTitle = 
+            assetObj.name || 
+            assetObj.model || 
+            assetObj.model_number || 
+            toolModel.name || 
+            (row.notes?.match(/ציוד\s+([^(]+)/)?.[1]?.trim()) || 
+            'כלי עבודה';
+
+          const assetBrand = assetObj.brand || toolModel.brand || 'כלי';
 
           return {
             id: row.id,
@@ -732,11 +875,11 @@ export async function getFleetNotesFeedAction(
             workerPhone: row.worker_phone || null,
             performedBy: row.performed_by || 'מחסנאי',
             assetId: row.asset_id || assetObj.id || '',
-            qrCode: assetObj.qr_code || 'TAG-UNKNOWN',
+            qrCode: assetObj.qr_code || assetObj.tag_number || 'TAG-UNKNOWN',
             serialNumber: null,
-            toolName: toolModel.name || 'כלי עבודה',
-            brand: toolModel.brand || 'General',
-            modelNumber: toolModel.model_number || null,
+            toolName: toolTitle,
+            brand: assetBrand,
+            modelNumber: assetObj.model || assetObj.model_number || toolModel.model_number || null,
             warehouseId: warehouse.id || undefined,
             warehouseName: warehouse.name || 'מחסן שטח',
             warehouseCode: warehouse.code || 'WH',

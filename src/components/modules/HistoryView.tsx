@@ -54,6 +54,60 @@ import { useRouter } from 'next/navigation';
 
 const BuildingOfficeIcon = Building2;
 
+/**
+ * Resolves authentic tool name and brand across joined asset, model, and movement notes.
+ * Eradicates generic placeholders "Tool Asset" and "STANDARD".
+ */
+export function resolveAssetIdentity(record: {
+  toolName?: string | null;
+  asset_name?: string | null;
+  brand?: string | null;
+  notes?: string | null;
+  assets?: {
+    name?: string | null;
+    model?: string | null;
+    model_number?: string | null;
+    brand?: string | null;
+  } | Array<{
+    name?: string | null;
+    model?: string | null;
+    model_number?: string | null;
+    brand?: string | null;
+  }> | null;
+}): { assetTitle: string; assetBrand: string } {
+  const rawAsset = Array.isArray(record.assets) ? record.assets[0] : record.assets;
+
+  const isGenericName =
+    !record.toolName ||
+    record.toolName === 'Tool Asset' ||
+    record.toolName.toLowerCase() === 'tool asset' ||
+    record.toolName === 'Registered Tool';
+
+  const isGenericBrand =
+    !record.brand ||
+    record.brand.toUpperCase() === 'STANDARD' ||
+    record.brand.toLowerCase() === 'standard' ||
+    record.brand.toLowerCase() === 'general';
+
+  // Resolve accurate tool title
+  const assetTitle =
+    rawAsset?.name ||
+    rawAsset?.model ||
+    rawAsset?.model_number ||
+    record.asset_name ||
+    (!isGenericName ? record.toolName! : null) ||
+    (record.notes?.match(/ציוד\s+([^(]+)/)?.[1]?.trim()) ||
+    'כלי עבודה';
+
+  // Resolve accurate brand
+  const assetBrand =
+    rawAsset?.brand ||
+    (!isGenericBrand ? record.brand! : null) ||
+    'כלי';
+
+  return { assetTitle, assetBrand };
+}
+
 interface HistoryViewProps {
   initialData: AuditHistoryPayload;
 }
@@ -413,6 +467,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
 
   const handleOpenToolActions = async (record: AuditHistoryRecord) => {
     setLoadingActionQr(record.qrCode);
+    const { assetTitle, assetBrand } = resolveAssetIdentity(record);
     try {
       const asset = await getAssetDetailsByQr(record.qrCode);
       if (asset) {
@@ -422,8 +477,8 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
         const fallbackAsset: ScannedAssetDetails = {
           id: record.assetId,
           qrCode: record.qrCode,
-          toolName: record.toolName,
-          brand: record.brand,
+          toolName: assetTitle,
+          brand: assetBrand,
           modelNumber: record.modelNumber,
           status: (record.action === 'CHECKOUT' ? 'checked_out' : record.action === 'MAINTENANCE_FLAG' ? 'maintenance' : 'available') as any,
           condition: (record.condition || 'good') as any,
@@ -442,8 +497,8 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
       const fallbackAsset: ScannedAssetDetails = {
         id: record.assetId,
         qrCode: record.qrCode,
-        toolName: record.toolName,
-        brand: record.brand,
+        toolName: assetTitle,
+        brand: assetBrand,
         modelNumber: record.modelNumber,
         status: (record.action === 'CHECKOUT' ? 'checked_out' : record.action === 'MAINTENANCE_FLAG' ? 'maintenance' : 'available') as any,
         condition: (record.condition || 'good') as any,
@@ -694,13 +749,15 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
       else if (r.action === 'MAINTENANCE_FLAG') actionTitle = 'קריאת שירות / תיקון';
       else if (r.action === 'ONBOARD') actionTitle = 'רישום ראשוני';
 
+      const { assetTitle, assetBrand } = resolveAssetIdentity(r);
+
       return [
         `"${r.id}"`,
         `"${new Date(r.createdAt).toLocaleString('he-IL')}"`,
         `"${actionTitle}"`,
         `"${r.qrCode}"`,
-        `"${(r.toolName || '').replace(/"/g, '""')}"`,
-        `"${(r.brand || '').replace(/"/g, '""')}"`,
+        `"${(assetTitle || '').replace(/"/g, '""')}"`,
+        `"${(assetBrand || '').replace(/"/g, '""')}"`,
         `"${(r.modelNumber || '').replace(/"/g, '""')}"`,
         `"${(r.warehouseName || '').replace(/"/g, '""')}"`,
         `"${(r.targetWorker || '').replace(/"/g, '""')}"`,
@@ -1332,6 +1389,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
             <div className="max-h-[500px] overflow-y-auto space-y-3 pr-1">
             {paginatedRecords.map((item) => {
               const isNew = newMovementIds.has(item.id);
+              const { assetTitle, assetBrand } = resolveAssetIdentity(item);
               return (
               <div
                 key={item.id}
@@ -1368,7 +1426,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
                 <div>
                   <div className="flex items-center gap-2 mb-1 flex-wrap">
                     <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded bg-blue-50 text-blue-800 border border-blue-200">
-                      {item.brand}
+                      {assetBrand}
                     </span>
 
                     {/* Interactive Open Tool Passport & Lifecycle on Tool QR Tag */}
@@ -1389,11 +1447,11 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
                   {/* Interactive Click-to-Filter on Tool Name */}
                   <button
                     type="button"
-                    onClick={() => handleQuickSearch(item.toolName)}
+                    onClick={() => handleQuickSearch(assetTitle)}
                     className="text-right text-base font-black text-blue-950 leading-snug hover:text-blue-700 transition-colors cursor-pointer"
-                    title={`סנן לפי שם הכלי: ${item.toolName}`}
+                    title={`סנן לפי שם הכלי: ${assetTitle}`}
                   >
-                    {item.toolName}
+                    {assetTitle}
                   </button>
 
                   {item.modelNumber && (
@@ -1621,7 +1679,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
                     onClick={() => handleOpenToolActions(item)}
                     disabled={loadingActionQr === item.qrCode}
                     className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black flex items-center gap-1.5 shadow-sm shadow-blue-600/20 active:scale-95 transition-all cursor-pointer disabled:opacity-50"
-                    title={`פתח תפריט פעולות כלי (שינוע, החזרה, ניפוק, תיקון) עבור ${item.toolName}`}
+                    title={`פתח תפריט פעולות כלי (שינוע, החזרה, ניפוק, תיקון) עבור ${assetTitle}`}
                   >
                     {loadingActionQr === item.qrCode ? (
                       <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
@@ -1765,7 +1823,9 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200">
-                    {filteredRecords.map((rec) => (
+                    {filteredRecords.map((rec) => {
+                      const { assetTitle, assetBrand } = resolveAssetIdentity(rec);
+                      return (
                       <tr key={rec.id} className="hover:bg-slate-50">
                         <td className="p-2.5 font-mono text-slate-500 whitespace-nowrap">
                           {formatTimestamp(rec.createdAt)}
@@ -1777,8 +1837,8 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
                           {rec.qrCode}
                         </td>
                         <td className="p-2.5">
-                          <div className="font-bold text-slate-900">{rec.toolName}</div>
-                          <div className="text-[10px] text-slate-500">{rec.brand} {rec.modelNumber || ''}</div>
+                          <div className="font-bold text-slate-900">{assetTitle}</div>
+                          <div className="text-[10px] text-slate-500">{assetBrand} {rec.modelNumber || ''}</div>
                         </td>
                         <td className="p-2.5 font-bold text-slate-800">
                           {rec.targetWorker || '—'}
@@ -1815,7 +1875,8 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
                           )}
                         </td>
                       </tr>
-                    ))}
+                    );
+                  })}
                   </tbody>
                 </table>
               </div>
@@ -1895,27 +1956,32 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
                   פרטי כלי העבודה
                 </span>
                 <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <span
-                        className="font-mono text-xs font-black text-blue-900 bg-blue-100 px-2 py-0.5 rounded border border-blue-200"
-                        dir="ltr"
-                      >
-                        {selectedReceiptRecord.qrCode}
-                      </span>
-                      <span className="text-[11px] font-bold text-slate-600 uppercase">
-                        {selectedReceiptRecord.brand}
-                      </span>
-                    </div>
-                    <h4 className="text-base font-black text-slate-900">
-                      {selectedReceiptRecord.toolName}
-                    </h4>
-                    {selectedReceiptRecord.modelNumber && (
-                      <p className="text-xs text-slate-500 font-mono mt-0.5" dir="ltr">
-                        דגם: {selectedReceiptRecord.modelNumber}
-                      </p>
-                    )}
-                  </div>
+                  {(() => {
+                    const { assetTitle, assetBrand } = resolveAssetIdentity(selectedReceiptRecord);
+                    return (
+                      <div>
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <span
+                            className="font-mono text-xs font-black text-blue-900 bg-blue-100 px-2 py-0.5 rounded border border-blue-200"
+                            dir="ltr"
+                          >
+                            {selectedReceiptRecord.qrCode}
+                          </span>
+                          <span className="text-[11px] font-bold text-slate-600 uppercase">
+                            {assetBrand}
+                          </span>
+                        </div>
+                        <h4 className="text-base font-black text-slate-900">
+                          {assetTitle}
+                        </h4>
+                        {selectedReceiptRecord.modelNumber && (
+                          <p className="text-xs text-slate-500 font-mono mt-0.5" dir="ltr">
+                            דגם: {selectedReceiptRecord.modelNumber}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })()}
                   <div className="text-left text-xs font-bold text-slate-600">
                     <div>מתקן / אתר:</div>
                     <span className="text-slate-900">{selectedReceiptRecord.warehouseName}</span>
