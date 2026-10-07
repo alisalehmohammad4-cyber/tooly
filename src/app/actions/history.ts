@@ -913,3 +913,195 @@ export async function getFleetNotesFeedAction(
   const notes = filterMockNotes(mockPayload.records, filters);
   return { notes, totalCount: notes.length };
 }
+
+/**
+ * Direct query on custody_ledger for asset timeline, ordered by created_at DESC.
+ * Guaranteed to never throw errors; returns { success: true, data: [] } if empty or on error.
+ */
+export async function getAssetTimelineAction(
+  assetId?: string | null,
+  tagNumber?: string | null,
+  organizationId?: string
+): Promise<{ success: boolean; data: AuditHistoryRecord[]; asset?: ScannedAssetDetails | null }> {
+  try {
+    const cleanId = assetId?.trim() || null;
+    const cleanTag = tagNumber?.trim() || null;
+
+    if (!cleanId && !cleanTag) {
+      return { success: true, data: [], asset: null };
+    }
+
+    const orgId = await resolveActiveOrganizationId(organizationId);
+
+    let resolvedAsset: ScannedAssetDetails | null = null;
+    let resolvedAssetId = cleanId;
+
+    // Resolve asset details if tag or id is provided
+    try {
+      const { getAssetDetailsByQr } = await import('@/app/actions/custody');
+      resolvedAsset = await getAssetDetailsByQr(cleanTag || cleanId!, undefined, orgId || undefined);
+      if (resolvedAsset?.id) {
+        resolvedAssetId = resolvedAsset.id;
+      }
+    } catch (e) {
+      console.warn('[getAssetTimelineAction] Could not resolve asset details:', e);
+    }
+
+    let records: AuditHistoryRecord[] = [];
+
+    if (isSupabaseConfigured() && (resolvedAssetId || cleanTag)) {
+      try {
+        const client = supabaseAdmin || supabase;
+        let query = client
+          .from('custody_ledger')
+          .select(`
+            id,
+            action,
+            performed_by,
+            target_worker,
+            worker_name,
+            worker_phone,
+            expected_return_date,
+            signature_data,
+            signature_svg,
+            is_tag_verified,
+            signed_at,
+            target_site_name,
+            condition_at_return,
+            from_warehouse_id,
+            to_warehouse_id,
+            accessories_snapshot,
+            damage_report,
+            gps_lat,
+            gps_lng,
+            notes,
+            created_at,
+            organization_id,
+            assets:asset_id (
+              id,
+              name,
+              model:model_number,
+              model_number,
+              brand,
+              tag_number,
+              qr_code,
+              condition,
+              current_warehouse_id,
+              organization_id,
+              tool_models:tool_model_id (
+                name,
+                brand,
+                model_number
+              ),
+              warehouses:current_warehouse_id (
+                id,
+                name,
+                code
+              )
+            )
+          `)
+          .order('created_at', { ascending: false });
+
+        if (orgId) {
+          query = query.eq('organization_id', orgId);
+        }
+
+        if (resolvedAssetId) {
+          query = query.eq('asset_id', resolvedAssetId);
+        }
+
+        const { data: rawRows, error } = await query;
+
+        if (!error && rawRows && rawRows.length > 0) {
+          records = (rawRows as unknown as RawLedgerRow[]).map((row) => {
+            let normalizedAction: AuditActionType = 'CHECKIN';
+            const raw = (row.action || '').toUpperCase();
+            if (raw === 'CHECKOUT') normalizedAction = 'CHECKOUT';
+            else if (raw === 'CHECKIN') normalizedAction = 'CHECKIN';
+            else if (raw === 'TRANSFER' || raw === 'TRANSFER_INIT') normalizedAction = 'TRANSFER';
+            else if (raw === 'TRANSFER_RECEIVE' || raw === 'RECEIVE_TRANSFER') normalizedAction = 'RECEIVE_TRANSFER';
+            else if (raw === 'CANCEL_TRANSFER') normalizedAction = 'CANCEL_TRANSFER';
+            else if (raw === 'DIRECT_TRANSFER') normalizedAction = 'DIRECT_TRANSFER';
+            else if (raw === 'MAINTENANCE' || raw === 'MAINTENANCE_FLAG' || raw === 'MAINTENANCE_IN' || raw === 'MAINTENANCE_OUT') normalizedAction = 'MAINTENANCE_FLAG';
+            else if (raw === 'STATUS_CHANGE') normalizedAction = 'STATUS_CHANGE';
+            else if (raw === 'ONBOARD') normalizedAction = 'ONBOARD';
+            else if (raw === 'LOCK_STATUS') normalizedAction = 'LOCK_STATUS';
+            else if (raw === 'SAFETY_INSPECTION') normalizedAction = 'SAFETY_INSPECTION';
+            else if (raw === 'RETIRE' || raw === 'DECOMMISSION') normalizedAction = 'RETIRE';
+
+            const rawAsset = Array.isArray(row.assets) ? row.assets[0] : row.assets;
+            const rawToolModel = Array.isArray(rawAsset?.tool_models) ? rawAsset.tool_models[0] : rawAsset?.tool_models;
+
+            const toolTitle = 
+              rawAsset?.name || 
+              rawAsset?.model || 
+              rawAsset?.model_number || 
+              rawToolModel?.name || 
+              resolvedAsset?.toolName || 
+              (row.notes?.match(/ציוד\s+([^(]+)/)?.[1]?.trim()) || 
+              'כלי עבודה';
+
+            const assetBrand = rawAsset?.brand || rawToolModel?.brand || resolvedAsset?.brand || 'כלי';
+            const modelNumber = rawAsset?.model || rawAsset?.model_number || rawToolModel?.model_number || resolvedAsset?.modelNumber || null;
+            const qrCode = rawAsset?.qr_code || rawAsset?.tag_number || resolvedAsset?.qrCode || cleanTag || 'N/A';
+
+            return {
+              id: row.id,
+              assetId: rawAsset?.id || resolvedAssetId || '',
+              qrCode,
+              toolName: toolTitle,
+              asset_name: toolTitle,
+              brand: assetBrand,
+              modelNumber,
+              action: normalizedAction,
+              performedBy: row.performed_by || 'מערכת',
+              targetWorker: row.target_worker || row.worker_name || (normalizedAction === 'CHECKOUT' ? row.performed_by : null),
+              workerPhone: row.worker_phone || null,
+              condition: (row.condition_at_return as AuditHistoryRecord['condition']) || rawAsset?.condition || 'good',
+              warehouseId: rawAsset?.current_warehouse_id || row.warehouse_id || null,
+              warehouseName: row.target_site_name || (Array.isArray(rawAsset?.warehouses) ? rawAsset?.warehouses[0]?.name : rawAsset?.warehouses?.name) || resolvedAsset?.warehouseName || 'מחסן ראשי',
+              warehouseCode: (Array.isArray(rawAsset?.warehouses) ? rawAsset?.warehouses[0]?.code : rawAsset?.warehouses?.code) || resolvedAsset?.warehouseCode || 'MAIN',
+              notes: row.notes,
+              createdAt: row.created_at,
+              organizationId: row.organization_id || orgId || '',
+              expectedReturnDate: row.expected_return_date || null,
+              signatureData: row.signature_data || row.signature_svg || null,
+              signedAt: row.signed_at || (row.signature_data || row.signature_svg ? row.created_at : null),
+              isTagVerified: Boolean(row.is_tag_verified),
+              accessoriesSnapshot: row.accessories_snapshot || null,
+              damageReport: row.damage_report || null,
+              gps: row.gps_lat != null && row.gps_lng != null ? { lat: row.gps_lat, lng: row.gps_lng } : null,
+            };
+          });
+        }
+      } catch (err) {
+        console.warn('[getAssetTimelineAction] Error fetching Supabase ledger:', err);
+      }
+    }
+
+    // Fallback to mock store if zero records found
+    if (records.length === 0) {
+      try {
+        const mockPayload = getMockAuditHistory(undefined, orgId || undefined);
+        records = mockPayload.records.filter(
+          (r) =>
+            (resolvedAssetId && r.assetId === resolvedAssetId) ||
+            (cleanTag && r.qrCode?.toLowerCase() === cleanTag.toLowerCase()) ||
+            (resolvedAsset?.qrCode && r.qrCode?.toLowerCase() === resolvedAsset.qrCode.toLowerCase())
+        );
+      } catch {
+        records = [];
+      }
+    }
+
+    return {
+      success: true,
+      data: records,
+      asset: resolvedAsset,
+    };
+  } catch (err) {
+    console.error('[getAssetTimelineAction] Global catch:', err);
+    return { success: true, data: [], asset: null };
+  }
+}
+

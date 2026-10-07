@@ -40,8 +40,7 @@ import {
   reserveAssetAction,
 } from '@/app/actions/custody';
 import {
-  getToolLifecycleHistory,
-  type ToolLifecyclePayload,
+  getAssetTimelineAction,
   type AuditHistoryRecord,
   type AuditActionType,
 } from '@/app/actions/history';
@@ -186,9 +185,9 @@ export default function ToolPassportModal({
   // Active Tab: 'timeline' or 'management'
   const [activeTab, setActiveTab] = useState<'timeline' | 'management'>('timeline');
 
-  // Lifecycle History and KPI Data
-  const [lifecycleData, setLifecycleData] = useState<ToolLifecyclePayload | null>(null);
-  const [isLoadingLifecycle, setIsLoadingLifecycle] = useState<boolean>(false);
+  // Timeline and Loading State
+  const [timeline, setTimeline] = useState<AuditHistoryRecord[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
 
   // Selected Signature Preview Modal
   const [inspectSignatureRecord, setInspectSignatureRecord] = useState<AuditHistoryRecord | null>(null);
@@ -224,33 +223,53 @@ export default function ToolPassportModal({
     type: 'success' | 'error';
   } | null>(null);
 
-  // Load Lifecycle History callback
-  const loadLifecycleData = React.useCallback(async () => {
-    const targetTagOrId = updatedAsset?.qrCode || updatedAsset?.id || asset?.qrCode || asset?.id || assetTag;
-    if (!targetTagOrId) return;
+  // Load Asset Timeline callback with strict try/catch/finally and 3.5s safety timeout
+  const loadTimeline = React.useCallback(async () => {
+    const targetId = asset?.id || updatedAsset?.id || null;
+    const targetTag = (asset as { tag_number?: string })?.tag_number || asset?.qrCode || updatedAsset?.qrCode || assetTag || null;
+    if (!targetId && !targetTag) {
+      setIsLoading(false);
+      setTimeline([]);
+      return;
+    }
 
-    setIsLoadingLifecycle(true);
+    // 3.5s safety timeout: if data fetching takes longer, automatically set setIsLoading(false) to prevent perpetual spinning
+    const safetyTimer = setTimeout(() => {
+      console.warn('[ToolPassportModal] Safety timeout reached (3.5s) - stopping timeline spinner');
+      setIsLoading(false);
+    }, 3500);
+
     try {
-      const payload = await getToolLifecycleHistory(targetTagOrId, currentOrganization?.id);
-      setLifecycleData(payload);
-      if (payload.asset && !asset) {
-        setUpdatedAsset(payload.asset);
+      setIsLoading(true);
+      const res = await getAssetTimelineAction(targetId, targetTag, currentOrganization?.id);
+      if (res && res.success && Array.isArray(res.data)) {
+        setTimeline(res.data);
+        if (res.asset && !asset && !updatedAsset) {
+          setUpdatedAsset(res.asset);
+        }
+      } else {
+        setTimeline([]);
       }
     } catch (err) {
-      console.warn('Error loading tool passport lifecycle:', err);
+      console.error('Failed to load asset timeline:', err);
+      setTimeline([]);
     } finally {
-      setIsLoadingLifecycle(false);
+      clearTimeout(safetyTimer);
+      setIsLoading(false); // MUST ALWAYS STOP SPINNER
     }
   }, [asset, assetTag, updatedAsset, currentOrganization?.id]);
 
   useEffect(() => {
-    if (!isOpen) return;
-    loadLifecycleData();
-  }, [isOpen, loadLifecycleData]);
+    if (!isOpen) {
+      setIsLoading(false);
+      return;
+    }
+    void loadTimeline();
+  }, [isOpen, loadTimeline]);
 
   if (!isOpen) return null;
 
-  const currentAsset = updatedAsset || asset || lifecycleData?.asset;
+  const currentAsset = updatedAsset || asset || null;
 
   const isSupervisorOrAdmin = role === 'supervisor' || role === 'admin';
 
@@ -331,7 +350,7 @@ export default function ToolPassportModal({
       setLockReason('');
       setFeedbackMessage({ text: res.message, type: 'success' });
       if (onAssetUpdated) onAssetUpdated(res.asset);
-      loadLifecycleData();
+      void loadTimeline();
     } else {
       setFeedbackMessage({ text: res.error, type: 'error' });
     }
@@ -364,7 +383,7 @@ export default function ToolPassportModal({
       setUpdatedAsset(res.asset);
       setFeedbackMessage({ text: res.message, type: 'success' });
       if (onAssetUpdated) onAssetUpdated(res.asset);
-      loadLifecycleData();
+      void loadTimeline();
     } else {
       setFeedbackMessage({ text: res.error, type: 'error' });
     }
@@ -400,7 +419,7 @@ export default function ToolPassportModal({
       setShowReserveForm(false);
       setFeedbackMessage({ text: res.message, type: 'success' });
       if (onAssetUpdated) onAssetUpdated(res.asset);
-      loadLifecycleData();
+      void loadTimeline();
     } else {
       setFeedbackMessage({ text: res.error, type: 'error' });
     }
@@ -425,7 +444,7 @@ export default function ToolPassportModal({
       setUpdatedAsset(res.asset);
       setFeedbackMessage({ text: res.message, type: 'success' });
       if (onAssetUpdated) onAssetUpdated(res.asset);
-      loadLifecycleData();
+      void loadTimeline();
     } else {
       setFeedbackMessage({ text: res.error, type: 'error' });
     }
@@ -444,12 +463,38 @@ export default function ToolPassportModal({
     }
   };
 
-  const kpi = lifecycleData?.kpi || {
-    totalCheckouts: 0,
-    totalSitesVisited: 1,
-    totalRepairs: 0,
-    totalDaysInService: 1,
-  };
+  const kpi = React.useMemo(() => {
+    const totalCheckouts = timeline.filter((r) => r.action === 'CHECKOUT').length;
+    const sitesVisitedSet = new Set(
+      timeline.map((r) => r.warehouseName || r.warehouseId).filter(Boolean)
+    );
+    if (currentAsset?.warehouseName) sitesVisitedSet.add(currentAsset.warehouseName);
+    const totalSitesVisited = Math.max(1, sitesVisitedSet.size);
+
+    const totalRepairs = timeline.filter(
+      (r) => r.action === 'MAINTENANCE_FLAG' || r.action === 'MAINTENANCE' || r.condition === 'needs_repair'
+    ).length;
+
+    const startDateStr =
+      currentAsset?.purchaseDate ||
+      (timeline.length > 0 ? timeline[timeline.length - 1].createdAt : null);
+
+    let totalDaysInService = 1;
+    if (startDateStr) {
+      const startMs = new Date(startDateStr).getTime();
+      const nowMs = Date.now();
+      if (!isNaN(startMs) && nowMs > startMs) {
+        totalDaysInService = Math.max(1, Math.floor((nowMs - startMs) / (1000 * 60 * 60 * 24)));
+      }
+    }
+
+    return {
+      totalCheckouts,
+      totalSitesVisited,
+      totalRepairs,
+      totalDaysInService,
+    };
+  }, [timeline, currentAsset]);
 
   return (
     <div
@@ -484,7 +529,7 @@ export default function ToolPassportModal({
                   const updated = { ...currentAsset, status: newSt };
                   setUpdatedAsset(updated);
                   if (onAssetUpdated) onAssetUpdated(updated);
-                  loadLifecycleData();
+                  void loadTimeline();
                 }}
               />
             ) : (
@@ -640,9 +685,9 @@ export default function ToolPassportModal({
           >
             <HistoryIcon className="w-4 h-4" />
             <span>יומן תנועות ומסלול חיים</span>
-            {lifecycleData?.history && (
+            {timeline && (
               <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-indigo-100 text-indigo-800 font-mono">
-                {lifecycleData.history.length}
+                {timeline.length}
               </span>
             )}
           </button>
@@ -690,7 +735,7 @@ export default function ToolPassportModal({
 
         {/* SCROLLABLE TAB CONTENT */}
         <div className="p-4 overflow-y-auto flex-1 space-y-4">
-          {isLoadingLifecycle ? (
+          {isLoading ? (
             <div className="py-16 text-center space-y-3">
               <Loader2 className="w-8 h-8 text-indigo-600 animate-spin mx-auto" />
               <div className="text-sm font-bold text-slate-700">
@@ -700,19 +745,13 @@ export default function ToolPassportModal({
           ) : activeTab === 'timeline' ? (
             /* TAB 1: CHRONOLOGICAL TIMELINE NODES */
             <div className="space-y-4">
-              {!lifecycleData?.history || lifecycleData.history.length === 0 ? (
-                <div className="p-10 rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 text-center space-y-2">
-                  <Clock className="w-8 h-8 text-slate-400 mx-auto" />
-                  <div className="text-sm font-bold text-slate-800">
-                    טרם נרשמו תנועות עבור כלי זה
-                  </div>
-                  <p className="text-xs text-slate-500">
-                    תנועות ניפוק, החזרה, שינוע ותחזוקה יופיעו כאן באופן כרונולוגי עם חתימות מאומתות.
-                  </p>
+              {!isLoading && timeline.length === 0 ? (
+                <div className="py-8 text-center text-slate-500 text-sm">
+                  אין תנועות נוספות מתועדות ביומן הביקורת לכלי זה
                 </div>
               ) : (
                 <div className="relative border-r-2 border-indigo-200 mr-4 pr-5 space-y-6">
-                  {lifecycleData.history.map((evt, idx) => (
+                  {timeline.map((evt, idx) => (
                     <div key={evt.id || idx} className="relative group">
                       {/* Timeline Node Bullet */}
                       <div className="absolute -right-[27px] top-1 w-4 h-4 rounded-full bg-white border-4 border-indigo-600 shadow-sm" />
