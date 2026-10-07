@@ -1,9 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import type { Html5Qrcode } from 'html5-qrcode';
 import {
-  CameraOff,
   QrCode,
   Building2,
   Wrench,
@@ -19,17 +17,14 @@ import {
   UserCheck,
   ShoppingCart,
   Zap,
+  ZapOff,
   KeyRound,
   FileText,
   Lock,
   BookmarkCheck,
-  Flashlight,
-  Barcode,
   PackagePlus,
   Radio,
-  Smartphone,
-  Type,
-  Camera,
+  Barcode,
   Sparkles,
 } from 'lucide-react';
 import type { Category, Warehouse, AssetCondition } from '@/types/domain';
@@ -53,6 +48,8 @@ import { getCurrentGpsCoordinates } from '@/lib/geo';
 import { getCachedAssetByQr, cacheAsset } from '@/lib/offline/offlineDb';
 import { useWebNfc } from '@/lib/nfc/useWebNfc';
 import { useOcrScanner } from '@/lib/ocr/useOcrScanner';
+import { detectBarcodeOrQr, extractTagFromBarcodePayload } from '@/lib/ocr/barcodeDetector';
+import { snapTagToAsset, triggerOcrHaptic, playOcrBeep } from '@/lib/ocr/tagParser';
 
 interface QuickOnboardViewProps {
   categories: Category[];
@@ -112,34 +109,42 @@ export default function QuickOnboardView({
   // QR Scanner & Input State
   const [qrCode, setQrCode] = useState<string>('');
   const [manualQrInput, setManualQrInput] = useState<string>('');
-  const [showManualInput, setShowManualInput] = useState<boolean>(false);
   const [scannerActive, setScannerActive] = useState<boolean>(true);
-  const [scannerError, setScannerError] = useState<string | null>(null);
+  const [cameraError, setCameraError] = useState<string | null>(null);
   const [isVerifyingQr, setIsVerifyingQr] = useState<boolean>(false);
   const [qrWarning, setQrWarning] = useState<string | null>(null);
 
-  // Storekeeper Streamlined View State (Hide onboarding form by default for high-velocity dispatch)
+  // Storekeeper Streamlined View State
   const [showOnboardForm, setShowOnboardForm] = useState<boolean>(false);
   const [isSuggestingQr, setIsSuggestingQr] = useState<boolean>(false);
-
-  // Camera Hardware Controls (Torch & Barcode Mode)
-  const [isTorchOn, setIsTorchOn] = useState<boolean>(false);
-  const [scanMode, setScanMode] = useState<'qr' | 'barcode'>('qr');
-
-  // OCR Text Scanner (Lazy initialization on demand)
-  const [isOcrMode, setIsOcrMode] = useState<boolean>(false);
   const [isIndustrialOcrOpen, setIsIndustrialOcrOpen] = useState<boolean>(false);
-  const [ocrScanFeedback, setOcrScanFeedback] = useState<{
-    type: 'success' | 'error';
-    message: string;
-  } | null>(null);
 
+  // Hardware Camera & Stream State (Locked to Primary Rear, Single Flip Button)
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const scanIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Concurrency & Debounce Lock refs
+  const isDebounceLockedRef = useRef<boolean>(false);
+  const isBarcodeBusyRef = useRef<boolean>(false);
+  const isOcrBusyRef = useRef<boolean>(false);
+  const lastScannedQrRef = useRef<{ code: string; timestamp: number }>({
+    code: '',
+    timestamp: 0,
+  });
+
+  const [torchSupported, setTorchSupported] = useState<boolean>(false);
+  const [torchEnabled, setTorchEnabled] = useState<boolean>(false);
+  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
+  const [candidateTag, setCandidateTag] = useState<string | null>(null);
+  const [isTargetLocked, setIsTargetLocked] = useState<boolean>(false);
+
+  // Silent Background OCR Hook
   const {
-    isInitializing: isOcrInitializing,
-    isRecognizing: isOcrRecognizing,
-    ocrProgress,
+    isOcrReady,
     initOcr,
-    recognizeFrame,
+    terminateOcr,
+    recognizeFrameWithDetails,
   } = useOcrScanner();
 
   // Web NFC Hook (Android Chrome direct reading/writing & iPhone deep-link support)
@@ -183,28 +188,137 @@ export default function QuickOnboardView({
   const [isRapidDispatchMode, setIsRapidDispatchMode] = useState<boolean>(false);
   const [isBulkModalOpen, setIsBulkModalOpen] = useState<boolean>(false);
 
-  // Scanner References
-  const scannerRef = useRef<Html5Qrcode | null>(null);
-  const isScanningRef = useRef<boolean>(false);
-  const lastScannedQrRef = useRef<{ code: string; timestamp: number }>({
-    code: '',
-    timestamp: 0,
-  });
-
-  // Stop scanner instance safely
-  const stopScanner = useCallback(async () => {
-    if (scannerRef.current && isScanningRef.current) {
-      try {
-        await scannerRef.current.stop();
-      } catch (err) {
-        console.warn('Error stopping html5-qrcode scanner:', err);
-      } finally {
-        isScanningRef.current = false;
-        setIsTorchOn(false);
-        setScannerActive(false);
-      }
+  // Toggle Hardware Torch / Flashlight
+  const toggleTorch = useCallback(async (track: MediaStreamTrack, enabled: boolean) => {
+    try {
+      await track.applyConstraints({
+        advanced: [{ torch: enabled } as unknown as MediaTrackConstraintSet],
+      });
+      setTorchEnabled(enabled);
+    } catch {
+      setTorchSupported(false);
     }
   }, []);
+
+  const handleToggleTorch = useCallback(() => {
+    if (!streamRef.current) return;
+    const track = streamRef.current.getVideoTracks()[0];
+    if (track) {
+      void toggleTorch(track, !torchEnabled);
+    }
+  }, [torchEnabled, toggleTorch]);
+
+  // Clean camera track stopping
+  const stopScanner = useCallback(async () => {
+    if (scanIntervalRef.current) {
+      clearInterval(scanIntervalRef.current);
+      scanIntervalRef.current = null;
+    }
+
+    if (streamRef.current) {
+      try {
+        const track = streamRef.current.getVideoTracks()[0];
+        if (track && torchEnabled) {
+          try {
+            await track.applyConstraints({
+              advanced: [{ torch: false } as unknown as MediaTrackConstraintSet],
+            });
+          } catch {
+            // ignore
+          }
+        }
+        streamRef.current.getTracks().forEach((t) => t.stop());
+      } catch (err) {
+        console.warn('Error stopping camera stream:', err);
+      } finally {
+        streamRef.current = null;
+      }
+    }
+
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+
+    setScannerActive(false);
+    setTorchEnabled(false);
+  }, [torchEnabled]);
+
+  // Start Camera with Primary Rear lock & iOS graceful fallback
+  const startCamera = useCallback(
+    async (requestedFacing?: 'environment' | 'user') => {
+      setCameraError(null);
+      void initOcr();
+
+      const activeFacing = requestedFacing || facingMode;
+      let stream: MediaStream | null = null;
+
+      // 1. Primary Attempt: high-res with requested facingMode (ideal for primary rear camera)
+      try {
+        const constraints: MediaStreamConstraints = {
+          video: {
+            facingMode: { ideal: activeFacing },
+            width: { ideal: 1920, min: 640 },
+            height: { ideal: 1080, min: 480 },
+          },
+          audio: false,
+        };
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch {
+        // 2. Secondary Attempt: basic facingMode without resolution clamps
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: activeFacing },
+            audio: false,
+          });
+        } catch {
+          // 3. Fallback: default video device
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: true,
+              audio: false,
+            });
+          } catch (e3) {
+            console.error('[Camera] getUserMedia failed completely:', e3);
+          }
+        }
+      }
+
+      if (!stream) {
+        setCameraError('לא ניתן לגשת למצלמת המכשיר. אנא אשר גישה למצלמה.');
+        setScannerActive(false);
+        return;
+      }
+
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+      }
+
+      setScannerActive(true);
+
+      // Check torch capability on active video track
+      const track = stream.getVideoTracks()[0];
+      if (track) {
+        const getCaps = (track as unknown as { getCapabilities?: () => { torch?: boolean } }).getCapabilities;
+        if (typeof getCaps === 'function') {
+          const caps = getCaps.call(track);
+          setTorchSupported(Boolean(caps?.torch));
+        } else {
+          setTorchSupported(false);
+        }
+      }
+    },
+    [facingMode, initOcr]
+  );
+
+  // Flip Camera (Back ↔ Front only, strictly no 7-camera carousel)
+  const handleFlipCamera = useCallback(async () => {
+    const nextFacing = facingMode === 'environment' ? 'user' : 'environment';
+    setFacingMode(nextFacing);
+    await stopScanner();
+    await startCamera(nextFacing);
+  }, [facingMode, stopScanner, startCamera]);
 
   // Automatically fetch and pre-fill next sequential available code (e.g. ZR-1099)
   const handleAutoSuggestNextQr = useCallback(async () => {
@@ -234,41 +348,6 @@ export default function QuickOnboardView({
     await stopScanner();
     setShowOnboardForm(true);
   }, [qrCode, handleAutoSuggestNextQr, stopScanner]);
-
-
-  // Toggle Torch on active camera video stream
-  const toggleTorch = useCallback(async () => {
-    try {
-      const videoElem = document.querySelector('#qr-reader video') as HTMLVideoElement | null;
-      const stream = videoElem?.srcObject as MediaStream | null;
-      const track = stream?.getVideoTracks()[0];
-      if (track) {
-        const nextState = !isTorchOn;
-        await track.applyConstraints({
-          advanced: [{ torch: nextState } as MediaTrackConstraintSet & { torch?: boolean }],
-        });
-        setIsTorchOn(nextState);
-      }
-    } catch (err) {
-      console.warn('Torch toggle not supported or failed on this device:', err);
-    }
-  }, [isTorchOn]);
-
-  // Toggle between Standard QR (240x240) and Wide 1D Barcode (280x110)
-  const handleToggleScanMode = useCallback(async () => {
-    const nextMode = scanMode === 'qr' ? 'barcode' : 'qr';
-    if (scannerRef.current && isScanningRef.current) {
-      try {
-        await scannerRef.current.stop();
-      } catch (err) {
-        console.warn('Error stopping scanner during mode toggle:', err);
-      } finally {
-        isScanningRef.current = false;
-        setIsTorchOn(false);
-      }
-    }
-    setScanMode(nextMode);
-  }, [scanMode]);
 
   // Add asset to dispatch cart
   const handleAddToCart = useCallback((asset: ScannedAssetDetails) => {
@@ -307,7 +386,7 @@ export default function QuickOnboardView({
     setQrWarning(null);
     setIsBulkModalOpen(false);
     setShowOnboardForm(false);
-    setIsTorchOn(false);
+    setTorchEnabled(false);
     setScannerActive(true);
   };
 
@@ -368,6 +447,14 @@ export default function QuickOnboardView({
           } catch (netErr) {
             console.warn('Network call failed, checking local IndexedDB cache:', netErr);
             existing = await getCachedAssetByQr(cleanQr, currentOrganization?.id);
+          }
+        }
+
+        // Also fallback to fuzzy tag matching via snapTagToAsset
+        if (!existing) {
+          existing = await snapTagToAsset(cleanQr, currentOrganization?.id, selectedWarehouseId);
+          if (existing) {
+            await cacheAsset(existing, currentOrganization?.id);
           }
         }
 
@@ -442,81 +529,84 @@ export default function QuickOnboardView({
     [isRapidDispatchMode, stopScanner, handleAddToCart, role, currentOrganization]
   );
 
+  // Claim detection from either Barcode/QR or Heavy-Duty OCR engine
+  const claimDetection = useCallback(
+    async (detectedTag: string) => {
+      if (isDebounceLockedRef.current || qrCode) return;
+
+      isDebounceLockedRef.current = true;
+      setIsTargetLocked(true);
+      setCandidateTag(detectedTag);
+
+      // Instant 50ms Haptic + Audio Beep
+      triggerOcrHaptic(50);
+      playOcrBeep();
+
+      setTimeout(() => {
+        handleScanSuccess(detectedTag);
+        setTimeout(() => {
+          isDebounceLockedRef.current = false;
+          setIsTargetLocked(false);
+          setCandidateTag(null);
+        }, 1200);
+      }, 200);
+    },
+    [qrCode, handleScanSuccess]
+  );
+
   // Handle Barcode & Text OCR Detections directly into the scan pipeline
   const handleBarcodeDetected = useCallback(
     (detectedCode: string) => {
-      handleScanSuccess(detectedCode);
+      void claimDetection(detectedCode);
     },
-    [handleScanSuccess]
+    [claimDetection]
   );
 
-  // Toggle OCR Mode & initialize Tesseract worker lazily on demand
-  const handleToggleOcrMode = useCallback(() => {
-    setIsOcrMode((prev) => {
-      const next = !prev;
-      if (next) {
-        // Pre-warm OCR worker in background
-        void initOcr();
-        setOcrScanFeedback({
-          type: 'success',
-          message: 'מצב סריקת טקסט OCR פעיל. מקם את הטקסט במסגרת ולחץ "סרוק טקסט עכשיו".',
-        });
-      } else {
-        setOcrScanFeedback(null);
-      }
-      return next;
-    });
-  }, [initOcr]);
-
-  // Trigger OCR Snapshot Recognition from active camera video feed
-  const handleTriggerOcrScan = useCallback(async () => {
-    if (isOcrRecognizing || isOcrInitializing) return;
-
-    // Locate the active video element injected by Html5Qrcode into #qr-reader
-    const videoElement = document.querySelector<HTMLVideoElement>('#qr-reader video');
-    if (!videoElement) {
-      setOcrScanFeedback({
-        type: 'error',
-        message: 'המצלמה אינה פעילה כרגע. ודא שהסורק פתוח ופעיל.',
-      });
+  // Parallel Dual-Engine Background Loop (Top speed, First Match Wins)
+  const performDualScanCycle = useCallback(async () => {
+    if (!videoRef.current || !scannerActive || isDebounceLockedRef.current || qrCode) {
       return;
     }
 
-    setOcrScanFeedback(null);
-
-    try {
-      const recognized = await recognizeFrame(videoElement);
-      if (recognized) {
-        // Haptic feedback on successful text recognition
-        if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
-          try {
-            navigator.vibrate([100, 50, 100]);
-          } catch {
-            // ignore if unsupported
-          }
-        }
-
-        setOcrScanFeedback({
-          type: 'success',
-          message: `טקסט זוהה בהצלחה: ${recognized}`,
-        });
-
-        // Route directly through handleBarcodeDetected just like a normal QR scan
-        handleBarcodeDetected(recognized);
-      } else {
-        setOcrScanFeedback({
-          type: 'error',
-          message: 'לא זוהה קוד כלי ברור. קרב את המצלמה למספר הכלי ונסה שוב.',
-        });
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'שגיאה במהלך סריקת הטקסט';
-      setOcrScanFeedback({
-        type: 'error',
-        message: msg,
-      });
+    if (videoRef.current.readyState < 2) {
+      return;
     }
-  }, [isOcrRecognizing, isOcrInitializing, recognizeFrame, handleBarcodeDetected]);
+
+    const video = videoRef.current;
+
+    // ENGINE A: Barcode & QR Detector
+    if (!isBarcodeBusyRef.current && !isDebounceLockedRef.current) {
+      isBarcodeBusyRef.current = true;
+      void detectBarcodeOrQr(video)
+        .then(async (barcodeResult) => {
+          if (barcodeResult && barcodeResult.rawValue && !isDebounceLockedRef.current) {
+            const cleanTag = extractTagFromBarcodePayload(barcodeResult.rawValue);
+            if (cleanTag) {
+              await claimDetection(cleanTag);
+            }
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          isBarcodeBusyRef.current = false;
+        });
+    }
+
+    // ENGINE B: Heavy-Duty OCR Engine
+    if (isOcrReady && !isOcrBusyRef.current && !isDebounceLockedRef.current) {
+      isOcrBusyRef.current = true;
+      void recognizeFrameWithDetails(video)
+        .then(async (ocrDetails) => {
+          if (ocrDetails && ocrDetails.tag && !isDebounceLockedRef.current) {
+            await claimDetection(ocrDetails.tag);
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          isOcrBusyRef.current = false;
+        });
+    }
+  }, [scannerActive, qrCode, isOcrReady, recognizeFrameWithDetails, claimDetection]);
 
   // 1. Universal iOS Background NFC Resolver & URL Deep-Link listener (?nfc=... or ?tool=...)
   useEffect(() => {
@@ -558,77 +648,41 @@ export default function QuickOnboardView({
     handleScanSuccess,
   ]);
 
-  // Synchronize Scanner lifecycle without synchronous effect setState
+  // Camera stream lifecycle
   useEffect(() => {
-    let isCancelled = false;
-
-    if (!qrCode && scannerActive) {
-      import('html5-qrcode')
-        .then(({ Html5Qrcode }) => {
-          if (isCancelled) return;
-          const readerElem = document.getElementById('qr-reader');
-          if (!readerElem) return;
-
-          if (!scannerRef.current) {
-            scannerRef.current = new Html5Qrcode('qr-reader');
-          }
-
-          if (!isScanningRef.current) {
-            const qrbox =
-              scanMode === 'barcode'
-                ? { width: 280, height: 110 }
-                : { width: 240, height: 240 };
-
-            scannerRef.current
-              .start(
-                { facingMode: 'environment' },
-                {
-                  fps: 10,
-                  qrbox,
-                  aspectRatio: 1.0,
-                },
-                handleScanSuccess,
-                () => {
-                  // Non-QR noise frame, ignore
-                }
-              )
-              .then(() => {
-                if (!isCancelled) {
-                  isScanningRef.current = true;
-                }
-              })
-              .catch((err: unknown) => {
-                if (!isCancelled) {
-                  isScanningRef.current = false;
-                  setScannerActive(false);
-                  const msg =
-                    err instanceof Error ? err.message : 'לא ניתן להפעיל את המצלמה.';
-                  setScannerError(msg);
-                }
-              });
-          }
-        })
-        .catch((err: unknown) => {
-          if (!isCancelled) {
-            const msg =
-              err instanceof Error ? err.message : 'טעינת רכיב הסורק נכשלה.';
-            setScannerError(msg);
-          }
-        });
+    if (!qrCode && scannerActive && !showOnboardForm) {
+      void startCamera();
+    } else {
+      void stopScanner();
+      void terminateOcr();
     }
 
     return () => {
-      isCancelled = true;
-      if (scannerRef.current && isScanningRef.current) {
-        scannerRef.current
-          .stop()
-          .then(() => {
-            isScanningRef.current = false;
-          })
-          .catch(() => {});
+      void stopScanner();
+    };
+  }, [qrCode, scannerActive, showOnboardForm, startCamera, stopScanner, terminateOcr]);
+
+  // Background Dual-Engine Cadence: 200ms
+  useEffect(() => {
+    if (!scannerActive || qrCode || showOnboardForm) {
+      if (scanIntervalRef.current) {
+        clearInterval(scanIntervalRef.current);
+        scanIntervalRef.current = null;
+      }
+      return;
+    }
+
+    scanIntervalRef.current = setInterval(() => {
+      void performDualScanCycle();
+    }, 200);
+
+    return () => {
+      if (scanIntervalRef.current) {
+        clearInterval(scanIntervalRef.current);
+        scanIntervalRef.current = null;
       }
     };
-  }, [qrCode, scannerActive, handleScanSuccess, scanMode]);
+  }, [scannerActive, qrCode, showOnboardForm, performDualScanCycle]);
 
   // Reset QR state and re-open scanner
   const handleReScan = async () => {
@@ -636,13 +690,15 @@ export default function QuickOnboardView({
     setManualQrInput('');
     setQrWarning(null);
     setSubmitError(null);
-    setScannerError(null);
+    setCameraError(null);
     setScannedRegisteredAsset(null);
     setIsModalOpen(false);
-    setShowManualInput(false);
     setShowOnboardForm(false);
-    setIsTorchOn(false);
+    setIsTargetLocked(false);
+    setCandidateTag(null);
+    isDebounceLockedRef.current = false;
     setScannerActive(true);
+    await startCamera();
   };
 
   // Callback when custody action completes from modal
@@ -656,7 +712,7 @@ export default function QuickOnboardView({
     setSubmitError(null);
     setIsModalOpen(false);
     setShowOnboardForm(false);
-    setIsTorchOn(false);
+    setTorchEnabled(false);
     setScannerActive(true);
   };
 
@@ -1117,227 +1173,139 @@ export default function QuickOnboardView({
           ) : (
             /* CAMERA VIEWFINDER & SCAN BOX */
             <div className="space-y-3">
-              {/* Cross-Platform NFC Status Badge */}
-              <div className="flex justify-center">
-                {isNfcSupported ? (
-                  <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-blue-50 border border-blue-200 text-blue-800 text-xs font-bold shadow-xs animate-in fade-in">
-                    <Radio className="w-3.5 h-3.5 text-blue-600 animate-pulse shrink-0" />
-                    <span>📡 סריקת NFC פעילה (הצמד כלי לגב המכשיר)</span>
-                  </div>
-                ) : (
-                  <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-100 border border-slate-200 text-slate-700 text-xs font-semibold shadow-xs">
-                    <Smartphone className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                    <span>💡 במכשירי iPhone: הצמד את חלקו העליון של המכשיר לתגית ה-NFC לפתיחה מיידית</span>
-                  </div>
-                )}
-              </div>
+              <div className="relative bg-black aspect-[4/3] sm:aspect-[1/1] max-h-[380px] rounded-2xl overflow-hidden flex items-center justify-center shadow-inner">
+                <video
+                  ref={videoRef}
+                  playsInline
+                  muted
+                  autoPlay
+                  className="w-full h-full object-cover"
+                />
 
-              <div className="relative w-full aspect-square max-h-72 rounded-xl overflow-hidden bg-slate-900 border-2 border-blue-200 flex flex-col items-center justify-center shadow-inner">
-                <div id="qr-reader" className="w-full h-full" />
-
-                {/* FLOATING CAMERA HARDWARE CONTROLS (Torch, 1D Barcode & OCR Text Scanner) */}
-                {scannerActive && !scannerError && (
-                  <div className="absolute top-2 inset-x-2 flex flex-wrap items-center justify-between gap-1.5 pointer-events-none z-20">
-                    <div className="flex flex-wrap items-center gap-1.5 pointer-events-auto">
-                      <button
-                        type="button"
-                        onClick={handleToggleScanMode}
-                        className="px-2.5 py-1.5 rounded-lg bg-slate-900/80 backdrop-blur-md text-white text-[11px] font-bold border border-white/20 flex items-center gap-1.5 shadow-lg active:scale-95 transition-all cursor-pointer hover:bg-slate-800"
-                        title="החלף בין סריקת ברקוד רחב (1D) לקוד QR"
-                      >
-                        {scanMode === 'barcode' ? (
-                          <>
-                            <Barcode className="w-3.5 h-3.5 text-blue-400" />
-                            <span>ברקוד רחב (1D)</span>
-                          </>
-                        ) : (
-                          <>
-                            <QrCode className="w-3.5 h-3.5 text-blue-400" />
-                            <span>קוד QR</span>
-                          </>
-                        )}
-                      </button>
-
-                      {/* Dedicated OCR Text Scanner Toggle Button */}
-                      <button
-                        type="button"
-                        onClick={handleToggleOcrMode}
-                        className={`px-2.5 py-1.5 rounded-lg backdrop-blur-md border flex items-center gap-1.5 shadow-lg active:scale-95 transition-all cursor-pointer ${
-                          isOcrMode
-                            ? 'bg-amber-500 text-slate-950 border-amber-300 ring-2 ring-amber-400/50'
-                            : 'bg-slate-900/80 text-white border-white/20 hover:bg-slate-800'
-                        }`}
-                        title="זיהוי טקסט OCR (כאשר ה-QR מחוק)"
-                      >
-                        <Type className={`w-3.5 h-3.5 ${isOcrMode ? 'text-slate-950 stroke-[2.5]' : 'text-amber-400'}`} />
-                        <span className="text-[11px] font-bold">
-                          {isOcrMode ? '🔤 זיהוי טקסט פעיל' : '🔤 זיהוי טקסט OCR'}
-                        </span>
-                      </button>
-
-                      {/* Dedicated Industrial Field OCR Trigger */}
-                      <button
-                        type="button"
-                        onClick={() => setIsIndustrialOcrOpen(true)}
-                        className="px-2.5 py-1.5 rounded-lg bg-emerald-600/90 hover:bg-emerald-500 text-white text-[11px] font-bold border border-emerald-400/40 flex items-center gap-1.5 shadow-lg active:scale-95 transition-all cursor-pointer backdrop-blur-md"
-                        title="סורק שטח מוקשח (פנס + סינון השתקפויות לתגיות שחוקות)"
-                      >
-                        <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                        <span>🔦 סורק שטח מוקשח</span>
-                      </button>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={toggleTorch}
-                      className={`pointer-events-auto px-2.5 py-1.5 rounded-lg backdrop-blur-md border flex items-center gap-1.5 shadow-lg active:scale-95 transition-all cursor-pointer ${
-                        isTorchOn
-                          ? 'bg-amber-400 text-slate-950 border-amber-300 ring-2 ring-amber-400/50'
-                          : 'bg-slate-900/80 text-white border-white/20 hover:bg-slate-800'
-                      }`}
-                      title={isTorchOn ? 'כבה פנס' : 'הדלק פנס'}
-                    >
-                      <Flashlight className={`w-3.5 h-3.5 ${isTorchOn ? 'text-slate-950 fill-slate-950' : 'text-amber-400'}`} />
-                      <span className="text-[11px] font-bold">
-                        {isTorchOn ? 'פנס דולק' : 'פנס'}
-                      </span>
-                    </button>
-                  </div>
-                )}
-
-                {/* Laser Alignment Guide in Barcode Mode */}
-                {scanMode === 'barcode' && !isOcrMode && scannerActive && !scannerError && (
-                  <div className="absolute inset-x-6 top-1/2 -translate-y-1/2 h-0.5 bg-red-500/80 shadow-[0_0_8px_rgba(239,68,68,0.9)] pointer-events-none z-10 animate-pulse" />
-                )}
-
-                {/* Focused Horizontal Text Targeting Bracket & Guidance Overlay in OCR Mode */}
-                {isOcrMode && scannerActive && !scannerError && (
-                  <div className="absolute inset-0 pointer-events-none z-10 flex flex-col items-center justify-center p-3">
-                    <div className="absolute inset-0 bg-slate-950/40" />
-
-                    {/* Focused horizontal targeting bracket */}
-                    <div className="relative w-[85%] h-20 rounded-lg border-2 border-amber-400 bg-amber-400/5 shadow-[0_0_20px_rgba(245,158,11,0.5)] flex items-center justify-center z-10">
-                      {/* Corner accents */}
-                      <div className="absolute -top-1.5 -left-1.5 w-4 h-4 border-t-2 border-l-2 border-amber-300" />
-                      <div className="absolute -top-1.5 -right-1.5 w-4 h-4 border-t-2 border-r-2 border-amber-300" />
-                      <div className="absolute -bottom-1.5 -left-1.5 w-4 h-4 border-b-2 border-l-2 border-amber-300" />
-                      <div className="absolute -bottom-1.5 -right-1.5 w-4 h-4 border-b-2 border-r-2 border-amber-300" />
-
-                      {/* Horizontal laser guidance line */}
-                      <div className="w-full h-0.5 bg-amber-400/80 shadow-[0_0_8px_rgba(245,158,11,0.9)] animate-pulse" />
-                    </div>
-
-                    {/* Guidance Text */}
-                    <div className="relative z-10 mt-3 px-3 py-1.5 rounded-lg bg-slate-950/90 backdrop-blur-sm border border-amber-400/50 text-[11px] font-bold text-amber-200 text-center max-w-[92%] shadow-lg leading-tight">
-                      כוון את המסגרת לטקסט המודפס בתחתית המדבקה (לדוגמה: TOOL-001)
-                    </div>
-                  </div>
-                )}
-
-                {scannerError && (
-                  <div className="absolute inset-0 bg-white/95 p-6 flex flex-col items-center justify-center text-center space-y-3">
-                    <CameraOff className="w-10 h-10 text-blue-600" />
-                    <div className="text-sm font-bold text-blue-950">
-                      אין גישה למצלמה
-                    </div>
-                    <p className="text-xs text-slate-600 max-w-xs">
-                      {scannerError}. ניתן להזין את הקוד ידנית למטה.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowManualInput(true);
-                        setScannerError(null);
-                        setScannerActive(true);
-                      }}
-                      className="min-h-[48px] px-4 rounded-xl bg-blue-50 text-blue-700 font-bold text-xs border border-blue-200 flex items-center gap-2 hover:bg-blue-100 cursor-pointer"
-                    >
-                      <RotateCcw className="w-4 h-4" /> נסה שוב
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* OCR Action Trigger Button & Status Feedback */}
-              {isOcrMode && scannerActive && !scannerError && (
-                <div className="space-y-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={handleTriggerOcrScan}
-                    disabled={isOcrRecognizing || isOcrInitializing}
-                    className={`w-full min-h-[48px] px-4 py-2.5 rounded-xl font-bold text-sm shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                      isOcrRecognizing || isOcrInitializing
-                        ? 'bg-amber-100 text-amber-900 border border-amber-300 cursor-wait opacity-85'
-                        : 'bg-amber-500 hover:bg-amber-600 active:scale-[0.99] text-slate-950 border border-amber-400 shadow-amber-500/20'
+                {/* Minimalist Viewfinder Overlay */}
+                <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                  <div
+                    className={`w-[72%] h-[140px] relative rounded-2xl flex items-center justify-center transition-all duration-200 ${
+                      isTargetLocked
+                        ? 'border-2 border-emerald-400 bg-emerald-500/20 shadow-[0_0_35px_rgba(16,185,129,0.7)] scale-[1.02]'
+                        : 'border border-white/40 bg-white/[0.02]'
                     }`}
                   >
-                    {isOcrRecognizing || isOcrInitializing ? (
-                      <>
-                        <Loader2 className="w-5 h-5 animate-spin text-amber-900" />
-                        <span>
-                          {isOcrInitializing
-                            ? `מאתחל מנוע OCR (${ocrProgress}%)...`
-                            : 'מפענח טקסט מהמצלמה...'}
-                        </span>
-                      </>
-                    ) : (
-                      <>
-                        <Camera className="w-5 h-5 text-slate-950" />
-                        <span>📸 סרוק טקסט עכשיו</span>
-                      </>
-                    )}
-                  </button>
-
-                  {ocrScanFeedback && (
+                    {/* 4 Precision Corner Brackets */}
                     <div
-                      className={`p-2.5 rounded-lg text-xs font-semibold flex items-center gap-2 border animate-in fade-in duration-200 ${
-                        ocrScanFeedback.type === 'success'
-                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                          : 'bg-rose-50 text-rose-800 border-rose-200'
-                      }`}
-                    >
-                      {ocrScanFeedback.type === 'success' ? (
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                      ) : (
-                        <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                      )}
-                      <span>{ocrScanFeedback.message}</span>
-                    </div>
-                  )}
-                </div>
-              )}
+                      className={`absolute top-0 left-0 w-3 h-3 border-t-2 border-l-2 ${
+                        isTargetLocked ? 'border-emerald-400' : 'border-white/70'
+                      } rounded-tl-sm`}
+                    />
+                    <div
+                      className={`absolute top-0 right-0 w-3 h-3 border-t-2 border-r-2 ${
+                        isTargetLocked ? 'border-emerald-400' : 'border-white/70'
+                      } rounded-tr-sm`}
+                    />
+                    <div
+                      className={`absolute bottom-0 left-0 w-3 h-3 border-b-2 border-l-2 ${
+                        isTargetLocked ? 'border-emerald-400' : 'border-white/70'
+                      } rounded-bl-sm`}
+                    />
+                    <div
+                      className={`absolute bottom-0 right-0 w-3 h-3 border-b-2 border-r-2 ${
+                        isTargetLocked ? 'border-emerald-400' : 'border-white/70'
+                      } rounded-br-sm`}
+                    />
 
-              {/* Manual Input Toggle */}
-              <div className="pt-1">
-                {showManualInput ? (
-                  <form onSubmit={handleManualQrSubmit} className="space-y-2">
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={manualQrInput}
-                        onChange={(e) => setManualQrInput(e.target.value)}
-                        placeholder="הזן ברקוד/QR ידנית (למשל TL-99281)"
-                        className="flex-1 min-h-[56px] bg-white text-blue-950 font-mono font-bold text-base px-4 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none placeholder:text-slate-400 shadow-sm"
-                        dir="ltr"
-                      />
+                    {/* Instant feedback on detection */}
+                    {isTargetLocked ? (
+                      <div className="flex flex-col items-center justify-center text-center animate-in zoom-in-95 duration-150">
+                        <CheckCircle2 className="w-8 h-8 text-emerald-400 mb-1" />
+                        <span className="font-mono text-sm font-black text-white tracking-wider" dir="ltr">
+                          {candidateTag}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-emerald-400/70 to-transparent shadow-[0_0_8px_#34d399] animate-[bounce_2.5s_infinite]" />
+                    )}
+                  </div>
+                </div>
+
+                {/* Floating Controls on Camera Feed (Flashlight + Flip Camera) */}
+                <div className="absolute bottom-3 inset-x-4 flex items-center justify-between pointer-events-none z-10">
+                  {/* Flashlight toggle (⚡) */}
+                  <div className="pointer-events-auto">
+                    {torchSupported ? (
                       <button
-                        type="submit"
-                        className="min-h-[56px] px-5 rounded-xl bg-blue-600 text-white font-black text-sm uppercase tracking-wider hover:bg-blue-700 active:scale-95 transition-all shadow-md shadow-blue-600/20 cursor-pointer"
+                        type="button"
+                        onClick={handleToggleTorch}
+                        className={`w-10 h-10 rounded-full flex items-center justify-center backdrop-blur-md border shadow-lg transition-all cursor-pointer ${
+                          torchEnabled
+                            ? 'bg-amber-500 text-slate-950 border-amber-300 shadow-amber-500/40'
+                            : 'bg-black/50 text-white border-white/20 hover:bg-black/70'
+                        }`}
+                        title={torchEnabled ? 'כיבוי פנס' : 'הפעל פנס'}
                       >
-                        אישור
+                        {torchEnabled ? (
+                          <ZapOff className="w-4 h-4 fill-slate-950" />
+                        ) : (
+                          <Zap className="w-4 h-4" />
+                        )}
                       </button>
-                    </div>
-                  </form>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setShowManualInput(true)}
-                    className="w-full text-center text-xs font-bold text-blue-600 hover:text-blue-800 underline py-1 cursor-pointer"
-                  >
-                    לא מצליח לסרוק? הזן ברקוד ידנית
-                  </button>
+                    ) : (
+                      <div />
+                    )}
+                  </div>
+
+                  {/* Flip camera toggle (🔄 Back ↔ Front) */}
+                  <div className="pointer-events-auto">
+                    <button
+                      type="button"
+                      onClick={() => void handleFlipCamera()}
+                      className="w-10 h-10 rounded-full bg-black/50 hover:bg-black/70 text-white border border-white/20 flex items-center justify-center backdrop-blur-md shadow-lg transition-all active:scale-90 cursor-pointer"
+                      title="החלף מצלמה (Flip Camera)"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Camera Error View */}
+                {cameraError && (
+                  <div className="absolute inset-0 bg-slate-950/95 flex flex-col items-center justify-center p-6 text-center space-y-3 z-20">
+                    <AlertTriangle className="w-9 h-9 text-rose-500" />
+                    <p className="text-xs font-bold text-rose-300 max-w-xs">{cameraError}</p>
+                    <button
+                      type="button"
+                      onClick={() => void startCamera()}
+                      className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>נסה שוב</span>
+                    </button>
+                  </div>
                 )}
               </div>
+
+              {/* Clean Manual Input Form */}
+              <form onSubmit={handleManualQrSubmit} className="flex items-center gap-2 pt-1">
+                <input
+                  type="text"
+                  value={manualQrInput}
+                  onChange={(e) => setManualQrInput(e.target.value.toUpperCase())}
+                  placeholder="הזן מספר תג או ברקוד ידנית (למשל ZR-1099)"
+                  className="flex-1 bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-blue-600 uppercase transition-colors shadow-xs"
+                  dir="ltr"
+                />
+                <button
+                  type="submit"
+                  disabled={!manualQrInput.trim() || isVerifyingQr}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs font-bold rounded-xl flex items-center gap-1 shadow-sm cursor-pointer transition-all shrink-0 active:scale-95"
+                >
+                  {isVerifyingQr ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  )}
+                  <span>אתר</span>
+                </button>
+              </form>
             </div>
           )}
         </div>

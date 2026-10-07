@@ -5,6 +5,7 @@ import { PwaInstallBanner } from "@/components/modules/PwaInstallBanner";
 import { AuthProvider } from "@/context/AuthContext";
 import { OfflineSyncProvider } from "@/context/OfflineSyncContext";
 import { LanguageProvider } from "@/context/LanguageContext";
+import ClientCacheBuster from "@/components/common/ClientCacheBuster";
 import PinPadModal from "@/components/common/PinPadModal";
 import { Analytics } from "@vercel/analytics/next";
 
@@ -43,6 +44,7 @@ export default function RootLayout({
   return (
     <html lang="he" dir="rtl" className={`${heebo.variable} ${heebo.className} bg-white text-blue-950`} suppressHydrationWarning>
       <body className="min-h-screen bg-white text-blue-950 antialiased selection:bg-blue-600 selection:text-white font-sans" suppressHydrationWarning>
+        <ClientCacheBuster />
         <LanguageProvider>
           <AuthProvider>
             <OfflineSyncProvider>

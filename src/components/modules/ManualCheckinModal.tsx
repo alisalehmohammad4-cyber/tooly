@@ -30,7 +30,8 @@ import {
   type ScannedAssetDetails,
 } from '@/app/actions/custody';
 import { useAuth } from '@/context/AuthContext';
-import type { Html5Qrcode } from 'html5-qrcode';
+import { detectBarcodeOrQr, extractTagFromBarcodePayload } from '@/lib/ocr/barcodeDetector';
+import { triggerOcrHaptic, playOcrBeep } from '@/lib/ocr/tagParser';
 import OcrScannerModal from '@/components/modules/OcrScannerModal';
 
 interface ManualCheckinModalProps {
@@ -77,12 +78,19 @@ export default function ManualCheckinModal({
     message: string;
   } | null>(null);
 
-  // Camera Scanner State (Tab 1)
+  // Camera Scanner State (Tab 1 - Minimalist Native Video)
   const [scannerStarted, setScannerStarted] = useState<boolean>(false);
   const [scannerError, setScannerError] = useState<string | null>(null);
   const [manualBarcodeScanInput, setManualBarcodeScanInput] = useState<string>('');
   const [isSearchingBarcode, setIsSearchingBarcode] = useState<boolean>(false);
-  const scannerRef = useRef<Html5Qrcode | null>(null);
+  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
+  const [torchSupported, setTorchSupported] = useState<boolean>(false);
+  const [torchEnabled, setTorchEnabled] = useState<boolean>(false);
+
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const scanIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const isBusyRef = useRef<boolean>(false);
 
   // Load checked out assets on modal open
   const loadLoans = useCallback(async () => {
@@ -122,96 +130,170 @@ export default function ManualCheckinModal({
 
   // Clean stop camera scanner helper
   const stopCameraScanner = useCallback(async () => {
-    if (scannerRef.current) {
+    if (scanIntervalRef.current) {
+      clearInterval(scanIntervalRef.current);
+      scanIntervalRef.current = null;
+    }
+    if (streamRef.current) {
       try {
-        if (scannerRef.current.isScanning) {
-          await scannerRef.current.stop();
+        const track = streamRef.current.getVideoTracks()[0];
+        if (track && torchEnabled) {
+          try {
+            await track.applyConstraints({
+              advanced: [{ torch: false } as unknown as MediaTrackConstraintSet],
+            });
+          } catch {
+            // ignore
+          }
         }
-        await scannerRef.current.clear();
+        streamRef.current.getTracks().forEach((t) => t.stop());
       } catch (err) {
-        console.warn('Error clearing scanner:', err);
+        console.warn('Error clearing scanner stream:', err);
+      } finally {
+        streamRef.current = null;
       }
-      scannerRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
     }
     setScannerStarted(false);
-  }, []);
+    setTorchEnabled(false);
+  }, [torchEnabled]);
 
-  // Initialize camera scanner when Tab 1 is active and no tool is selected
-  useEffect(() => {
-    let isCancelled = false;
+  // Start Camera with Primary Rear lock & iOS graceful fallback
+  const startCameraScanner = useCallback(
+    async (requestedFacing?: 'environment' | 'user') => {
+      setScannerError(null);
+      const activeFacing = requestedFacing || facingMode;
+      let stream: MediaStream | null = null;
 
-    if (isOpen && activeTab === 'scanner' && !selectedAsset) {
-      const initScanner = async () => {
+      try {
+        const constraints: MediaStreamConstraints = {
+          video: {
+            facingMode: { ideal: activeFacing },
+            width: { ideal: 1920, min: 640 },
+            height: { ideal: 1080, min: 480 },
+          },
+          audio: false,
+        };
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch {
         try {
-          const { Html5Qrcode } = await import('html5-qrcode');
-          if (isCancelled) return;
-
-          // Stop any previous instance
-          await stopCameraScanner();
-
-          const readerElem = document.getElementById('manual-checkin-qr-reader');
-          if (!readerElem) return;
-
-          const scanner = new Html5Qrcode('manual-checkin-qr-reader');
-          scannerRef.current = scanner;
-
-          await scanner.start(
-            { facingMode: 'environment' },
-            {
-              fps: 10,
-              qrbox: { width: 250, height: 250 },
-              aspectRatio: 1.0,
-            },
-            async (decodedText) => {
-              if (isCancelled) return;
-              try {
-                // Pause scanner and lookup tool
-                await scanner.pause(true);
-                const asset = await getAssetDetailsByQr(decodedText, warehouseId, orgId);
-                if (asset) {
-                  setSelectedAsset(asset);
-                  setSubmitFeedback(null);
-                  await stopCameraScanner();
-                } else {
-                  setScannerError(`לא נמצא כלי התואם לברקוד "${decodedText}".`);
-                  scanner.resume();
-                }
-              } catch (err) {
-                console.warn('Failed lookup for scanned QR:', err);
-                scanner.resume();
-              }
-            },
-            () => {
-              // scanning frames...
-            }
-          );
-
-          if (!isCancelled) {
-            setScannerStarted(true);
-            setScannerError(null);
-          }
-        } catch (err: unknown) {
-          if (!isCancelled) {
-            console.warn('Camera scanner init notice:', err);
-            setScannerError('מצלמה לא זמינה או שחסרה הרשאת גישה. ניתן להקליד ברקוד ידנית למטה.');
-            setScannerStarted(false);
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: activeFacing },
+            audio: false,
+          });
+        } catch {
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: true,
+              audio: false,
+            });
+          } catch (e3) {
+            console.error('[ManualCheckin] getUserMedia failed completely:', e3);
           }
         }
-      };
+      }
 
-      const timer = setTimeout(() => {
-        void initScanner();
-      }, 150);
+      if (!stream) {
+        setScannerError('לא ניתן לגשת למצלמת המכשיר. אנא אשר גישה למצלמה.');
+        setScannerStarted(false);
+        return;
+      }
 
-      return () => {
-        isCancelled = true;
-        clearTimeout(timer);
-        void stopCameraScanner();
-      };
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+      }
+
+      setScannerStarted(true);
+
+      const track = stream.getVideoTracks()[0];
+      if (track) {
+        const getCaps = (track as unknown as { getCapabilities?: () => { torch?: boolean } }).getCapabilities;
+        if (typeof getCaps === 'function') {
+          const caps = getCaps.call(track);
+          setTorchSupported(Boolean(caps?.torch));
+        } else {
+          setTorchSupported(false);
+        }
+      }
+    },
+    [facingMode]
+  );
+
+  // Flip Camera (Back ↔ Front only)
+  const handleFlipCamera = useCallback(async () => {
+    const nextFacing = facingMode === 'environment' ? 'user' : 'environment';
+    setFacingMode(nextFacing);
+    await stopCameraScanner();
+    await startCameraScanner(nextFacing);
+  }, [facingMode, stopCameraScanner, startCameraScanner]);
+
+  // Background frame scan check
+  const performScanCheck = useCallback(async () => {
+    if (!videoRef.current || isBusyRef.current || selectedAsset || !scannerStarted) return;
+    if (videoRef.current.readyState < 2) return;
+
+    isBusyRef.current = true;
+    try {
+      const res = await detectBarcodeOrQr(videoRef.current);
+      if (res && res.rawValue) {
+        const clean = extractTagFromBarcodePayload(res.rawValue);
+        if (clean) {
+          triggerOcrHaptic(50);
+          playOcrBeep();
+          const asset = await getAssetDetailsByQr(clean, warehouseId, orgId);
+          if (asset) {
+            setSelectedAsset(asset);
+            setSubmitFeedback(null);
+            await stopCameraScanner();
+          } else {
+            setScannerError(`לא נמצא כלי התואם לברקוד "${clean}".`);
+          }
+        }
+      }
+    } catch {
+      // ignore
+    } finally {
+      isBusyRef.current = false;
+    }
+  }, [selectedAsset, scannerStarted, warehouseId, orgId, stopCameraScanner]);
+
+  // Lifecycle for camera scanner
+  useEffect(() => {
+    if (isOpen && activeTab === 'scanner' && !selectedAsset) {
+      void startCameraScanner();
     } else {
       void stopCameraScanner();
     }
-  }, [isOpen, activeTab, selectedAsset, warehouseId, orgId, stopCameraScanner]);
+    return () => {
+      void stopCameraScanner();
+    };
+  }, [isOpen, activeTab, selectedAsset, startCameraScanner, stopCameraScanner]);
+
+  // Periodic interval
+  useEffect(() => {
+    if (!scannerStarted || selectedAsset || !isOpen || activeTab !== 'scanner') {
+      if (scanIntervalRef.current) {
+        clearInterval(scanIntervalRef.current);
+        scanIntervalRef.current = null;
+      }
+      return;
+    }
+
+    scanIntervalRef.current = setInterval(() => {
+      void performScanCheck();
+    }, 200);
+
+    return () => {
+      if (scanIntervalRef.current) {
+        clearInterval(scanIntervalRef.current);
+        scanIntervalRef.current = null;
+      }
+    };
+  }, [scannerStarted, selectedAsset, isOpen, activeTab, performScanCheck]);
 
   // Handle Manual Barcode Lookup in Tab 1
   const handleBarcodeManualSearch = async () => {
@@ -627,10 +709,40 @@ export default function ManualCheckinModal({
               {/* TAB 1: CAMERA SCANNER */}
               {activeTab === 'scanner' && (
                 <div className="space-y-3 animate-in fade-in">
-                  <div className="relative w-full aspect-[4/3] max-w-sm mx-auto bg-slate-950 rounded-2xl overflow-hidden border-2 border-slate-800 shadow-inner flex items-center justify-center">
-                    <div id="manual-checkin-qr-reader" className="w-full h-full" />
+                  <div className="relative w-full aspect-[4/3] max-w-sm mx-auto bg-black rounded-2xl overflow-hidden border border-slate-800 shadow-inner flex items-center justify-center">
+                    <video
+                      ref={videoRef}
+                      playsInline
+                      muted
+                      autoPlay
+                      className="w-full h-full object-cover"
+                    />
+
+                    {/* Viewfinder frame */}
+                    <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                      <div className="w-[72%] h-[140px] relative rounded-2xl border border-white/40 bg-white/[0.02] flex items-center justify-center">
+                        <div className="absolute top-0 left-0 w-3 h-3 border-t-2 border-l-2 border-white/70 rounded-tl-sm" />
+                        <div className="absolute top-0 right-0 w-3 h-3 border-t-2 border-r-2 border-white/70 rounded-tr-sm" />
+                        <div className="absolute bottom-0 left-0 w-3 h-3 border-b-2 border-l-2 border-white/70 rounded-bl-sm" />
+                        <div className="absolute bottom-0 right-0 w-3 h-3 border-b-2 border-r-2 border-white/70 rounded-br-sm" />
+                        <div className="absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-emerald-400/70 to-transparent shadow-[0_0_8px_#34d399] animate-[bounce_2.5s_infinite]" />
+                      </div>
+                    </div>
+
+                    {/* Floating flip camera button */}
+                    <div className="absolute bottom-3 right-3 pointer-events-auto">
+                      <button
+                        type="button"
+                        onClick={() => void handleFlipCamera()}
+                        className="w-9 h-9 rounded-full bg-black/60 hover:bg-black/80 text-white border border-white/20 flex items-center justify-center backdrop-blur-md shadow-md transition-all active:scale-90 cursor-pointer"
+                        title="החלף מצלמה"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
                     {!scannerStarted && !scannerError && (
-                      <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 gap-2 p-4 text-center">
+                      <div className="absolute inset-0 bg-slate-950 flex flex-col items-center justify-center text-slate-400 gap-2 p-4 text-center z-10">
                         <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
                         <span className="text-xs font-bold">מפעיל מצלמה לסריקה...</span>
                       </div>
@@ -647,7 +759,7 @@ export default function ManualCheckinModal({
                     className="w-full max-w-sm mx-auto py-2.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white text-xs font-black flex items-center justify-center gap-2 shadow-md shadow-emerald-700/25 cursor-pointer transition-all hover:scale-[1.01] active:scale-95"
                   >
                     <Sparkles className="w-4 h-4 text-amber-300" />
-                    <span>🔦 סורק OCR שטח (פנס + סינון לתגיות שחוקות)</span>
+                    <span>סרוק כלי (מצלמה מורחבת / OCR)</span>
                   </button>
 
                   {scannerError && (
