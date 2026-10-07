@@ -25,7 +25,6 @@ import {
   PackagePlus,
   Radio,
   Barcode,
-  Sparkles,
 } from 'lucide-react';
 import type { Category, Warehouse, AssetCondition } from '@/types/domain';
 import {
@@ -526,7 +525,7 @@ export default function QuickOnboardView({
         setIsVerifyingQr(false);
       }
     },
-    [isRapidDispatchMode, stopScanner, handleAddToCart, role, currentOrganization]
+    [isRapidDispatchMode, stopScanner, handleAddToCart, role, currentOrganization, selectedWarehouseId]
   );
 
   // Claim detection from either Barcode/QR or Heavy-Duty OCR engine
@@ -685,7 +684,7 @@ export default function QuickOnboardView({
   }, [scannerActive, qrCode, showOnboardForm, performDualScanCycle]);
 
   // Reset QR state and re-open scanner
-  const handleReScan = async () => {
+  const handleReScan = useCallback(async () => {
     setQrCode('');
     setManualQrInput('');
     setQrWarning(null);
@@ -699,7 +698,7 @@ export default function QuickOnboardView({
     isDebounceLockedRef.current = false;
     setScannerActive(true);
     await startCamera();
-  };
+  }, [startCamera]);
 
   // Callback when custody action completes from modal
   const handleModalActionComplete = (message: string) => {
@@ -738,17 +737,17 @@ export default function QuickOnboardView({
     if (!scannedRegisteredAsset) return;
     if (role !== 'worker') {
       handleAddToCart(scannedRegisteredAsset);
-      handleReScan();
+      void handleReScan();
     } else {
       openPinModal(
         () => {
           handleAddToCart(scannedRegisteredAsset);
-          handleReScan();
+          void handleReScan();
         },
         'הזן קוד מנהל עבודה (PIN) להוספת כלי לסל ניפוק'
       );
     }
-  }, [role, scannedRegisteredAsset, handleAddToCart, openPinModal]);
+  }, [role, scannedRegisteredAsset, handleAddToCart, handleReScan, openPinModal]);
 
   // Manual QR input submission
   const handleManualQrSubmit = async (e: React.FormEvent) => {

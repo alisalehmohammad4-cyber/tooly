@@ -4,7 +4,6 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation';
 import {
   X,
-  Scan,
   Keyboard,
   Search,
   CheckCircle2,
@@ -12,7 +11,6 @@ import {
   Clock,
   User,
   Phone,
-  Wrench,
   Loader2,
   ArrowRight,
   Sparkles,
@@ -84,7 +82,6 @@ export default function ManualCheckinModal({
   const [manualBarcodeScanInput, setManualBarcodeScanInput] = useState<string>('');
   const [isSearchingBarcode, setIsSearchingBarcode] = useState<boolean>(false);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
-  const [torchSupported, setTorchSupported] = useState<boolean>(false);
   const [torchEnabled, setTorchEnabled] = useState<boolean>(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -208,17 +205,6 @@ export default function ManualCheckinModal({
       }
 
       setScannerStarted(true);
-
-      const track = stream.getVideoTracks()[0];
-      if (track) {
-        const getCaps = (track as unknown as { getCapabilities?: () => { torch?: boolean } }).getCapabilities;
-        if (typeof getCaps === 'function') {
-          const caps = getCaps.call(track);
-          setTorchSupported(Boolean(caps?.torch));
-        } else {
-          setTorchSupported(false);
-        }
-      }
     },
     [facingMode]
   );
