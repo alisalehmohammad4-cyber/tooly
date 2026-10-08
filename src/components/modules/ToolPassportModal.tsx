@@ -231,36 +231,40 @@ function ToolPassportModalContent({
 
   // Safe field extraction with bulletproof fallbacks so it NEVER throws a TypeError
   const currentAsset = updatedAsset || asset || null;
-  const assetId = currentAsset?.id || currentAsset?.asset_id || asset?.id || asset?.asset_id || '';
-  const tagNumber =
-    currentAsset?.tag_number ||
-    currentAsset?.tagNumber ||
-    currentAsset?.serial_number ||
+  const rawCurrent = (currentAsset as unknown as Record<string, unknown>) || {};
+  const rawAsset = (asset as unknown as Record<string, unknown>) || {};
+  const assetId = String(currentAsset?.id || rawCurrent.asset_id || asset?.id || rawAsset.asset_id || '');
+  const tagNumber = String(
+    rawCurrent.tag_number ||
+    rawCurrent.tagNumber ||
+    rawCurrent.serial_number ||
     currentAsset?.qrCode ||
-    asset?.tag_number ||
-    asset?.tagNumber ||
-    asset?.serial_number ||
+    rawAsset.tag_number ||
+    rawAsset.tagNumber ||
+    rawAsset.serial_number ||
     asset?.qrCode ||
     assetTag ||
-    '';
-  const assetTitle =
-    currentAsset?.name ||
+    ''
+  );
+  const assetTitle = String(
+    rawCurrent.name ||
     currentAsset?.toolName ||
-    currentAsset?.model ||
-    currentAsset?.asset_name ||
-    asset?.name ||
+    rawCurrent.model ||
+    rawCurrent.asset_name ||
+    rawAsset.name ||
     asset?.toolName ||
-    asset?.model ||
-    asset?.asset_name ||
-    'כלי עבודה';
-  const assetBrand = currentAsset?.brand || asset?.brand || 'MAGMA';
+    rawAsset.model ||
+    rawAsset.asset_name ||
+    'כלי עבודה'
+  );
+  const assetBrand = String(currentAsset?.brand || asset?.brand || 'MAGMA');
   const modelNumber =
     currentAsset?.modelNumber ||
     currentAsset?.model_number ||
-    currentAsset?.model ||
+    (rawCurrent.model as string) ||
     asset?.modelNumber ||
     asset?.model_number ||
-    asset?.model ||
+    (rawAsset.model as string) ||
     null;
 
   // Timeline loading useEffect with bulletproof null safety and try/catch
@@ -277,7 +281,7 @@ function ToolPassportModalContent({
         if (isMounted && res && res.success && Array.isArray(res.data)) {
           setTimeline(res.data);
           if (res.asset) {
-            setUpdatedAsset((prev) => prev || res.asset);
+            setUpdatedAsset((prev) => prev ?? (res.asset || null));
           }
         } else if (isMounted) {
           setTimeline([]);
@@ -612,9 +616,15 @@ function ToolPassportModalContent({
                 currentStatus={currentAsset?.status || 'available'}
                 variant="dropdown"
                 onStatusChanged={(newSt) => {
-                  const updated = { ...currentAsset, status: newSt };
-                  setUpdatedAsset(updated);
-                  if (onAssetUpdated) onAssetUpdated(updated);
+                  if (currentAsset) {
+                    const updated: ScannedAssetDetails = {
+                      ...currentAsset,
+                      id: currentAsset.id || assetId,
+                      status: newSt,
+                    };
+                    setUpdatedAsset(updated);
+                    if (onAssetUpdated) onAssetUpdated(updated);
+                  }
                   void refreshTimeline();
                 }}
               />
@@ -1321,17 +1331,29 @@ export default function ToolPassportModal({
   onAssetUpdated,
 }: ToolPassportModalProps) {
   // If asset is null/undefined and no tag is provided, or modal is closed, return null
-  const resolvedAsset =
+  const resolvedAsset: ScannedAssetDetails | null =
     asset ||
     (assetTag
-      ? {
-          id: '',
+      ? ({
+          id: assetTag,
           qrCode: assetTag,
+          qr_code: assetTag,
           tag_number: assetTag,
           name: 'כלי עבודה',
           toolName: 'כלי עבודה',
           brand: 'MAGMA',
-        }
+          modelNumber: null,
+          warehouseName: 'מחסן כללי',
+          warehouseCode: 'WH',
+          status: 'available',
+          condition: 'good',
+          currentAssignedWorker: null,
+          currentWarehouseId: '',
+          version: 1,
+          safetyInspectionDue: null,
+          isLocked: false,
+          lockReason: null,
+        } as unknown as ScannedAssetDetails)
       : null);
 
   if (!resolvedAsset || isOpen === false) {

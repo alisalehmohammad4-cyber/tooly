@@ -528,11 +528,6 @@ export async function getCatalogData(
           '') as string;
         const wh = currentWh?.name ? currentWh : warehouseMap.get(whId);
 
-        // Explicit resolved warehouse name: Prioritize joined current_warehouse
-        const resolvedWhName =
-          asset.current_warehouse?.name ||
-          wh?.name ||
-          'מתקן כללי';
 
         const catId = (asset.category_id || asset.categoryId || asset.tool_models?.category_id || mockFallback?.categoryId || '') as string;
         const catName = (asset.category_name || asset.categoryName || asset.category || '') as string;
@@ -591,7 +586,11 @@ export async function getCatalogData(
           warehouseName: asset.current_warehouse?.name || wh?.name || 'מתקן כללי',
           warehouse_name: asset.current_warehouse?.name || wh?.name || 'מתקן כללי',
           warehouse: asset.current_warehouse?.name || wh?.name || 'מתקן כללי',
-          current_warehouse: asset.current_warehouse || (currentWh ? { id: currentWh.id || whId, name: resolvedWhName, code: currentWh.code || '' } : (wh ? { id: wh.id, name: wh.name, code: wh.code } : null)),
+          current_warehouse: (currentWh && currentWh.name)
+            ? { id: currentWh.id || whId || 'wh', name: currentWh.name, code: currentWh.code || 'WH' }
+            : (wh && wh.name)
+            ? { id: wh.id || whId || 'wh', name: wh.name, code: wh.code || 'WH' }
+            : null,
           warehouseCode:
             currentWh?.code || wh?.code || mockFallback?.warehouseCode || (asset.warehouse_code as string) || 'WH',
           warehouse_code:

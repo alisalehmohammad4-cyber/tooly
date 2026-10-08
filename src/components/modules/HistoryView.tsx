@@ -473,11 +473,13 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
       toolName: assetTitle,
       brand: assetBrand,
       modelNumber: item.modelNumber,
-      condition: item.condition,
+      condition: item.condition || 'good',
       warehouseName: item.warehouseName,
-      warehouseId: item.warehouseId,
-      currentWarehouseId: item.warehouseId,
+      warehouseCode: 'WH',
+      warehouseId: item.warehouseId || undefined,
+      currentWarehouseId: item.warehouseId || '',
       currentAssignedWorker: item.targetWorker,
+      version: 1,
       status: item.action === 'CHECKOUT' ? 'checked_out' : item.action === 'MAINTENANCE_FLAG' ? 'maintenance' : 'available',
     });
     setIsPassportOpen(true);

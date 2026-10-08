@@ -22,12 +22,13 @@ import {
   Loader2,
   Check,
   X,
-  ExternalLink,
   ChevronLeft,
   Power,
+  ScanLine,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { isPlatformSuperAdmin } from '@/lib/auth/superadmin';
+import MasterScanModal from '@/components/modules/MasterScanModal';
 import type { Organization, OrganizationStatus } from '@/types/domain';
 import {
   getPendingOrganizationsAction,
@@ -64,6 +65,7 @@ export default function SuperAdminDashboardView() {
   const [rejectingOrgId, setRejectingOrgId] = useState<string | null>(null);
   const [togglingOrgId, setTogglingOrgId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const [isMasterScanOpen, setIsMasterScanOpen] = useState<boolean>(false);
 
   // Security Check: strictly platform superadmins
   useEffect(() => {
@@ -255,13 +257,15 @@ export default function SuperAdminDashboardView() {
               <span className="hidden sm:inline">רענון</span>
             </button>
 
-            <Link
-              href="/"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold transition-all cursor-pointer"
+            <button
+              type="button"
+              onClick={() => setIsMasterScanOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-950/60 hover:bg-purple-900/80 text-purple-200 border border-purple-700/60 text-xs font-bold transition-all cursor-pointer shadow-sm shadow-purple-950/30"
+              title="סורק שטח גלובלי - איתור וסריקת כלים בכלל המערכת ללא שיוך מחסן"
             >
+              <ScanLine className="w-3.5 h-3.5 text-purple-400" />
               <span>סורק שטח</span>
-              <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
-            </Link>
+            </button>
 
             <button
               type="button"
@@ -438,7 +442,7 @@ export default function SuperAdminDashboardView() {
                         </div>
 
                         <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
-                          ממתין
+                          {org.status === 'suspended' ? 'מושהה / ממתין' : 'ממתין לאישור'}
                         </span>
                       </div>
 
@@ -570,7 +574,6 @@ export default function SuperAdminDashboardView() {
                   const isToggling = togglingOrgId === org.id;
                   const isActive = org.status === 'active';
                   const isSuspended = org.status === 'suspended';
-                  const isPending = org.status === 'pending_approval';
 
                   return (
                     <tr key={org.id} className="hover:bg-slate-800/40 transition-colors">
@@ -617,35 +620,35 @@ export default function SuperAdminDashboardView() {
                       </td>
                       <td className="py-3.5 px-4 text-left">
                         <div className="flex items-center justify-end gap-2">
-                          {!isPending && (
+                          {isActive ? (
                             <button
                               type="button"
                               disabled={isToggling}
                               onClick={() => handleToggleStatus(org.id, org.status, org.name)}
-                              className={`px-3 py-1.5 rounded-xl border text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50 ${
-                                isActive
-                                  ? 'border-red-500/30 hover:bg-red-950/60 text-red-300'
-                                  : 'border-emerald-500/30 hover:bg-emerald-950/60 text-emerald-300'
-                              }`}
+                              className="px-3 py-1.5 rounded-xl border border-red-500/30 hover:bg-red-950/60 text-red-300 text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                              title="השהה ארגון"
                             >
                               {isToggling ? (
                                 <Loader2 className="w-3 h-3 animate-spin" />
                               ) : (
                                 <Power className="w-3 h-3" />
                               )}
-                              <span>{isActive ? 'השהה' : 'הפעל מחדש'}</span>
+                              <span>השהה</span>
                             </button>
-                          )}
-
-                          {isPending && (
+                          ) : (
                             <button
                               type="button"
                               onClick={() => handleApprove(org.id, org.name)}
                               disabled={approvingOrgId === org.id}
                               className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                              title="אשר והפעל ארגון"
                             >
-                              <Check className="w-3 h-3" />
-                              <span>אשר</span>
+                              {approvingOrgId === org.id ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <Check className="w-3 h-3" />
+                              )}
+                              <span>אשר ארגון</span>
                             </button>
                           )}
                         </div>
@@ -671,6 +674,12 @@ export default function SuperAdminDashboardView() {
       <footer className="border-t border-slate-800/80 bg-slate-950 px-4 py-4 text-center text-xs text-slate-500">
         <p>Tooly Multi-Tenant Platform &bull; סביבת ניהול ראשית מבודדת (SuperAdmin Only) &bull; v2.5</p>
       </footer>
+
+      {/* Master Scan & Lookup Modal */}
+      <MasterScanModal
+        isOpen={isMasterScanOpen}
+        onClose={() => setIsMasterScanOpen(false)}
+      />
     </div>
   );
 }

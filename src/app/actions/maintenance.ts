@@ -236,14 +236,14 @@ export async function getInTransitFleetAction(
           const originWarehouseName = req?.source_warehouse?.name || (originWarehouseId ? orgWhMap.get(originWarehouseId) : null) || 'מחסן שטח ראשי';
           const destinationWarehouseId = req?.target_warehouse_id || row.current_warehouse_id || '';
           const destinationWarehouseName = req?.target_warehouse?.name || row.warehouses?.name || (destinationWarehouseId ? orgWhMap.get(destinationWarehouseId) : null) || 'אתר יעד מבוקש';
-          const dispatchedAt = req?.updated_at || row.updated_at || row.created_at;
+          const dispatchedAt = req?.updated_at || row.updated_at || row.created_at || new Date().toISOString();
           const dispatchedBy = req?.decided_by || req?.requested_by || 'מנהל תפעול';
           const transporterNotes = req?.reason || ledgerNoteMap.get(row.id) || null;
 
           return {
             id: req?.id || row.id,
             assetId: row.id,
-            qrCode: row.qr_code,
+            qrCode: (row.qr_code as string) || (row.tag_number as string) || row.id,
             toolName,
             brand,
             modelNumber,
@@ -287,7 +287,7 @@ export async function getInTransitFleetAction(
         toolName: sample.toolName,
         brand: sample.brand,
         modelNumber: sample.modelNumber,
-        serialNumber: (sample as Record<string, unknown>).serialNumber as string || 'SN-77892',
+        serialNumber: ((sample as unknown as Record<string, unknown>).serialNumber as string) || 'SN-77892',
         originWarehouseId: originWh.id,
         originWarehouseName: originWh.name,
         destinationWarehouseId: destWh.id,
@@ -302,7 +302,7 @@ export async function getInTransitFleetAction(
   }
 
   return inTransitAssets.map((a, idx) => {
-    const rawA = a as Record<string, unknown>;
+    const rawA = a as unknown as Record<string, unknown>;
     const originWh = warehouses[idx % warehouses.length] || { id: 'wh-01', name: 'מחסן ראשי' };
     const destWh = warehouses[(idx + 1) % warehouses.length] || { id: 'wh-02', name: 'אתר עבודה' };
     const dispatchedAt = (rawA.updatedAt as string) || new Date().toISOString();
@@ -424,7 +424,7 @@ export async function getMaintenanceAssetsAction(
           const brand = row.tool_models?.brand || row.brand || '';
           const modelNumber = row.tool_models?.model_number || row.model_number || null;
           const reportingWarehouseName = row.warehouses?.name || 'מחסן שטח מרכזי';
-          const dispatchedDate = ledger?.created_at || row.updated_at || row.created_at;
+          const dispatchedDate = ledger?.created_at || row.updated_at || row.created_at || new Date().toISOString();
 
           // Infer or assign representative technician / lab based on brand
           let lab = 'מעבדת שירות מרכזית';
@@ -438,7 +438,7 @@ export async function getMaintenanceAssetsAction(
           return {
             id: row.id,
             assetId: row.id,
-            qrCode: row.qr_code,
+            qrCode: (row.qr_code as string) || (row.tag_number as string) || row.id,
             toolName,
             brand,
             modelNumber,
@@ -449,7 +449,7 @@ export async function getMaintenanceAssetsAction(
             faultDescription: ledger?.notes || 'בדיקת מנוע והחלפת פחמים תקופתית',
             dispatchedDate,
             elapsedTimeText: formatElapsedHebrew(dispatchedDate),
-            condition: row.condition || 'needs_repair',
+            condition: ((row.condition as string) || 'needs_repair') as 'needs_repair' | 'retired',
           };
         });
       }
@@ -483,7 +483,7 @@ export async function getMaintenanceAssetsAction(
         toolName: sample1.toolName,
         brand: sample1.brand,
         modelNumber: sample1.modelNumber,
-        serialNumber: (sample1 as Record<string, unknown>).serialNumber as string || 'SN-88219',
+        serialNumber: ((sample1 as unknown as Record<string, unknown>).serialNumber as string) || 'SN-88219',
         currentWarehouseId: sample1.warehouseId,
         reportingWarehouseName: wh1.name,
         assignedTechnicianOrLab: 'מעבדת מקיטה רשמית',
@@ -499,7 +499,7 @@ export async function getMaintenanceAssetsAction(
         toolName: sample2.toolName,
         brand: sample2.brand,
         modelNumber: sample2.modelNumber,
-        serialNumber: (sample2 as Record<string, unknown>).serialNumber as string || 'SN-33901',
+        serialNumber: ((sample2 as unknown as Record<string, unknown>).serialNumber as string) || 'SN-33901',
         currentWarehouseId: sample2.warehouseId,
         reportingWarehouseName: wh2.name,
         assignedTechnicianOrLab: 'מוסך מרכזי - תיקוני שטח',
@@ -512,7 +512,7 @@ export async function getMaintenanceAssetsAction(
   }
 
   return maintenanceAssets.map((a) => {
-    const rawA = a as Record<string, unknown>;
+    const rawA = a as unknown as Record<string, unknown>;
     const wh = warehouses.find((w) => w.id === a.warehouseId) || { name: a.warehouseName || 'מחסן שטח' };
     const dispatchedDate = (rawA.updatedAt as string) || new Date().toISOString();
 

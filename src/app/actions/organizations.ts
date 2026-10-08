@@ -321,23 +321,25 @@ export async function getPendingOrganizationsAction(): Promise<{
     if (isSupabaseConfigured()) {
       try {
         const serverClient = getSupabaseServerClient();
+        // Query pending / non-active organizations (including Yamojee, suspended, or pending_approval)
         const { data, error } = await serverClient
           .from('organizations')
           .select('*')
-          .eq('status', 'pending_approval')
+          .neq('status', 'active')
           .order('created_at', { ascending: false });
 
         if (data && !error) {
           type OrgDbRow = Record<string, unknown> & {
-            id: string;
-            name: string;
-            slug: string;
+            id: string | number;
+            name?: string;
+            slug?: string;
             serial_prefix?: string;
             serialPrefix?: string;
             default_currency?: string;
             defaultCurrency?: string;
             logo_url?: string;
             logoUrl?: string;
+            status?: string;
             contact_phone?: string;
             contactPhone?: string;
             contact_email?: string;
@@ -347,14 +349,21 @@ export async function getPendingOrganizationsAction(): Promise<{
             approved_by?: string;
           };
           for (const row of (data as OrgDbRow[])) {
+            const orgId = String(row.id);
+            const rawStatus = (row.status as string) || '';
+            const normalizedStatus: OrganizationStatus =
+              !rawStatus || rawStatus === 'pending' || rawStatus === 'pending_approval'
+                ? 'pending_approval'
+                : (rawStatus as OrganizationStatus);
+
             const orgObj: Organization = {
-              id: row.id,
-              name: row.name,
-              slug: row.slug,
+              id: orgId,
+              name: row.name || 'ארגון ללא שם',
+              slug: row.slug || orgId.slice(0, 8),
               serialPrefix: row.serial_prefix || row.serialPrefix || 'TOOL-',
               defaultCurrency: row.default_currency || row.defaultCurrency || 'ILS',
               logoUrl: row.logo_url || row.logoUrl,
-              status: 'pending_approval',
+              status: normalizedStatus,
               contact_phone: row.contact_phone || row.contactPhone,
               contact_email: row.contact_email || row.contactEmail,
               contactPhone: row.contact_phone || row.contactPhone,
@@ -371,8 +380,8 @@ export async function getPendingOrganizationsAction(): Promise<{
       }
     }
 
-    // 2. Mock Store Pending Organizations
-    const mockPending = getMockOrganizations().filter((o) => o.status === 'pending_approval');
+    // 2. Mock Store Pending Organizations (all non-active organizations)
+    const mockPending = getMockOrganizations().filter((o) => o.status !== 'active');
     for (const mo of mockPending) {
       if (!orgsMap.has(mo.id)) {
         orgsMap.set(mo.id, mo);
@@ -454,6 +463,7 @@ export async function approveOrganizationAction(
       }
     }
 
+    revalidatePath('/admin');
     revalidatePath('/dashboard/manager');
     revalidatePath('/');
 
@@ -605,13 +615,19 @@ export async function getAllOrganizationsAdminAction(): Promise<{
           };
           for (const row of (dbOrgs as DbOrgRow[])) {
             const orgId = String(row.id);
+            const rawStatus = (row.status as string) || '';
+            const normalizedStatus: OrganizationStatus =
+              !rawStatus || rawStatus === 'pending' || rawStatus === 'pending_approval'
+                ? 'pending_approval'
+                : (rawStatus as OrganizationStatus);
+
             orgsMap.set(orgId, {
               id: orgId,
               name: row.name || 'ארגון ללא שם',
               slug: row.slug || orgId.slice(0, 8),
               serialPrefix: row.serial_prefix || row.serialPrefix || 'TOOL-',
               defaultCurrency: row.default_currency || row.defaultCurrency || 'ILS',
-              status: (row.status as OrganizationStatus) || 'active',
+              status: normalizedStatus,
               contactPhone: row.contact_phone || row.contactPhone,
               contactEmail: row.contact_email || row.contactEmail,
               toolsCount: 0,
@@ -751,7 +767,7 @@ export async function getPlatformMetricsAction(): Promise<{
 
     const totalOrgs = orgs.length;
     const activeOrgs = orgs.filter((o) => o.status === 'active').length;
-    const pendingOrgs = orgs.filter((o) => o.status === 'pending_approval').length;
+    const pendingOrgs = orgs.filter((o) => o.status !== 'active').length;
     const totalAssets = orgs.reduce((sum, o) => sum + (o.toolsCount || 0), 0);
     const totalLoans = orgs.reduce((sum, o) => sum + (o.activeLoansCount || 0), 0);
     const totalUsers = orgs.reduce((sum, o) => sum + (o.membersCount || 0), 0);
@@ -827,3 +843,179 @@ export async function toggleOrganizationStatusAction(
     };
   }
 }
+
+export interface MasterAssetResult {
+  id: string;
+  name: string;
+  tagNumber: string;
+  serialNumber?: string;
+  qrCode?: string;
+  brand?: string;
+  modelNumber?: string;
+  status: string;
+  condition?: string;
+  organizationId: string;
+  organizationName: string;
+  warehouseName?: string;
+  assignedWorker?: string;
+  assignedWorkerPhone?: string;
+}
+
+/**
+ * SuperAdmin Only: Global lookup for any asset across all organizations and warehouses.
+ * Completely isolates SuperAdmin as platform-master without adopting customer warehouse scope.
+ */
+export async function masterLookupAssetsAction(query?: string): Promise<{
+  success: boolean;
+  assets: MasterAssetResult[];
+  error?: string;
+}> {
+  try {
+    const caller = await getServerSessionUser();
+    if (!isPlatformSuperAdmin(caller)) {
+      return {
+        success: false,
+        assets: [],
+        error: 'הרשאה נדחתה: פעולה זו מורשית למנהל על בלבד.',
+      };
+    }
+
+    const cleanQuery = query?.trim() || '';
+    const results: MasterAssetResult[] = [];
+    const seenIds = new Set<string>();
+
+    // 1. Supabase Query across all organizations
+    if (isSupabaseConfigured()) {
+      try {
+        const serverClient = getSupabaseServerClient();
+
+        // Get organizations map for human names
+        const { data: orgRows } = await serverClient
+          .from('organizations')
+          .select('id, name');
+        const orgNamesMap = new Map<string, string>();
+        if (orgRows) {
+          for (const o of orgRows) {
+            orgNamesMap.set(String(o.id), o.name || 'ארגון');
+          }
+        }
+
+        // Get warehouses map for warehouse names
+        const { data: whRows } = await serverClient
+          .from('warehouses')
+          .select('id, name');
+        const whNamesMap = new Map<string, string>();
+        if (whRows) {
+          for (const w of whRows) {
+            whNamesMap.set(String(w.id), w.name || 'מחסן');
+          }
+        }
+
+        let dbQuery = serverClient
+          .from('assets')
+          .select(
+            'id, name, tag_number, serial_number, qr_code, brand, model_number, status, condition, organization_id, current_warehouse_id, current_assigned_worker, assigned_worker_phone'
+          )
+          .limit(50);
+
+        if (cleanQuery) {
+          dbQuery = dbQuery.or(
+            `tag_number.ilike.%${cleanQuery}%,serial_number.ilike.%${cleanQuery}%,name.ilike.%${cleanQuery}%,brand.ilike.%${cleanQuery}%,qr_code.ilike.%${cleanQuery}%,current_assigned_worker.ilike.%${cleanQuery}%`
+          );
+        } else {
+          dbQuery = dbQuery.order('created_at', { ascending: false });
+        }
+
+        const { data: assetsData, error: assetsErr } = await dbQuery;
+
+        if (assetsData && !assetsErr) {
+          for (const a of assetsData) {
+            const orgId = String(a.organization_id || '');
+            const orgName = orgNamesMap.get(orgId) || 'ארגון כללי';
+            const whId = String(a.current_warehouse_id || '');
+            const whName = whNamesMap.get(whId) || (whId ? 'מחסן' : 'לא מוגדר');
+
+            results.push({
+              id: a.id,
+              name: a.name || 'כלי עבודה',
+              tagNumber: a.tag_number || a.id.slice(0, 8),
+              serialNumber: a.serial_number || undefined,
+              qrCode: a.qr_code || undefined,
+              brand: a.brand || undefined,
+              modelNumber: a.model_number || undefined,
+              status: a.status || 'in_stock',
+              condition: a.condition || 'good',
+              organizationId: orgId,
+              organizationName: orgName,
+              warehouseName: whName,
+              assignedWorker: a.current_assigned_worker || undefined,
+              assignedWorkerPhone: a.assigned_worker_phone || undefined,
+            });
+            seenIds.add(a.id);
+          }
+        }
+      } catch (err) {
+        console.warn('[masterLookupAssetsAction] Supabase lookup error:', err);
+      }
+    }
+
+    // 2. Fallback / Merge from MOCK_ASSETS
+    try {
+      const { MOCK_ASSETS } = await import('@/lib/mockStore');
+      const qLower = cleanQuery.toLowerCase();
+      const matchedMocks = cleanQuery
+        ? MOCK_ASSETS.filter((item) => {
+            const a = item as unknown as Record<string, unknown>;
+            const tag = String(a.tag_number || a.tagNumber || a.qrCode || '').toLowerCase();
+            const serial = String(a.serial_number || a.serialNumber || '').toLowerCase();
+            const name = String(a.name || a.toolName || '').toLowerCase();
+            const brand = String(a.brand || '').toLowerCase();
+            const worker = String(a.current_assigned_worker || a.assignedWorker || '').toLowerCase();
+            return (
+              tag.includes(qLower) ||
+              serial.includes(qLower) ||
+              name.includes(qLower) ||
+              brand.includes(qLower) ||
+              worker.includes(qLower)
+            );
+          })
+        : MOCK_ASSETS.slice(0, 30);
+
+      for (const raw of matchedMocks) {
+        const m = raw as unknown as Record<string, unknown>;
+        const id = String(m.id || '');
+        if (!seenIds.has(id)) {
+          results.push({
+            id,
+            name: String(m.name || m.toolName || 'כלי עבודה'),
+            tagNumber: String(m.tag_number || m.tagNumber || m.qrCode || id),
+            serialNumber: m.serial_number ? String(m.serial_number) : (m.serialNumber ? String(m.serialNumber) : undefined),
+            qrCode: m.qr_code ? String(m.qr_code) : (m.qrCode ? String(m.qrCode) : undefined),
+            brand: m.brand ? String(m.brand) : undefined,
+            modelNumber: m.model_number ? String(m.model_number) : (m.modelNumber ? String(m.modelNumber) : undefined),
+            status: String(m.status || 'in_stock'),
+            condition: String(m.condition || 'good'),
+            organizationId: String(m.organization_id || m.organizationId || 'default-org'),
+            organizationName: 'הבונים (Mock)',
+            warehouseName: String(m.warehouse_name || m.warehouseName || 'מחסן ראשי'),
+            assignedWorker: m.current_assigned_worker ? String(m.current_assigned_worker) : (m.assignedWorker ? String(m.assignedWorker) : undefined),
+            assignedWorkerPhone: m.assigned_worker_phone ? String(m.assigned_worker_phone) : (m.assignedWorkerPhone ? String(m.assignedWorkerPhone) : undefined),
+          });
+          seenIds.add(id);
+        }
+      }
+    } catch {}
+
+    return {
+      success: true,
+      assets: results,
+    };
+  } catch (err: unknown) {
+    return {
+      success: false,
+      assets: [],
+      error: err instanceof Error ? err.message : 'שגיאה באיתור כלי עבודה גלובלי',
+    };
+  }
+}
+

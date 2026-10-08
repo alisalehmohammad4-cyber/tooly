@@ -69,6 +69,14 @@ export interface ScannedAssetDetails {
   organization_id?: string;
   lastCheckoutNote?: string | null;
   last_checkout_note?: string | null;
+  name?: string;
+  asset_name?: string;
+  tag_number?: string;
+  tagNumber?: string;
+  serial_number?: string;
+  model?: string;
+  assetId?: string;
+  asset_id?: string;
 }
 
 export type CustodyActionResult =

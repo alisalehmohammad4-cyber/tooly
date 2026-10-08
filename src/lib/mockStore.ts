@@ -43018,7 +43018,7 @@ export function getMockStorekeeperOperations(
   const activeLoans: StorekeeperActiveLoan[] = [];
 
   whAssets.forEach((asset) => {
-    const rawAsset = asset as Record<string, unknown>;
+    const rawAsset = asset as unknown as Record<string, unknown>;
     if (asset.status === 'available') availableCount++;
     if (asset.status === 'checked_out') {
       checkedOutCount++;
@@ -43145,12 +43145,17 @@ export function getMockCatalogData(warehouseId?: string, organizationId?: string
     const worker = a.currentAssignedWorker || a.current_assigned_worker || null;
     const qr = a.qrCode || a.qr_code || '';
     const orderNum = a.orderNumber || a.order_number || null;
-    const rawAsset = a as Record<string, unknown> & {
+    const rawAsset = a as unknown as Record<string, unknown> & {
       current_warehouse?: { id: string; name: string; code?: string } | null;
       warehouses?: { name?: string } | null;
       warehouse?: string;
     };
-    const resolvedWh = rawAsset.current_warehouse || (wh ? { id: wh.id, name: wh.name, code: wh.code } : null);
+    const rawWh = rawAsset.current_warehouse;
+    const resolvedWh = rawWh
+      ? { id: rawWh.id, name: rawWh.name, code: rawWh.code || 'WH' }
+      : wh
+      ? { id: wh.id, name: wh.name, code: wh.code || 'WH' }
+      : null;
     const whName =
       rawAsset.current_warehouse?.name ||
       rawAsset.warehouses?.name ||

@@ -1234,25 +1234,26 @@ export default function WarehouseDashboardView({
   }, [isStorekeeper, assignedWarehouseId, selectedWarehouseId, handleWarehouseChange]);
 
   // Open tool passport modal by QR / Tag
-  const handleOpenPassport = async (qrCode: string, fallbackItem?: Partial<ScannedAssetDetails> & Record<string, unknown>) => {
+  const handleOpenPassport = async (qrCode: string, fallbackItem?: unknown) => {
     const clean = qrCode?.trim();
     if (!clean && !fallbackItem) return;
 
+    const fb = (fallbackItem && typeof fallbackItem === 'object' ? fallbackItem : {}) as Record<string, unknown>;
+
     if (fallbackItem) {
       const itemObj: ScannedAssetDetails = {
-        id: (fallbackItem.assetId as string) || (fallbackItem.id as string) || '',
-        qrCode: clean || (fallbackItem.qrCode as string) || (fallbackItem.tag_number as string) || '',
-        tag_number: clean || (fallbackItem.qrCode as string) || (fallbackItem.tag_number as string) || '',
-        name: (fallbackItem.toolName as string) || (fallbackItem.name as string) || 'כלי עבודה',
-        toolName: (fallbackItem.toolName as string) || (fallbackItem.name as string) || 'כלי עבודה',
-        brand: (fallbackItem.brand as string) || 'MAGMA',
-        modelNumber: (fallbackItem.modelNumber as string) || (fallbackItem.model as string) || null,
-        status: (fallbackItem.status as AssetStatus) || 'available',
-        condition: (fallbackItem.condition as 'excellent' | 'good' | 'needs_repair' | 'retired') || 'good',
-        warehouseName: (fallbackItem.warehouseName as string) || 'מתקן כללי',
+        id: String(fb.assetId || fb.id || ''),
+        qrCode: clean || String(fb.qrCode || fb.tag_number || ''),
+        name: String(fb.toolName || fb.name || 'כלי עבודה'),
+        toolName: String(fb.toolName || fb.name || 'כלי עבודה'),
+        brand: String(fb.brand || 'MAGMA'),
+        modelNumber: fb.modelNumber ? String(fb.modelNumber) : (fb.model ? String(fb.model) : null),
+        status: (fb.status as 'available' | 'checked_out' | 'maintenance' | 'retired') || 'available',
+        condition: (fb.condition as 'excellent' | 'good' | 'needs_repair' | 'retired') || 'good',
+        warehouseName: String(fb.warehouseName || 'מתקן כללי'),
         warehouseCode: 'WH',
-        currentWarehouseId: (fallbackItem.currentWarehouseId as string) || (fallbackItem.warehouseId as string) || selectedWarehouseId || '',
-        currentAssignedWorker: (fallbackItem.workerName as string) || (fallbackItem.currentAssignedWorker as string) || null,
+        currentWarehouseId: String(fb.currentWarehouseId || fb.warehouseId || selectedWarehouseId || ''),
+        currentAssignedWorker: fb.workerName ? String(fb.workerName) : (fb.currentAssignedWorker ? String(fb.currentAssignedWorker) : null),
         version: 1,
       };
       setPassportAsset(itemObj);
@@ -1264,7 +1265,7 @@ export default function WarehouseDashboardView({
     setPassportLookupFeedback(null);
     try {
       const activeOrgId = currentOrganization?.id || user?.organizationId;
-      const asset = await getAssetDetailsByQr(clean || fallbackItem?.qrCode, undefined, activeOrgId);
+      const asset = await getAssetDetailsByQr(clean || String(fb.qrCode || ''), undefined, activeOrgId);
       if (asset) {
         setPassportAsset(asset);
         setIsPassportOpen(true);
