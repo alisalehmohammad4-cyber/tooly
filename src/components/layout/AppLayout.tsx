@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   Scan,
   Layers,
@@ -421,6 +421,7 @@ interface AuthGateLoginFormProps {
 }
 
 function AuthGateLoginForm({ requiredRole }: AuthGateLoginFormProps) {
+  const router = useRouter();
   const { loginWithCredentials } = useAuth();
   const { t, dir } = useLanguage();
   const [username, setUsername] = useState('');
@@ -455,7 +456,7 @@ function AuthGateLoginForm({ requiredRole }: AuthGateLoginFormProps) {
           result.user.username?.toLowerCase() === 'admin';
 
         if (isSuper) {
-          window.location.href = '/admin';
+          router.push('/admin');
           return;
         }
 

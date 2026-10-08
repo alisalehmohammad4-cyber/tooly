@@ -5,6 +5,7 @@ import type {
   HighRiskOverdueAsset,
   StorekeeperReturnDue,
   StorekeeperOverdueAsset,
+  StorekeeperActiveLoan,
 } from '@/app/actions/dashboard';
 import type {
   CatalogDataPayload,
@@ -43014,9 +43015,10 @@ export function getMockStorekeeperOperations(
           a.warehouseCode === currentWh.code
       );
 
-  const activeLoans: any[] = [];
+  const activeLoans: StorekeeperActiveLoan[] = [];
 
   whAssets.forEach((asset) => {
+    const rawAsset = asset as Record<string, unknown>;
     if (asset.status === 'available') availableCount++;
     if (asset.status === 'checked_out') {
       checkedOutCount++;
@@ -43028,9 +43030,9 @@ export function getMockStorekeeperOperations(
         qrCode: asset.qrCode,
         workerName: asset.currentAssignedWorker || 'עובד שטח',
         workerPhone: asset.workerPhone,
-        checkedOutAt: (asset as any).checkedOutAt || (asset as any).updated_at || new Date(Date.now() - 3 * 3600 * 1000).toISOString(),
+        checkedOutAt: (rawAsset.checkedOutAt as string) || (rawAsset.updated_at as string) || new Date(Date.now() - 3 * 3600 * 1000).toISOString(),
         expectedReturnDate: asset.expectedReturnDate || null,
-        checkoutNote: (asset as any).lastCheckoutNote || (asset as any).checkoutNote || 'ציוד הונפק לעובד שטח',
+        checkoutNote: (rawAsset.lastCheckoutNote as string) || (rawAsset.checkoutNote as string) || 'ציוד הונפק לעובד שטח',
       });
     }
     if (asset.status === 'maintenance' || asset.status === 'needs_repair' || asset.isLocked) quarantinedCount++;
@@ -43050,7 +43052,7 @@ export function getMockStorekeeperOperations(
           warehouseName: asset.warehouseName || currentWh.name,
           expectedReturnDate: asset.expectedReturnDate,
           daysOverdue: days,
-          checkoutNote: (asset as any).lastCheckoutNote || (asset as any).checkoutNote || 'ציוד נמסר בשטח עם כבל מאריך 20 מטר',
+          checkoutNote: (rawAsset.lastCheckoutNote as string) || (rawAsset.checkoutNote as string) || 'ציוד נמסר בשטח עם כבל מאריך 20 מטר',
         });
       } else if (rTime >= startOfToday.getTime() && rTime <= endOfToday.getTime()) {
         returnsDueToday.push({
@@ -43062,7 +43064,7 @@ export function getMockStorekeeperOperations(
           workerName: asset.currentAssignedWorker || 'עובד שטח',
           workerPhone: asset.workerPhone,
           expectedReturnDate: asset.expectedReturnDate,
-          checkoutNote: (asset as any).lastCheckoutNote || (asset as any).checkoutNote || 'כולל 2 סוללות ומטען מהיר',
+          checkoutNote: (rawAsset.lastCheckoutNote as string) || (rawAsset.checkoutNote as string) || 'כולל 2 סוללות ומטען מהיר',
           accessoriesSummary: asset.accessories
             ? `${asset.accessories.batteriesCount} סוללות${asset.accessories.hasCharger ? ' + מטען' : ''}${asset.accessories.hasCase ? ' + ארגז' : ''}`
             : undefined,
@@ -43143,11 +43145,16 @@ export function getMockCatalogData(warehouseId?: string, organizationId?: string
     const worker = a.currentAssignedWorker || a.current_assigned_worker || null;
     const qr = a.qrCode || a.qr_code || '';
     const orderNum = a.orderNumber || a.order_number || null;
-    const resolvedWh = (a as any).current_warehouse || (wh ? { id: wh.id, name: wh.name, code: wh.code } : null);
+    const rawAsset = a as Record<string, unknown> & {
+      current_warehouse?: { id: string; name: string; code?: string } | null;
+      warehouses?: { name?: string } | null;
+      warehouse?: string;
+    };
+    const resolvedWh = rawAsset.current_warehouse || (wh ? { id: wh.id, name: wh.name, code: wh.code } : null);
     const whName =
-      (a as any).current_warehouse?.name ||
-      (a as any).warehouses?.name ||
-      (a as any).warehouse ||
+      rawAsset.current_warehouse?.name ||
+      rawAsset.warehouses?.name ||
+      rawAsset.warehouse ||
       wh?.name ||
       a.warehouseName ||
       a.warehouse_name ||
@@ -43164,9 +43171,9 @@ export function getMockCatalogData(warehouseId?: string, organizationId?: string
       warehouseId: whId,
       currentWarehouseId: whId,
       current_warehouse_id: whId,
-      warehouseName: (a as any).current_warehouse?.name || (a as any).warehouses?.name || (a as any).warehouse || whName,
-      warehouse_name: (a as any).current_warehouse?.name || (a as any).warehouses?.name || (a as any).warehouse || whName,
-      warehouse: (a as any).current_warehouse?.name || (a as any).warehouses?.name || (a as any).warehouse || whName,
+      warehouseName: rawAsset.current_warehouse?.name || rawAsset.warehouses?.name || rawAsset.warehouse || whName,
+      warehouse_name: rawAsset.current_warehouse?.name || rawAsset.warehouses?.name || rawAsset.warehouse || whName,
+      warehouse: rawAsset.current_warehouse?.name || rawAsset.warehouses?.name || rawAsset.warehouse || whName,
       current_warehouse: resolvedWh,
       warehouseCode: wh?.code || a.warehouseCode || a.warehouse_code || 'WH',
       warehouse_code: wh?.code || a.warehouseCode || a.warehouse_code || 'WH',

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   SlidersHorizontal,
   ChevronLeft,
@@ -51,6 +51,7 @@ import { getAuditHistory } from '@/app/actions/history';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
+import type { AssetStatus } from '@/types/domain';
 
 const BuildingOfficeIcon = Building2;
 
@@ -339,7 +340,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
   }, [initialData]);
 
   // Refresh history data from authoritative server action
-  const refreshHistoryData = async (options?: { isBackgroundPoll?: boolean }) => {
+  const refreshHistoryData = useCallback(async (options?: { isBackgroundPoll?: boolean }) => {
     if (isRefreshingRef.current) return;
     isRefreshingRef.current = true;
     if (!options?.isBackgroundPoll) {
@@ -394,7 +395,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
       isRefreshingRef.current = false;
       setIsRefreshing(false);
     }
-  };
+  }, [currentOrganization, initialData.records]);
 
   // Setup Supabase Realtime subscription on custody_ledger table + 15s fallback auto-polling
   useEffect(() => {
@@ -409,7 +410,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
             schema: 'public',
             table: 'custody_ledger',
           },
-          async (_payload) => {
+          async () => {
             // Automatically refetch or prepend the latest movement to the history list
             await refreshHistoryData();
           }
@@ -435,7 +436,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
       }
       clearInterval(pollInterval);
     };
-  }, [currentOrganization?.id]);
+  }, [refreshHistoryData]);
 
   // Search & 300ms Debounce State
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -458,7 +459,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
   const router = useRouter();
   const [selectedReceiptRecord, setSelectedReceiptRecord] = useState<AuditHistoryRecord | null>(null);
   const [isPdfExportModalOpen, setIsPdfExportModalOpen] = useState<boolean>(false);
-  const [selectedAsset, setSelectedAsset] = useState<ScannedAssetDetails | any | null>(null);
+  const [selectedAsset, setSelectedAsset] = useState<ScannedAssetDetails | null>(null);
   const [isPassportOpen, setIsPassportOpen] = useState<boolean>(false);
 
   const handleOpenPassport = (item: AuditHistoryRecord) => {
@@ -502,8 +503,8 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
           toolName: assetTitle,
           brand: assetBrand,
           modelNumber: record.modelNumber,
-          status: (record.action === 'CHECKOUT' ? 'checked_out' : record.action === 'MAINTENANCE_FLAG' ? 'maintenance' : 'available') as any,
-          condition: (record.condition || 'good') as any,
+          status: (record.action === 'CHECKOUT' ? 'checked_out' : record.action === 'MAINTENANCE_FLAG' ? 'maintenance' : 'available') as AssetStatus,
+          condition: (record.condition || 'good') as 'excellent' | 'good' | 'needs_repair' | 'retired',
           warehouseName: record.warehouseName,
           warehouseCode: record.warehouseCode,
           currentWarehouseId: record.warehouseId || historyData.warehouses[0]?.id || '',
@@ -522,8 +523,8 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
         toolName: assetTitle,
         brand: assetBrand,
         modelNumber: record.modelNumber,
-        status: (record.action === 'CHECKOUT' ? 'checked_out' : record.action === 'MAINTENANCE_FLAG' ? 'maintenance' : 'available') as any,
-        condition: (record.condition || 'good') as any,
+        status: (record.action === 'CHECKOUT' ? 'checked_out' : record.action === 'MAINTENANCE_FLAG' ? 'maintenance' : 'available') as AssetStatus,
+        condition: (record.condition || 'good') as 'excellent' | 'good' | 'needs_repair' | 'retired',
         warehouseName: record.warehouseName,
         warehouseCode: record.warehouseCode,
         currentWarehouseId: record.warehouseId || historyData.warehouses[0]?.id || '',
@@ -1642,7 +1643,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
                     >
                       <BuildingOfficeIcon className="w-3.5 h-3.5 shrink-0" />
                       <span className="truncate max-w-[180px]">
-                        {item.assets?.current_warehouse?.name || (item as any).current_warehouse?.name || item.currentWarehouseName || item.warehouseName || 'מתקן כללי'}
+                        {item.assets?.current_warehouse?.name || (item as unknown as { current_warehouse?: { name?: string } }).current_warehouse?.name || item.currentWarehouseName || item.warehouseName || 'מתקן כללי'}
                       </span>
                     </span>
 
@@ -2106,7 +2107,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
           setIsActionModalOpen(false);
           setActionModalAsset(null);
         }}
-        onActionComplete={(_msg, _updated) => {
+        onActionComplete={() => {
           refreshHistoryData();
           router.refresh();
         }}

@@ -592,7 +592,7 @@ export async function decideTransferRequestAction(
         reqUpdateQuery.eq('organization_id', orgId);
       }
 
-      const { data: updatedReqRows, error: reqErr } = await reqUpdateQuery.select();
+      const { error: reqErr } = await reqUpdateQuery;
 
       if (reqErr) {
         console.error('[decideTransferRequestAction] Update transfer_requests error:', reqErr);

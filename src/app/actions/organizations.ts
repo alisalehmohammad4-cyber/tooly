@@ -10,7 +10,6 @@ import { isSupabaseConfigured, getSupabaseServerClient } from '@/lib/supabase';
 import { isPlatformSuperAdmin } from '@/lib/auth/superadmin';
 import { getServerSessionUser } from '@/lib/auth/session';
 import {
-  getMockOrganizationById,
   getMockOrganizationBySlug,
   getMockOrganizations,
   updateMockOrganization,
@@ -329,7 +328,25 @@ export async function getPendingOrganizationsAction(): Promise<{
           .order('created_at', { ascending: false });
 
         if (data && !error) {
-          for (const row of data as any[]) {
+          type OrgDbRow = Record<string, unknown> & {
+            id: string;
+            name: string;
+            slug: string;
+            serial_prefix?: string;
+            serialPrefix?: string;
+            default_currency?: string;
+            defaultCurrency?: string;
+            logo_url?: string;
+            logoUrl?: string;
+            contact_phone?: string;
+            contactPhone?: string;
+            contact_email?: string;
+            contactEmail?: string;
+            created_at?: string;
+            approved_at?: string;
+            approved_by?: string;
+          };
+          for (const row of (data as OrgDbRow[])) {
             const orgObj: Organization = {
               id: row.id,
               name: row.name,
@@ -416,7 +433,7 @@ export async function approveOrganizationAction(
     if (isSupabaseConfigured()) {
       try {
         const serverClient = getSupabaseServerClient();
-        const updatePayload: Record<string, any> = {
+        const updatePayload: Record<string, unknown> = {
           status: 'active',
           approved_at: nowIso,
         };
@@ -570,7 +587,23 @@ export async function getAllOrganizationsAdminAction(): Promise<{
           .order('created_at', { ascending: false });
 
         if (dbOrgs && !orgErr) {
-          for (const row of dbOrgs as any[]) {
+          type DbOrgRow = Record<string, unknown> & {
+            id: string | number;
+            name?: string;
+            slug?: string;
+            serial_prefix?: string;
+            serialPrefix?: string;
+            default_currency?: string;
+            defaultCurrency?: string;
+            status?: string;
+            contact_phone?: string;
+            contactPhone?: string;
+            contact_email?: string;
+            contactEmail?: string;
+            created_at?: string;
+            approved_at?: string;
+          };
+          for (const row of (dbOrgs as DbOrgRow[])) {
             const orgId = String(row.id);
             orgsMap.set(orgId, {
               id: orgId,

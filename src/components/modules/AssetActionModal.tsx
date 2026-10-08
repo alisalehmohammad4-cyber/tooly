@@ -238,7 +238,7 @@ export default function AssetActionModal({
       if (res.asset) await cacheAsset(res.asset);
       onActionComplete(res.message, updatedAsset);
       onClose();
-    } catch (err: any) {
+    } catch {
       // Fallback on network disconnect
       await enqueueSyncAction('checkout', checkoutPayload);
       const updated = await updateCachedAsset(asset.id, {
@@ -441,7 +441,7 @@ export default function AssetActionModal({
       onActionComplete(res.message, updatedAsset);
       router.refresh();
       onClose();
-    } catch (err: any) {
+    } catch {
       await enqueueSyncAction('transfer', transferPayload);
       const updated = await updateCachedAsset(asset.id, {
         currentWarehouseId: targetWarehouseId,
@@ -495,9 +495,9 @@ export default function AssetActionModal({
       onActionComplete(res.message || 'הכלי הועבר בהצלחה לתחזוקה/תיקון', updatedAsset);
       router.refresh();
       onClose();
-    } catch (err: any) {
+    } catch (err) {
       setIsSubmitting(false);
-      const msg = err?.message || 'שגיאה בלתי צפויה בהעברה לתיקון';
+      const msg = (err as { message?: string })?.message || 'שגיאה בלתי צפויה בהעברה לתיקון';
       setActionError(msg);
       alert(msg);
     }

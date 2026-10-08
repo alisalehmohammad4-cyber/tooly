@@ -8,12 +8,10 @@ import {
   Building2,
   Clock,
   CheckCircle2,
-  XCircle,
   AlertTriangle,
   Users,
   Wrench,
   Activity,
-  ArrowRight,
   LogOut,
   RefreshCw,
   Search,
@@ -26,7 +24,6 @@ import {
   X,
   ExternalLink,
   ChevronLeft,
-  Flame,
   Power,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
@@ -270,7 +267,7 @@ export default function SuperAdminDashboardView() {
               type="button"
               onClick={() => {
                 switchToWorker();
-                window.location.href = '/';
+                router.push('/');
               }}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-950/60 hover:bg-red-900/80 text-red-200 border border-red-800/60 text-xs font-bold transition-all cursor-pointer"
               title="התנתקות מוחלטת"

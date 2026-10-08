@@ -481,7 +481,40 @@ export async function getCatalogData(
       const categoryNameMap = new Map(categoriesList.map((c) => [c.name, c]));
       const mockAssetMap = new Map(getMockAssets(orgId).map((a) => [a.qrCode, a]));
 
-      allAssets = rawAssetsRows.map((asset: any) => {
+      type RawAssetDbRow = Record<string, unknown> & {
+        id?: string;
+        qr_code?: string;
+        qrCode?: string;
+        status?: string;
+        condition?: string;
+        current_warehouse?: { id?: string; name?: string; code?: string } | null;
+        current_warehouse_id?: string;
+        warehouse_id?: string;
+        currentWarehouseId?: string;
+        warehouse_code?: string;
+        category_id?: string;
+        categoryId?: string;
+        category_name?: string;
+        categoryName?: string;
+        category?: string;
+        tool_models?: { category_id?: string; name?: string; brand?: string; model_number?: string } | null;
+        current_assigned_worker?: string | null;
+        currentAssignedWorker?: string | null;
+        tool_name?: string;
+        toolName?: string;
+        name?: string;
+        brand?: string;
+        model_number?: string | null;
+        modelNumber?: string | null;
+        order_number?: string | null;
+        orderNumber?: string | null;
+        purchase_date?: string;
+        purchaseDate?: string;
+        purchase_cost?: number;
+        purchaseCost?: number;
+      };
+
+      allAssets = (rawAssetsRows as RawAssetDbRow[]).map((asset) => {
         const qr = (asset.qr_code || asset.qrCode || '') as string;
         const mockFallback = mockAssetMap.get(qr);
 
@@ -827,7 +860,7 @@ export async function updateAssetStatusAction(
         to_warehouse_id: targetWarehouseId,
         from_warehouse_id: targetWarehouseId,
         performed_by: performedBy,
-        condition_at_return: (updatedRows[0] as any)?.condition || null,
+        condition_at_return: (updatedRows[0] as { condition?: string | null } | undefined)?.condition || null,
         notes: reason || `שינוי סטטוס כלי ישיר ל-${newStatus}`,
         created_at: now,
       });

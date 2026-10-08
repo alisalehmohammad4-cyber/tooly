@@ -177,7 +177,7 @@ async function runSuite() {
       .select();
 
     // 2.2 Insert ledger entry with signature
-    const { data: ledgerCheckout, error: coLedgerErr } = await supabase
+    const { error: coLedgerErr } = await supabase
       .from('custody_ledger')
       .insert({
         asset_id: testAssetId,
@@ -461,7 +461,7 @@ async function runSuite() {
     const reqNow = new Date().toISOString();
 
     // 7.1 Create request
-    const { data: createdReq, error: reqInsertErr } = await supabase
+    const { error: reqInsertErr } = await supabase
       .from('site_tool_requests')
       .insert({
         id: testRequestId,

@@ -20,15 +20,9 @@ import {
   UserCheck,
   Truck,
   Sparkles,
-  Phone,
   FileSignature,
   Printer,
   History as HistoryIcon,
-  Calendar,
-  Wrench,
-  Layers,
-  MapPin,
-  ExternalLink,
   Copy,
   Check,
   FileText,
@@ -41,7 +35,6 @@ import {
 } from '@/app/actions/custody';
 import {
   getAssetTimelineAction,
-  getAssetPassportAction,
   type AuditHistoryRecord,
   type AuditActionType,
 } from '@/app/actions/history';
@@ -50,11 +43,11 @@ import { useWebNfc } from '@/lib/nfc/useWebNfc';
 import StatusSwitcher from '@/components/modules/StatusSwitcher';
 
 export interface ToolPassportModalProps {
-  asset?: ScannedAssetDetails | any | null;
+  asset?: ScannedAssetDetails | null;
   assetTag?: string | null;
   isOpen: boolean;
   onClose: () => void;
-  onAssetUpdated?: (updated: any) => void;
+  onAssetUpdated?: (updated: ScannedAssetDetails) => void;
 }
 
 function formatEventTimestamp(isoString: string): string {
@@ -190,7 +183,7 @@ function ToolPassportModalContent({
   assetTag,
   onClose,
   onAssetUpdated,
-}: ToolPassportModalProps & { asset: any }) {
+}: ToolPassportModalProps) {
   const { role, user, openPinModal, currentOrganization, isAdmin } = useAuth();
   const { isWriting: isNfcWriting, writeNfcTag } = useWebNfc();
   const [nfcWriteStatus, setNfcWriteStatus] = useState<string | null>(null);
@@ -209,7 +202,7 @@ function ToolPassportModalContent({
   const [isCopied, setIsCopied] = useState<boolean>(false);
 
   // Optimistic updates state
-  const [updatedAsset, setUpdatedAsset] = useState<any | null>(null);
+  const [updatedAsset, setUpdatedAsset] = useState<ScannedAssetDetails | null>(null);
 
   // Lockout Form State
   const [showLockInput, setShowLockInput] = useState<boolean>(false);
@@ -283,8 +276,8 @@ function ToolPassportModalContent({
         const res = await getAssetTimelineAction(assetId, tagNumber, currentOrganization?.id);
         if (isMounted && res && res.success && Array.isArray(res.data)) {
           setTimeline(res.data);
-          if (res.asset && !updatedAsset) {
-            setUpdatedAsset(res.asset);
+          if (res.asset) {
+            setUpdatedAsset((prev) => prev || res.asset);
           }
         } else if (isMounted) {
           setTimeline([]);
@@ -419,7 +412,7 @@ function ToolPassportModalContent({
       } else {
         setFeedbackMessage({ text: res.error, type: 'error' });
       }
-    } catch (err) {
+    } catch {
       setIsLockSubmitting(false);
       setFeedbackMessage({ text: 'שגיאה בעדכון נעילת הכלי', type: 'error' });
     }
@@ -458,7 +451,7 @@ function ToolPassportModalContent({
       } else {
         setFeedbackMessage({ text: res.error, type: 'error' });
       }
-    } catch (err) {
+    } catch {
       setIsRenewSubmitting(false);
       setFeedbackMessage({ text: 'שגיאה בעדכון בדיקת הבטיחות', type: 'error' });
     }
@@ -500,7 +493,7 @@ function ToolPassportModalContent({
       } else {
         setFeedbackMessage({ text: res.error, type: 'error' });
       }
-    } catch (err) {
+    } catch {
       setIsReserveSubmitting(false);
       setFeedbackMessage({ text: 'שגיאה בשמירת שריון', type: 'error' });
     }
@@ -531,7 +524,7 @@ function ToolPassportModalContent({
       } else {
         setFeedbackMessage({ text: res.error, type: 'error' });
       }
-    } catch (err) {
+    } catch {
       setIsReserveSubmitting(false);
       setFeedbackMessage({ text: 'שגיאה בביטול שריון', type: 'error' });
     }

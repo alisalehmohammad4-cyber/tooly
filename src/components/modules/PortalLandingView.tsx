@@ -63,7 +63,7 @@ export default function PortalLandingView({
       } catch (err) {
         console.warn('SuperAdmin login warning:', err);
       }
-      window.location.href = '/admin';
+      router.push('/admin');
       return;
     }
 
@@ -76,22 +76,22 @@ export default function PortalLandingView({
           result.user.username?.toLowerCase() === 'admintool' ||
           result.user.username?.toLowerCase() === 'admin'
         ) {
-          window.location.href = '/admin';
+          router.push('/admin');
         } else if (
           result.user.role === 'general_manager' ||
           result.user.role === 'admin' ||
           result.user.role === 'manager' ||
           result.user.role === 'superadmin'
         ) {
-          window.location.href = '/dashboard/manager';
+          router.push('/dashboard/manager');
         } else if (
           result.user.role === 'chief_operations' ||
           result.user.role === 'storekeeper' ||
           result.user.role === 'supervisor'
         ) {
-          window.location.href = '/dashboard/warehouse';
+          router.push('/dashboard/warehouse');
         } else {
-          window.location.href = '/dashboard/manager';
+          router.push('/dashboard/manager');
         }
       } else {
         setLoginError(result.error || 'פרטי התחברות שגויים');

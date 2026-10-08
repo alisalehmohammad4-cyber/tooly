@@ -144,7 +144,20 @@ export async function getInTransitFleetAction(
       const { data: assetRows, error: assetErr } = await assetQuery.order('updated_at', { ascending: false });
 
       if (!assetErr && assetRows && assetRows.length > 0) {
-        const assetIds = assetRows.map((a: any) => a.id);
+        const typedAssetRows = assetRows as Array<Record<string, unknown> & {
+          id: string;
+          qr_code?: string;
+          tool_models?: { name?: string; brand?: string; model_number?: string | null } | null;
+          name?: string;
+          brand?: string;
+          model_number?: string | null;
+          serial_number?: string | null;
+          current_warehouse_id?: string;
+          warehouses?: { name?: string } | null;
+          updated_at?: string;
+          created_at?: string;
+        }>;
+        const assetIds = typedAssetRows.map((a) => a.id);
 
         // Retrieve approved transfer requests to identify source and target warehouses
         const { data: transferReqs } = await supabaseAdmin
@@ -166,9 +179,23 @@ export async function getInTransitFleetAction(
           .eq('status', 'APPROVED')
           .order('updated_at', { ascending: false });
 
-        const reqMap = new Map<string, any>();
+        type TransferReqRecord = {
+          id: string;
+          asset_id: string;
+          source_warehouse_id?: string;
+          target_warehouse_id?: string;
+          requested_by?: string;
+          decided_by?: string;
+          reason?: string;
+          updated_at?: string;
+          created_at?: string;
+          source_warehouse?: { name?: string; code?: string } | null;
+          target_warehouse?: { name?: string; code?: string } | null;
+        };
+
+        const reqMap = new Map<string, TransferReqRecord>();
         if (transferReqs) {
-          for (const req of transferReqs) {
+          for (const req of (transferReqs as TransferReqRecord[])) {
             if (req.asset_id && !reqMap.has(req.asset_id)) {
               reqMap.set(req.asset_id, req);
             }
@@ -195,17 +222,16 @@ export async function getInTransitFleetAction(
           .from('warehouses')
           .select('id, name')
           .eq('organization_id', orgId);
+        const typedWhs = (allOrgWhs || []) as Array<{ id: string; name: string }>;
         const orgWhMap = new Map<string, string>();
-        if (allOrgWhs) {
-          allOrgWhs.forEach((w: any) => orgWhMap.set(w.id, w.name));
-        }
+        typedWhs.forEach((w) => orgWhMap.set(w.id, w.name));
 
-        return assetRows.map((row: any) => {
+        return typedAssetRows.map((row) => {
           const req = reqMap.get(row.id);
           const toolName = row.tool_models?.name || row.name || 'כלי בשינוע';
           const brand = row.tool_models?.brand || row.brand || '';
           const modelNumber = row.tool_models?.model_number || row.model_number || null;
-          const defaultOriginWh = allOrgWhs?.find((w: any) => w.id !== row.current_warehouse_id) || allOrgWhs?.[0];
+          const defaultOriginWh = typedWhs.find((w) => w.id !== row.current_warehouse_id) || typedWhs[0];
           const originWarehouseId = req?.source_warehouse_id || defaultOriginWh?.id || '';
           const originWarehouseName = req?.source_warehouse?.name || (originWarehouseId ? orgWhMap.get(originWarehouseId) : null) || 'מחסן שטח ראשי';
           const destinationWarehouseId = req?.target_warehouse_id || row.current_warehouse_id || '';
@@ -261,7 +287,7 @@ export async function getInTransitFleetAction(
         toolName: sample.toolName,
         brand: sample.brand,
         modelNumber: sample.modelNumber,
-        serialNumber: (sample as any).serialNumber || 'SN-77892',
+        serialNumber: (sample as Record<string, unknown>).serialNumber as string || 'SN-77892',
         originWarehouseId: originWh.id,
         originWarehouseName: originWh.name,
         destinationWarehouseId: destWh.id,
@@ -276,9 +302,10 @@ export async function getInTransitFleetAction(
   }
 
   return inTransitAssets.map((a, idx) => {
+    const rawA = a as Record<string, unknown>;
     const originWh = warehouses[idx % warehouses.length] || { id: 'wh-01', name: 'מחסן ראשי' };
     const destWh = warehouses[(idx + 1) % warehouses.length] || { id: 'wh-02', name: 'אתר עבודה' };
-    const dispatchedAt = (a as any).updatedAt || new Date().toISOString();
+    const dispatchedAt = (rawA.updatedAt as string) || new Date().toISOString();
 
     return {
       id: `trans-${a.id}`,
@@ -287,7 +314,7 @@ export async function getInTransitFleetAction(
       toolName: a.toolName,
       brand: a.brand,
       modelNumber: a.modelNumber,
-      serialNumber: (a as any).serialNumber || null,
+      serialNumber: (rawA.serialNumber as string) || null,
       originWarehouseId: originWh.id,
       originWarehouseName: originWh.name,
       destinationWarehouseId: destWh.id,
@@ -296,7 +323,7 @@ export async function getInTransitFleetAction(
       elapsedTransitTimeText: formatElapsedHebrew(dispatchedAt),
       dispatchedBy: 'אחראי תפעול',
       status: 'in_transit' as const,
-      transporterNotes: (a as any).transporterNotes || 'שינוע ציוד לפי דרישת עבודה',
+      transporterNotes: (rawA.transporterNotes as string) || 'שינוע ציוד לפי דרישת עבודה',
     };
   });
 }
@@ -351,7 +378,20 @@ export async function getMaintenanceAssetsAction(
       const { data: assetRows, error: assetErr } = await assetQuery.order('updated_at', { ascending: false });
 
       if (!assetErr && assetRows && assetRows.length > 0) {
-        const assetIds = assetRows.map((a: any) => a.id);
+        const typedAssetRows = assetRows as Array<Record<string, unknown> & {
+          id: string;
+          qr_code?: string;
+          tool_models?: { name?: string; brand?: string; model_number?: string | null } | null;
+          name?: string;
+          brand?: string;
+          model_number?: string | null;
+          serial_number?: string | null;
+          current_warehouse_id?: string;
+          warehouses?: { name?: string } | null;
+          updated_at?: string;
+          created_at?: string;
+        }>;
+        const assetIds = typedAssetRows.map((a) => a.id);
 
         // Fetch latest incident reports from custody_ledger
         const { data: ledgerEntries } = await supabaseAdmin
@@ -361,16 +401,24 @@ export async function getMaintenanceAssetsAction(
           .in('action', ['MAINTENANCE_FLAG', 'MAINTENANCE_IN', 'CHECKIN'])
           .order('created_at', { ascending: false });
 
-        const ledgerMap = new Map<string, any>();
+        type LedgerEntryRecord = {
+          asset_id?: string;
+          action?: string;
+          notes?: string;
+          performed_by?: string;
+          damage_report?: string;
+          created_at?: string;
+        };
+        const ledgerMap = new Map<string, LedgerEntryRecord>();
         if (ledgerEntries) {
-          for (const entry of ledgerEntries) {
+          for (const entry of (ledgerEntries as LedgerEntryRecord[])) {
             if (entry.asset_id && !ledgerMap.has(entry.asset_id)) {
               ledgerMap.set(entry.asset_id, entry);
             }
           }
         }
 
-        return assetRows.map((row: any) => {
+        return typedAssetRows.map((row) => {
           const ledger = ledgerMap.get(row.id);
           const toolName = row.tool_models?.name || row.name || 'כלי בתיקון';
           const brand = row.tool_models?.brand || row.brand || '';
@@ -435,7 +483,7 @@ export async function getMaintenanceAssetsAction(
         toolName: sample1.toolName,
         brand: sample1.brand,
         modelNumber: sample1.modelNumber,
-        serialNumber: (sample1 as any).serialNumber || 'SN-88219',
+        serialNumber: (sample1 as Record<string, unknown>).serialNumber as string || 'SN-88219',
         currentWarehouseId: sample1.warehouseId,
         reportingWarehouseName: wh1.name,
         assignedTechnicianOrLab: 'מעבדת מקיטה רשמית',
@@ -451,7 +499,7 @@ export async function getMaintenanceAssetsAction(
         toolName: sample2.toolName,
         brand: sample2.brand,
         modelNumber: sample2.modelNumber,
-        serialNumber: (sample2 as any).serialNumber || 'SN-33901',
+        serialNumber: (sample2 as Record<string, unknown>).serialNumber as string || 'SN-33901',
         currentWarehouseId: sample2.warehouseId,
         reportingWarehouseName: wh2.name,
         assignedTechnicianOrLab: 'מוסך מרכזי - תיקוני שטח',
@@ -464,8 +512,9 @@ export async function getMaintenanceAssetsAction(
   }
 
   return maintenanceAssets.map((a) => {
+    const rawA = a as Record<string, unknown>;
     const wh = warehouses.find((w) => w.id === a.warehouseId) || { name: a.warehouseName || 'מחסן שטח' };
-    const dispatchedDate = (a as any).updatedAt || new Date().toISOString();
+    const dispatchedDate = (rawA.updatedAt as string) || new Date().toISOString();
 
     return {
       id: a.id,
@@ -474,7 +523,7 @@ export async function getMaintenanceAssetsAction(
       toolName: a.toolName,
       brand: a.brand,
       modelNumber: a.modelNumber,
-      serialNumber: (a as any).serialNumber || null,
+      serialNumber: (rawA.serialNumber as string) || null,
       currentWarehouseId: a.warehouseId,
       reportingWarehouseName: wh.name,
       assignedTechnicianOrLab: 'מעבדת שירות מוסמכת',

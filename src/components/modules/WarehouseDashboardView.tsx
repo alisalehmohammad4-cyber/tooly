@@ -152,7 +152,7 @@ export default function WarehouseDashboardView({
   const [isCheckinModalOpen, setIsCheckinModalOpen] = useState<boolean>(false);
   const [checkinPreselectedAssetId, setCheckinPreselectedAssetId] = useState<string | null>(null);
 
-  const warehouses = propWarehouses || data.warehouses || data.allWarehouses || [];
+  const warehouses = React.useMemo(() => propWarehouses || data.warehouses || data.allWarehouses || [], [propWarehouses, data.warehouses, data.allWarehouses]);
 
   // Chief Operations: Inter-Depot Transfer Modal State
   const [isTransferModalOpen, setIsTransferModalOpen] = useState<boolean>(false);
@@ -1234,27 +1234,28 @@ export default function WarehouseDashboardView({
   }, [isStorekeeper, assignedWarehouseId, selectedWarehouseId, handleWarehouseChange]);
 
   // Open tool passport modal by QR / Tag
-  const handleOpenPassport = async (qrCode: string, fallbackItem?: any) => {
+  const handleOpenPassport = async (qrCode: string, fallbackItem?: Partial<ScannedAssetDetails> & Record<string, unknown>) => {
     const clean = qrCode?.trim();
     if (!clean && !fallbackItem) return;
 
     if (fallbackItem) {
-      const itemObj = {
-        id: fallbackItem.assetId || fallbackItem.id || '',
-        asset_id: fallbackItem.assetId || fallbackItem.id || '',
-        qrCode: clean || fallbackItem.qrCode || fallbackItem.tag_number || '',
-        tag_number: clean || fallbackItem.qrCode || fallbackItem.tag_number || '',
-        name: fallbackItem.toolName || fallbackItem.name || 'כלי עבודה',
-        toolName: fallbackItem.toolName || fallbackItem.name || 'כלי עבודה',
-        brand: fallbackItem.brand || 'MAGMA',
-        modelNumber: fallbackItem.modelNumber || fallbackItem.model || '',
-        status: fallbackItem.status || 'available',
-        condition: fallbackItem.condition || 'good',
-        warehouseName: fallbackItem.warehouseName || 'מתקן כללי',
-        currentWarehouseId: fallbackItem.currentWarehouseId || fallbackItem.warehouseId || selectedWarehouseId || '',
-        currentAssignedWorker: fallbackItem.workerName || fallbackItem.currentAssignedWorker || null,
+      const itemObj: ScannedAssetDetails = {
+        id: (fallbackItem.assetId as string) || (fallbackItem.id as string) || '',
+        qrCode: clean || (fallbackItem.qrCode as string) || (fallbackItem.tag_number as string) || '',
+        tag_number: clean || (fallbackItem.qrCode as string) || (fallbackItem.tag_number as string) || '',
+        name: (fallbackItem.toolName as string) || (fallbackItem.name as string) || 'כלי עבודה',
+        toolName: (fallbackItem.toolName as string) || (fallbackItem.name as string) || 'כלי עבודה',
+        brand: (fallbackItem.brand as string) || 'MAGMA',
+        modelNumber: (fallbackItem.modelNumber as string) || (fallbackItem.model as string) || null,
+        status: (fallbackItem.status as AssetStatus) || 'available',
+        condition: (fallbackItem.condition as 'excellent' | 'good' | 'needs_repair' | 'retired') || 'good',
+        warehouseName: (fallbackItem.warehouseName as string) || 'מתקן כללי',
+        warehouseCode: 'WH',
+        currentWarehouseId: (fallbackItem.currentWarehouseId as string) || (fallbackItem.warehouseId as string) || selectedWarehouseId || '',
+        currentAssignedWorker: (fallbackItem.workerName as string) || (fallbackItem.currentAssignedWorker as string) || null,
+        version: 1,
       };
-      setPassportAsset(itemObj as any);
+      setPassportAsset(itemObj);
       setIsPassportOpen(true);
       setPassportLookupInput('');
     }

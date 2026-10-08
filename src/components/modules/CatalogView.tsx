@@ -758,16 +758,16 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
                       </div>
 
                       {/* PO Number and Supply Location badge if present */}
-                      {((asset as any).po_number || asset.poNumber || (asset as any).supply_location || asset.supplyLocation) && (
+                      {(asset.po_number || asset.poNumber || asset.supply_location || asset.supplyLocation) && (
                         <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-600 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200">
-                          {((asset as any).po_number || asset.poNumber) && (
+                          {(asset.po_number || asset.poNumber) && (
                             <span className="font-mono font-bold text-blue-950" dir="ltr">
-                              מספר הזמנה: <strong>{(asset as any).po_number || asset.poNumber}</strong>
+                              מספר הזמנה: <strong>{asset.po_number || asset.poNumber}</strong>
                             </span>
                           )}
-                          {((asset as any).supply_location || asset.supplyLocation) && (
+                          {(asset.supply_location || asset.supplyLocation) && (
                             <span className="text-slate-800 font-medium">
-                              מיקום סיפוק: <strong>{(asset as any).supply_location || asset.supplyLocation}</strong>
+                              מיקום סיפוק: <strong>{asset.supply_location || asset.supplyLocation}</strong>
                             </span>
                           )}
                         </div>
@@ -851,12 +851,9 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
                         <button
                           type="button"
                           onClick={() => {
-                            (setPassportAsset as (val: any) => void)({
+                            setPassportAsset({
                               id: asset.id,
-                              asset_id: asset.id,
                               qrCode: asset.qrCode,
-                              tag_number: asset.qrCode,
-                              name: asset.toolName,
                               status: asset.status,
                               condition: asset.condition,
                               currentAssignedWorker: asset.currentAssignedWorker,

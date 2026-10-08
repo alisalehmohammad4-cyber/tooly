@@ -171,9 +171,9 @@ export async function createSiteToolRequestAction(data: {
         console.error('[createSiteToolRequestAction] Supabase insert error:', error);
         return { success: false, error: `שגיאה בשמירת הבקשה: ${error.message}` };
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error('[createSiteToolRequestAction] Supabase error:', err);
-      return { success: false, error: err?.message || 'שגיאה ברישום בקשת הציוד' };
+      return { success: false, error: (err as { message?: string })?.message || 'שגיאה ברישום בקשת הציוד' };
     }
   }
 
@@ -613,11 +613,11 @@ export async function resolveToolRequestAction(data: {
             error: reqErr?.message || 'עדכון דרישת הציוד נכשל (0 שורות עודכנו)',
           };
         }
-      } catch (err: any) {
+      } catch (err) {
         console.error('[resolveToolRequestAction] Supabase error during approval:', err);
         return {
           success: false,
-          error: err?.message || 'שגיאת שרת בעת אישור הדרישה',
+          error: (err as { message?: string })?.message || 'שגיאת שרת בעת אישור הדרישה',
         };
       }
     }
@@ -664,11 +664,11 @@ export async function resolveToolRequestAction(data: {
             error: reqErr?.message || 'עדכון דרישת הציוד נכשל (0 שורות עודכנו)',
           };
         }
-      } catch (err: any) {
+      } catch (err) {
         console.error('[resolveToolRequestAction] Supabase request reject error:', err);
         return {
           success: false,
-          error: err?.message || 'שגיאת שרת בעת דחיית הדרישה',
+          error: (err as { message?: string })?.message || 'שגיאת שרת בעת דחיית הדרישה',
         };
       }
     }
@@ -752,11 +752,11 @@ export async function confirmToolReceptionAction(
         notes: `נקלט בהצלחה באתר היעד (${targetWarehouseId})`,
         created_at: now,
       });
-    } catch (err: any) {
+    } catch (err) {
       console.error('[confirmToolReceptionAction] Supabase error:', err);
       return {
         success: false,
-        error: err?.message || 'שגיאת שרת בעת קליטת הכלי',
+        error: (err as { message?: string })?.message || 'שגיאת שרת בעת קליטת הכלי',
       };
     }
   }

@@ -9,6 +9,7 @@ import React, {
   useRef,
   useSyncExternalStore,
 } from 'react';
+import { useRouter } from 'next/navigation';
 import type { AppUser, UserRole, Organization } from '@/types/domain';
 import {
   authenticateUserAction,
@@ -478,6 +479,7 @@ function clearUserFromStorage() {
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
   const rawUser = useSyncExternalStore(
     subscribeToAuth,
     getAuthSnapshot,
@@ -728,10 +730,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsPinModalOpen(false);
     setPinDialogMessage(undefined);
     pinSuccessCallbackRef.current = null;
-    if (typeof window !== 'undefined') {
-      window.location.href = '/';
-    }
-  }, []);
+    router.push('/');
+  }, [router]);
 
   const value = useMemo<AuthContextType>(() => {
     const isSuperAdmin = isPlatformSuperAdmin(user);
