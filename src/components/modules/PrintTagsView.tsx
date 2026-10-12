@@ -35,9 +35,12 @@ type PrintMode = 'batch' | 'reprint';
 export function printThermalLabelsDirectly(labelsData: Array<{
   tagNumber: string;
   toolName: string;
-  brand: string;
-  qrCodeDataUrl: string;
-  companyName: string;
+  brand?: string;
+  qrCodeDataUrl?: string;
+  qrDataUrl?: string;
+  companyName?: string;
+  orgName?: string;
+  warehouseName?: string;
 }>) {
   if (typeof window === 'undefined') return;
 
@@ -49,10 +52,10 @@ export function printThermalLabelsDirectly(labelsData: Array<{
 
   const htmlContent = `
     <!DOCTYPE html>
-    <html dir="rtl" lang="he">
+    <html lang="he">
     <head>
       <meta charset="utf-8" />
-      <title>TSC Print</title>
+      <title>TSC Print - 60x30mm</title>
       <style>
         @page {
           size: 60mm 30mm;
@@ -66,100 +69,117 @@ export function printThermalLabelsDirectly(labelsData: Array<{
           print-color-adjust: exact;
         }
         html, body {
-          width: 60mm;
-          height: 30mm;
-          margin: 0;
-          padding: 0;
+          margin: 0 !important;
+          padding: 0 !important;
+          width: 60mm !important;
+          height: 30mm !important;
+          overflow: hidden !important;
           background: #ffffff;
-          overflow: hidden;
           font-family: Arial, Helvetica, sans-serif;
         }
-        .sticker {
-          position: relative;
-          width: 60mm;
-          height: 29mm; /* 29mm strictly fits inside 30mm with 1mm safety gap */
-          max-height: 29mm;
-          page-break-after: always;
-          page-break-inside: avoid;
-          overflow: hidden;
-          background: #fff;
+        @media print {
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 60mm !important;
+            height: auto !important;
+            overflow: visible !important;
+          }
         }
-        /* Fixed absolute layout: QR on Right (RTL), Details on Left */
-        .qr-box {
-          position: absolute;
-          top: 3mm;
-          right: 3mm;
+        .label-sticker {
+          width: 58mm !important;
+          height: 27mm !important;
+          max-height: 27mm !important;
+          box-sizing: border-box !important;
+          display: flex !important;
+          flex-direction: row !important;
+          align-items: center !important;
+          justify-content: space-between !important;
+          padding: 1.5mm 2mm !important;
+          overflow: hidden !important;
+          page-break-inside: avoid !important;
+          page-break-after: always !important;
+          break-inside: avoid !important;
+          break-after: page !important;
+          background: #ffffff;
+        }
+        .label-sticker:last-child {
+          page-break-after: avoid !important;
+          break-after: avoid !important;
+        }
+        .qr-col {
           width: 22mm;
-          height: 23mm;
+          height: 22mm;
+          flex-shrink: 0;
+        }
+        .qr-col img {
+          width: 22mm !important;
+          height: 22mm !important;
+          display: block !important;
+          object-fit: contain;
+          image-rendering: -webkit-optimize-contrast;
+          image-rendering: crisp-edges;
+        }
+        .info-col {
+          flex: 1;
+          margin-left: 2mm;
           display: flex;
           flex-direction: column;
-          align-items: center;
           justify-content: center;
+          overflow: hidden;
+          text-align: right;
+          direction: rtl;
         }
-        .qr-box img {
-          width: 19mm;
-          height: 19mm;
-          object-fit: contain;
+        .tag-title {
+          font-size: 13pt;
+          font-weight: 900;
+          line-height: 1.1;
+          letter-spacing: 0.5px;
+          color: #000;
+          font-family: Arial, Helvetica, sans-serif;
         }
-        .qr-box span {
-          font-size: 7px;
-          font-weight: bold;
-          font-family: monospace;
+        .tool-name {
+          font-size: 8pt;
+          font-weight: 700;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
           margin-top: 1mm;
           color: #000;
         }
-        .details-box {
-          position: absolute;
-          top: 3mm;
-          left: 3mm;
-          width: 31mm;
-          height: 23mm;
-          text-align: right;
-          display: flex;
-          flex-direction: column;
-          justify-content: space-between;
-          overflow: hidden;
-        }
         .org-name {
-          font-size: 8px;
-          font-weight: 800;
+          font-size: 7pt;
           color: #333;
+          margin-top: 0.5mm;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
         }
-        .tool-title {
-          font-size: 9px;
-          font-weight: 900;
-          color: #000;
-          line-height: 1.15;
-          max-height: 11mm;
-          overflow: hidden;
-          word-break: break-word;
-        }
-        .tag-badge {
-          font-size: 13px;
-          font-weight: 900;
-          font-family: monospace;
-          color: #000;
-          letter-spacing: 0.5px;
-        }
       </style>
     </head>
     <body>
-      ${labelsData.map(l => `
-        <div class="sticker">
-          <div class="qr-box">
-            <img src="${l.qrCodeDataUrl}" alt="QR" />
-            <span>${l.tagNumber}</span>
+      ${labelsData.map(l => {
+        const qrDataUrl = l.qrDataUrl || l.qrCodeDataUrl || '';
+        const tagNumber = l.tagNumber || '';
+        const toolName = l.toolName || '';
+        const orgName = l.orgName || l.companyName || 'TOOLY';
+        const warehouseName = l.warehouseName || '';
+        const orgDisplay = warehouseName ? `${orgName} - ${warehouseName}` : orgName;
+        return `
+        <div class="label-sticker">
+          <!-- Column 1: QR Code -->
+          <div class="qr-col">
+            <img src="${qrDataUrl}" style="width: 22mm; height: 22mm; display: block;" />
           </div>
-          <div class="details-box">
-            <div class="org-name">${l.companyName || 'TOOLY'}</div>
-            <div class="tool-title">${l.toolName}${l.brand ? '(' + l.brand + ')' : ''}</div>
-            <div class="tag-badge">${l.tagNumber}</div>
+          <!-- Column 2: Text Info -->
+          <div class="info-col">
+            <div class="tag-title">${tagNumber}</div>
+            <div class="tool-name">${toolName}</div>
+            <div class="org-name">${orgDisplay}</div>
           </div>
         </div>
-      `).join('')}
+        `;
+      }).join('')}
       <script>
         window.onload = function() {
           window.focus();
@@ -181,9 +201,12 @@ export function printThermalLabelsDirectly(labelsData: Array<{
 function renderLabelToCanvasDataUrl(label: {
   tagNumber: string;
   toolName: string;
-  brand: string;
-  qrCodeDataUrl: string;
-  companyName: string;
+  brand?: string;
+  qrCodeDataUrl?: string;
+  qrDataUrl?: string;
+  companyName?: string;
+  orgName?: string;
+  warehouseName?: string;
   isReprint?: boolean;
 }): Promise<string> {
   return new Promise((resolve) => {
@@ -204,44 +227,38 @@ function renderLabelToCanvasDataUrl(label: {
       const qrImg = new Image();
       qrImg.crossOrigin = 'anonymous';
       qrImg.onload = () => {
-        // Draw QR code on the right side (matches absolute print layout)
-        const qrSize = 224;
-        const qrX = canvas.width - qrSize - 35;
-        const qrY = 35;
+        // Column 1: QR Code on Left (22mm x 22mm @ 300 DPI = ~260px)
+        const qrSize = Math.round(22 * (300 / 25.4));
+        const padX = Math.round(2 * (300 / 25.4));
+        const qrY = Math.round((canvas.height - qrSize) / 2);
+
         ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
+        ctx.drawImage(qrImg, padX, qrY, qrSize, qrSize);
         ctx.imageSmoothingEnabled = true;
 
-        // QR Tag Number under QR
-        ctx.fillStyle = '#000000';
-        ctx.font = 'bold 20px monospace';
-        ctx.textAlign = 'center';
-        ctx.direction = 'ltr';
-        ctx.fillText(label.tagNumber, qrX + qrSize / 2, qrY + qrSize + 26);
-
-        // Details on the left (RTL text)
-        const detailsRight = qrX - 25;
+        // Column 2: Text Info on Right (RTL, right-aligned)
+        const textRight = canvas.width - padX;
         ctx.direction = 'rtl';
         ctx.textAlign = 'right';
 
-        // 1. Company Name
-        ctx.fillStyle = '#222222';
-        ctx.font = '800 24px Arial, Helvetica, sans-serif';
-        const compName = label.companyName || 'TOOLY';
-        ctx.fillText(compName, detailsRight, 65);
-
-        // 2. Tool Title + Brand
+        // 1. Tag Title (13pt @ 300 DPI = ~54px)
         ctx.fillStyle = '#000000';
-        ctx.font = '900 26px Arial, Helvetica, sans-serif';
-        const toolDisplayName = `${label.toolName || 'ציוד מבוקר'}${label.brand ? ' (' + label.brand + ')' : ''}`;
-        ctx.fillText(toolDisplayName.slice(0, 32), detailsRight, 130);
+        ctx.font = '900 54px Arial, Helvetica, sans-serif';
+        ctx.fillText(label.tagNumber, textRight, 130);
 
-        // 3. Large bold Tag Number (Monospace)
-        ctx.fillStyle = '#020617';
-        ctx.font = '900 48px monospace';
-        ctx.direction = 'ltr';
-        ctx.textAlign = 'right';
-        ctx.fillText(label.tagNumber, detailsRight, 240);
+        // 2. Tool Name (8pt @ 300 DPI = ~34px)
+        ctx.fillStyle = '#000000';
+        ctx.font = '700 34px Arial, Helvetica, sans-serif';
+        const toolTitle = label.toolName || 'כלי עבודה';
+        ctx.fillText(toolTitle.slice(0, 36), textRight, 195);
+
+        // 3. Org Name - Warehouse Name (7pt @ 300 DPI = ~29px)
+        ctx.fillStyle = '#333333';
+        ctx.font = '28px Arial, Helvetica, sans-serif';
+        const org = label.orgName || label.companyName || 'TOOLY';
+        const wh = label.warehouseName || '';
+        const orgLine = wh ? `${org} - ${wh}` : org;
+        ctx.fillText(orgLine.slice(0, 42), textRight, 250);
 
         resolve(canvas.toDataURL('image/png'));
       };
@@ -250,7 +267,7 @@ function renderLabelToCanvasDataUrl(label: {
         resolve(canvas.toDataURL('image/png'));
       };
 
-      qrImg.src = label.qrCodeDataUrl;
+      qrImg.src = label.qrDataUrl || label.qrCodeDataUrl || '';
     } catch {
       resolve('');
     }
@@ -260,9 +277,12 @@ function renderLabelToCanvasDataUrl(label: {
 export async function downloadThermalLabelsPdf(labelsData: Array<{
   tagNumber: string;
   toolName: string;
-  brand: string;
-  qrCodeDataUrl: string;
-  companyName: string;
+  brand?: string;
+  qrCodeDataUrl?: string;
+  qrDataUrl?: string;
+  companyName?: string;
+  orgName?: string;
+  warehouseName?: string;
   isReprint?: boolean;
 }>) {
   if (typeof window === 'undefined' || labelsData.length === 0) return;
@@ -552,7 +572,10 @@ export default function PrintTagsView() {
         toolName: t.toolName || batchModelText || 'כלי עבודה',
         brand: (activeTab === 'reprint' ? reprintAsset?.brand : undefined) || 'ציוד מקצועי',
         qrCodeDataUrl: t.qrDataUrl,
+        qrDataUrl: t.qrDataUrl,
         companyName: effectiveCompanyName || 'TOOLY',
+        orgName: effectiveCompanyName || 'TOOLY',
+        warehouseName: (activeTab === 'reprint' ? reprintAsset?.warehouseName : (t.facilityName || facilityText)) || 'מחסן ראשי',
       }));
       printThermalLabelsDirectly(labelsData);
     }
@@ -567,7 +590,10 @@ export default function PrintTagsView() {
         toolName: t.toolName || batchModelText || 'כלי עבודה',
         brand: (activeTab === 'reprint' ? reprintAsset?.brand : undefined) || 'ציוד מקצועי',
         qrCodeDataUrl: t.qrDataUrl,
+        qrDataUrl: t.qrDataUrl,
         companyName: effectiveCompanyName || 'TOOLY',
+        orgName: effectiveCompanyName || 'TOOLY',
+        warehouseName: (activeTab === 'reprint' ? reprintAsset?.warehouseName : (t.facilityName || facilityText)) || 'מחסן ראשי',
         isReprint: t.isReprint,
       }));
       await downloadThermalLabelsPdf(labelsData);
@@ -599,10 +625,10 @@ export default function PrintTagsView() {
           html,
           body {
             width: 60mm !important;
-            height: 28mm !important;
+            height: auto !important;
             margin: 0 !important;
             padding: 0 !important;
-            overflow: hidden !important;
+            overflow: visible !important;
             background: #ffffff !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
@@ -613,23 +639,24 @@ export default function PrintTagsView() {
             margin: 0 !important;
             padding: 0 !important;
           }
+          .label-sticker,
           .print-label-page,
           .tsc-label {
             width: 58mm !important;
-            height: 28mm !important;
+            height: 27mm !important;
             max-width: 58mm !important;
-            max-height: 28mm !important;
+            max-height: 27mm !important;
             box-sizing: border-box !important;
-            page-break-after: always !important;
-            break-after: page !important;
-            page-break-inside: avoid !important;
-            break-inside: avoid !important;
-            overflow: hidden !important;
             display: flex !important;
             flex-direction: row !important;
             align-items: center !important;
             justify-content: space-between !important;
-            padding: 1.5mm 2.5mm !important;
+            padding: 1.5mm 2mm !important;
+            overflow: hidden !important;
+            page-break-inside: avoid !important;
+            page-break-after: always !important;
+            break-inside: avoid !important;
+            break-after: page !important;
             border: none !important;
             border-radius: 0 !important;
             box-shadow: none !important;
@@ -638,20 +665,60 @@ export default function PrintTagsView() {
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
           }
+          .label-sticker:last-child,
+          .print-label-page:last-child,
+          .tsc-label:last-child {
+            page-break-after: avoid !important;
+            break-after: avoid !important;
+          }
+          .qr-col {
+            width: 22mm !important;
+            height: 22mm !important;
+            flex-shrink: 0 !important;
+          }
+          .qr-col img,
           .tsc-qr-img {
             width: 22mm !important;
             height: 22mm !important;
             max-width: 22mm !important;
             max-height: 22mm !important;
+            display: block !important;
             object-fit: contain !important;
             image-rendering: -webkit-optimize-contrast !important;
             image-rendering: crisp-edges !important;
           }
-          .tsc-serial {
+          .info-col {
+            flex: 1 !important;
+            margin-left: 2mm !important;
+            display: flex !important;
+            flex-direction: column !important;
+            justify-content: center !important;
+            overflow: hidden !important;
+            text-align: right !important;
+            direction: rtl !important;
+          }
+          .tag-title {
             font-size: 13pt !important;
-            line-height: 1.1 !important;
-            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
             font-weight: 900 !important;
+            line-height: 1.1 !important;
+            letter-spacing: 0.5px !important;
+            font-family: Arial, Helvetica, sans-serif !important;
+          }
+          .tool-name {
+            font-size: 8pt !important;
+            font-weight: 700 !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            margin-top: 1mm !important;
+          }
+          .org-name {
+            font-size: 7pt !important;
+            color: #333 !important;
+            margin-top: 0.5mm !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
           }
         }
       `}</style>
@@ -1124,77 +1191,40 @@ export default function PrintTagsView() {
         ) : (
           /* TSC THERMAL LABEL 60x30 mm ROLL (Exact 2:1 Landscape) */
           <div className="tsc-container grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 print:block print:w-[60mm] print:m-0 print:p-0">
-            {tags.map((tag, idx) => (
-              <div
-                key={`${tag.serial}-${idx}`}
-                dir="rtl"
-                className="print-label-page tsc-label bg-white border-2 border-slate-900 rounded-xl p-2.5 sm:p-3 aspect-[2/1] w-full max-w-[340px] mx-auto flex flex-row items-center justify-between gap-2.5 shadow-sm transition-all overflow-hidden print:shadow-none print:border-none print:rounded-none print:m-0 print:w-[60mm] print:h-[30mm] print:max-w-[60mm] print:max-h-[30mm] print:p-[1.5mm_2.5mm]"
-              >
-                {/* Side 1: High-res QR code (approx 22mm x 22mm) */}
-                <div className="shrink-0 flex flex-col items-center justify-center p-0 bg-white">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={tag.qrDataUrl}
-                    alt={`QR Code for ${tag.serial}`}
-                    className="tsc-qr-img aspect-square w-[72px] h-[72px] sm:w-[82px] sm:h-[82px] print:w-[22mm] print:h-[22mm] object-contain"
-                  />
-                  <span className="text-[10px] font-bold font-mono text-slate-800" dir="ltr">{tag.serial}</span>
-                </div>
-
-                {/* Side 2: Company Name / Logo, Equipment / Tool Model, Large bold Tag Number */}
+            {tags.map((tag, idx) => {
+              const currentWh = (activeTab === 'reprint' ? reprintAsset?.warehouseName : (tag.facilityName || facilityText)) || 'מחסן ראשי';
+              const currentTool = tag.toolName || batchModelText || 'כלי עבודה';
+              return (
                 <div
-                  className="flex-1 flex flex-col justify-between h-full min-w-0 text-right pl-2 print:pl-[2mm] py-0.5 print:py-0 overflow-hidden"
-                  dir="rtl"
+                  key={`${tag.serial}-${idx}`}
+                  className="label-sticker print-label-page tsc-label bg-white border-2 border-slate-900 rounded-xl p-2.5 sm:p-3 aspect-[2/1] w-full max-w-[340px] mx-auto flex flex-row items-center justify-between gap-2 shadow-sm transition-all overflow-hidden print:shadow-none print:border-none print:rounded-none print:m-0 print:w-[58mm] print:h-[27mm] print:max-h-[27mm] print:p-[1.5mm_2mm]"
                 >
-                  {/* Micro header: Company Name / Logo */}
-                  <div className="flex items-center justify-between gap-1 min-w-0 pb-0.5 border-b border-slate-200 print:border-black/30 overflow-hidden shrink-0">
-                    <div className="flex items-center gap-1 min-w-0 overflow-hidden">
-                      <Wrench className="w-3.5 h-3.5 text-blue-600 print:text-black shrink-0" />
-                      <span
-                        className="font-extrabold text-slate-950 print:text-black truncate text-xs print:text-[8pt] leading-tight"
-                        title={effectiveCompanyName}
-                      >
-                        {effectiveCompanyName}
-                      </span>
-                    </div>
-                    {tag.isReprint && (
-                      <span className="shrink-0 text-[8px] print:text-[6.5pt] font-black uppercase px-1 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300 print:border-black print:text-black leading-none">
-                        חלופית
-                      </span>
-                    )}
+                  {/* Column 1: QR Code */}
+                  <div className="qr-col shrink-0 flex items-center justify-center">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={tag.qrDataUrl}
+                      alt={`QR Code for ${tag.serial}`}
+                      style={{ width: '22mm', height: '22mm', display: 'block' }}
+                      className="tsc-qr-img object-contain"
+                    />
                   </div>
 
-                  {/* Equipment / Tool Model name */}
-                  <div className="overflow-hidden py-0.5 print:py-0 shrink-0">
-                    <div
-                      className="font-bold text-slate-700 print:text-black truncate text-[11px] print:text-[7.5pt] leading-tight"
-                      title={tag.toolName || tag.facilityName || 'ציוד מבוקר'}
-                    >
-                      {tag.toolName || tag.facilityName || 'ציוד מבוקר'}
-                    </div>
-                  </div>
-
-                  {/* Large bold Tag Number (e.g. ZR-1099) in clear monospace font */}
-                  <div className="overflow-hidden py-0.5 print:py-0 shrink-0">
-                    <div
-                      className="tsc-serial font-mono font-black text-slate-950 print:text-black text-right tracking-wider select-all leading-tight text-sm sm:text-base print:text-[13pt]"
-                      dir="ltr"
-                    >
+                  {/* Column 2: Text Info */}
+                  <div className="info-col flex-1 min-w-0 mr-1 sm:mr-2 text-right overflow-hidden flex flex-col justify-center" dir="rtl">
+                    <div className="tag-title font-mono font-black text-slate-950 text-sm sm:text-base leading-tight tracking-wider" dir="ltr">
                       {tag.serial}
                     </div>
-                  </div>
-
-                  {/* Micro footer subtext */}
-                  <div className="text-[9px] print:text-[6.5pt] font-medium text-slate-500 print:text-black/80 truncate leading-tight pt-0.5 border-t border-slate-100 print:border-black/20 shrink-0">
-                    {tag.isReprint
-                      ? 'מדבקה חלופית • סרוק לבדיקה'
-                      : tag.toolName && tag.facilityName
-                      ? `${tag.facilityName} • סרוק לשיוך`
-                      : 'ציוד מבוקר • סרוק לבדיקה'}
+                    <div className="tool-name text-xs font-bold text-slate-800 truncate mt-1 leading-tight" title={currentTool}>
+                      {currentTool}
+                    </div>
+                    <div className="org-name text-[10px] text-slate-600 truncate mt-0.5 leading-tight">
+                      {effectiveCompanyName} - {currentWh}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
