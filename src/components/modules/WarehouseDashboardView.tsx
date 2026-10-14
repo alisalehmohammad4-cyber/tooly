@@ -445,84 +445,62 @@ export default function WarehouseDashboardView({
     [currentOrganization, user, selectedWarehouseId, data]
   );
 
-  const performInlineScanCycle = useCallback(async () => {
-    if (
-      inlineIsPausedRef.current ||
-      !inlineVideoRef.current ||
-      !isInlineScannerOpen ||
-      inlineIsDebounceLockedRef.current ||
-      isPassportOpen
-    ) {
-      return;
-    }
-
-    if (inlineVideoRef.current.readyState < 2) {
-      return;
-    }
-
-    const video = inlineVideoRef.current;
-
-    // ENGINE A: Barcode & QR Detector
-    if (!inlineIsBarcodeBusyRef.current && !inlineIsDebounceLockedRef.current && !inlineIsPausedRef.current) {
-      inlineIsBarcodeBusyRef.current = true;
-      void detectBarcodeOrQr(video)
-        .then(async (barcodeResult) => {
-          if (barcodeResult && barcodeResult.rawValue && !inlineIsDebounceLockedRef.current && !inlineIsPausedRef.current) {
-            const cleanTag = extractTagFromBarcodePayload(barcodeResult.rawValue);
-            if (cleanTag) {
-              await claimInlineDetection(cleanTag);
-            }
-          }
-        })
-        .catch(() => {})
-        .finally(() => {
-          inlineIsBarcodeBusyRef.current = false;
-        });
-    }
-
-    // ENGINE B: OCR Engine (cadence: runs actively every 700ms)
-    if (isInlineOcrReady && !inlineIsOcrBusyRef.current && !inlineIsDebounceLockedRef.current && !inlineIsPausedRef.current) {
-      inlineIsOcrBusyRef.current = true;
-      void recognizeInlineFrame(video)
-        .then(async (ocrDetails) => {
-          if (ocrDetails && ocrDetails.tag && !inlineIsDebounceLockedRef.current && !inlineIsPausedRef.current) {
-            if (ocrDetails.confidence > 85 || ocrDetails.isConfident) {
-              const detectedCode = ocrDetails.normalizedTag || ocrDetails.tag;
-              await claimInlineDetection(detectedCode);
-            }
-          }
-        })
-        .catch(() => {})
-        .finally(() => {
-          inlineIsOcrBusyRef.current = false;
-        });
-    }
-  }, [isInlineScannerOpen, isPassportOpen, isInlineOcrReady, recognizeInlineFrame, claimInlineDetection]);
-
-  // Lifecycle when isInlineScannerOpen toggles
+  /**
+   * ENGINE A: 60fps Continuous Barcode & QR Detection Loop for Inline Scanner
+   */
   useEffect(() => {
-    if (isInlineScannerOpen) {
-      inlineIsPausedRef.current = false;
-      void startInlineCamera();
-    } else {
-      inlineIsPausedRef.current = true;
-      if (inlineVideoRef.current) {
-        try {
-          inlineVideoRef.current.pause();
-        } catch {
-          // ignore
-        }
+    if (!isInlineScannerOpen || isPassportOpen) return;
+
+    let animId: number;
+    let active = true;
+
+    const qrScanLoop = () => {
+      if (!active) return;
+
+      if (
+        !inlineIsPausedRef.current &&
+        !inlineIsDebounceLockedRef.current &&
+        !inlineIsBarcodeBusyRef.current &&
+        !isPassportOpen &&
+        inlineVideoRef.current &&
+        inlineVideoRef.current.readyState >= 2
+      ) {
+        inlineIsBarcodeBusyRef.current = true;
+        detectBarcodeOrQr(inlineVideoRef.current)
+          .then(async (barcodeResult) => {
+            if (
+              barcodeResult &&
+              barcodeResult.rawValue &&
+              !inlineIsDebounceLockedRef.current &&
+              !inlineIsPausedRef.current &&
+              !isPassportOpen
+            ) {
+              const cleanTag = extractTagFromBarcodePayload(barcodeResult.rawValue);
+              if (cleanTag) {
+                await claimInlineDetection(cleanTag);
+              }
+            }
+          })
+          .catch(() => {})
+          .finally(() => {
+            inlineIsBarcodeBusyRef.current = false;
+          });
       }
-    }
+
+      animId = requestAnimationFrame(qrScanLoop);
+    };
+
+    animId = requestAnimationFrame(qrScanLoop);
 
     return () => {
-      if (!isInlineScannerOpen) {
-        void stopInlineCamera();
-      }
+      active = false;
+      cancelAnimationFrame(animId);
     };
-  }, [isInlineScannerOpen, startInlineCamera, stopInlineCamera]);
+  }, [isInlineScannerOpen, isPassportOpen, claimInlineDetection]);
 
-  // Active 700ms OCR cadence loop
+  /**
+   * ENGINE B: Cloud OCR (OCR.space Engine 2 + DB Whitelist) triggered every 1.2s on sharp center-cropped frames
+   */
   useEffect(() => {
     if (!isInlineScannerOpen || isPassportOpen) {
       if (inlineScanIntervalRef.current) {
@@ -532,9 +510,39 @@ export default function WarehouseDashboardView({
       return;
     }
 
-    inlineScanIntervalRef.current = setInterval(() => {
-      void performInlineScanCycle();
-    }, 700);
+    inlineScanIntervalRef.current = setInterval(async () => {
+      if (
+        inlineIsPausedRef.current ||
+        !inlineVideoRef.current ||
+        !isInlineScannerOpen ||
+        inlineIsDebounceLockedRef.current ||
+        inlineIsOcrBusyRef.current ||
+        isPassportOpen ||
+        inlineVideoRef.current.readyState < 2
+      ) {
+        return;
+      }
+
+      inlineIsOcrBusyRef.current = true;
+      try {
+        const activeOrgId = currentOrganization?.id || user?.organizationId;
+        const ocrDetails = await recognizeInlineFrame(inlineVideoRef.current, activeOrgId);
+        if (
+          ocrDetails &&
+          ocrDetails.tag &&
+          !inlineIsDebounceLockedRef.current &&
+          !inlineIsPausedRef.current &&
+          !isPassportOpen
+        ) {
+          const detectedCode = ocrDetails.normalizedTag || ocrDetails.tag;
+          await claimInlineDetection(detectedCode);
+        }
+      } catch (err) {
+        console.warn('[CloudOCR] Inline OCR cycle error:', err);
+      } finally {
+        inlineIsOcrBusyRef.current = false;
+      }
+    }, 1200);
 
     return () => {
       if (inlineScanIntervalRef.current) {
@@ -542,7 +550,7 @@ export default function WarehouseDashboardView({
         inlineScanIntervalRef.current = null;
       }
     };
-  }, [isInlineScannerOpen, isPassportOpen, performInlineScanCycle]);
+  }, [isInlineScannerOpen, isPassportOpen, currentOrganization, user, recognizeInlineFrame, claimInlineDetection]);
 
   // Stream Watchdog: Revives dead or ended camera stream every 1000ms
   useEffect(() => {

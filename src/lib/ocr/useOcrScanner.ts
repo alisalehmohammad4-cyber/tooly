@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect } from 'react';
-import { createWorker, PSM, type Worker } from 'tesseract.js';
-import { preprocessFrameForOcr } from './imagePreprocessing';
+import { useState, useRef, useCallback } from 'react';
+import { captureSharpCenterCrop } from './imagePreprocessing';
 import { cleanAndCorrectTag } from './tagParser';
+import { recognizeTagWithCloudOcrAction } from '@/app/actions/ocr';
 
 export interface OcrDetailsResult {
   tag: string | null;
@@ -24,7 +24,8 @@ export interface UseOcrScannerResult {
   terminateOcr: () => Promise<void>;
   recognizeFrame: (videoElement: HTMLVideoElement) => Promise<string | null>;
   recognizeFrameWithDetails: (
-    videoElement: HTMLVideoElement
+    videoElement: HTMLVideoElement,
+    organizationId?: string
   ) => Promise<OcrDetailsResult | null>;
 }
 
@@ -35,7 +36,7 @@ export interface ValidatedSerialMatch {
 }
 
 /**
- * Hardened regex validation for local industrial equipment tag recognition:
+ * Hardened regex validation for equipment tag recognition:
  * Allow standalone 3 to 5 digit numbers (e.g., 1099, 1065, 1032, 282) WITHOUT requiring 'ZR-':
  * const match = text.match(/(?:ZR[- ]?)?\b(\d{3,5})\b/i);
  */
@@ -102,144 +103,89 @@ export function extractToolSerialFromText(rawText: string): string | null {
 }
 
 /**
- * Dedicated React hook for offline-ready client-side optical character recognition (OCR)
- * using Tesseract.js with high-contrast 60% ROI cropping, 2x scale, unsharp masking,
- * Otsu dynamic binarization, and character constraint [0-9, Z, R, -].
+ * High-performance, zero-client-overhead OCR scanner hook.
+ * Completely replaces heavy client-side Tesseract.js with Cloud OCR (OCR.space Engine 2)
+ * + Database Whitelist verification. Frees up 100% of mobile CPU and RAM.
  */
 export function useOcrScanner(): UseOcrScannerResult {
-  const [isOcrReady, setIsOcrReady] = useState<boolean>(false);
-  const [isInitializing, setIsInitializing] = useState<boolean>(false);
+  const [isOcrReady] = useState<boolean>(true);
+  const [isInitializing] = useState<boolean>(false);
   const [isRecognizing, setIsRecognizing] = useState<boolean>(false);
-  const [ocrProgress, setOcrProgress] = useState<number>(0);
+  const [ocrProgress] = useState<number>(100);
   const [ocrError, setOcrError] = useState<string | null>(null);
 
-  const workerRef = useRef<Worker | null>(null);
-  const isInitializingRef = useRef<boolean>(false);
+  const isBusyRef = useRef<boolean>(false);
 
-  // Lazy initialize Tesseract worker on demand
   const initOcr = useCallback(async (): Promise<boolean> => {
-    if (workerRef.current) {
-      setIsOcrReady(true);
-      return true;
-    }
-
-    if (isInitializingRef.current) {
-      return false;
-    }
-
-    isInitializingRef.current = true;
-    setIsInitializing(true);
-    setOcrError(null);
-    setOcrProgress(10);
-
-    try {
-      // Initialize local Tesseract worker with English model
-      const worker = await createWorker('eng', undefined, {
-        logger: (m) => {
-          if (m && typeof m.progress === 'number') {
-            setOcrProgress(Math.round(m.progress * 100));
-          }
-        },
-      });
-
-      // Constrain recognition strictly to characters: [0-9, Z, R, -]
-      await worker.setParameters({
-        tessedit_char_whitelist: '0123456789ZR-',
-        tessedit_pageseg_mode: PSM.SINGLE_LINE,
-      });
-
-      workerRef.current = worker;
-      setIsOcrReady(true);
-      setIsInitializing(false);
-      isInitializingRef.current = false;
-      return true;
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : 'שגיאה באתחול מנוע סריקת טקסט OCR';
-      console.error('Failed to initialize Tesseract worker:', err);
-      setOcrError(errMsg);
-      setIsInitializing(false);
-      isInitializingRef.current = false;
-      return false;
-    }
+    return true;
   }, []);
 
-  // Terminate worker
   const terminateOcr = useCallback(async (): Promise<void> => {
-    if (workerRef.current) {
-      try {
-        await workerRef.current.terminate();
-      } catch (err) {
-        console.warn('Error terminating Tesseract worker:', err);
-      } finally {
-        workerRef.current = null;
-        setIsOcrReady(false);
-      }
-    }
+    // Zero-overhead cloud OCR requires no teardown
   }, []);
 
-  // Detailed recognition returning tag, raw text, and confidence
+  /**
+   * Detailed recognition extracting sharp center 60% crop and calling Cloud OCR server action
+   * with strict database whitelist validation.
+   */
   const recognizeFrameWithDetails = useCallback(
     async (
-      videoElement: HTMLVideoElement
+      videoElement: HTMLVideoElement,
+      organizationId?: string
     ): Promise<OcrDetailsResult | null> => {
-      if (!videoElement) return null;
+      if (!videoElement || isBusyRef.current) return null;
 
-      if (!workerRef.current) {
-        const ready = await initOcr();
-        if (!ready || !workerRef.current) {
-          return null;
-        }
-      }
+      if (videoElement.readyState < 2) return null;
 
+      isBusyRef.current = true;
       setIsRecognizing(true);
       setOcrError(null);
 
       try {
-        // Preprocess frame: 60% center ROI crop, 2x scale, unsharp mask, Otsu binarization
-        const canvas = preprocessFrameForOcr(videoElement);
+        // Capture sharp center 60% crop of the frame
+        const canvas = captureSharpCenterCrop(videoElement, 0.60, 2);
         if (!canvas) {
+          isBusyRef.current = false;
           setIsRecognizing(false);
           return null;
         }
 
-        const result = await workerRef.current.recognize(canvas);
-        const rawText = result?.data?.text || '';
-        const confidence = result?.data?.confidence || 0;
+        const base64Image = canvas.toDataURL('image/jpeg', 0.85);
 
-        // Regex validation: match pattern ZR-\d{3,5} or standalone 3 to 5 digit numbers
-        let validated = validateSerialTag(rawText);
-        if (!validated) {
-          const fuzzy = cleanAndCorrectTag(rawText);
-          if (fuzzy) {
-            validated = validateSerialTag(fuzzy);
-          }
-        }
-        const isValid = Boolean(validated);
-        // If confidence > 85%, claim detection immediately
-        const isConfident = confidence > 85;
+        // Execute cloud OCR with strict DB whitelist verification
+        const result = await recognizeTagWithCloudOcrAction(base64Image, organizationId);
 
+        isBusyRef.current = false;
         setIsRecognizing(false);
 
-        return {
-          tag: validated ? validated.tag : null,
-          normalizedTag: validated ? validated.normalizedTag : null,
-          rawText,
-          confidence,
-          isValid,
-          isConfident,
-        };
+        if (result.success && result.matchedTag) {
+          return {
+            tag: result.matchedTag,
+            normalizedTag: result.matchedTag,
+            rawText: result.rawText || result.matchedTag,
+            confidence: 99,
+            isValid: true,
+            isConfident: true,
+          };
+        }
+
+        if (result.error && !result.error.includes('No candidate') && !result.error.includes('whitelist')) {
+          setOcrError(result.error);
+        }
+
+        return null;
       } catch (err: unknown) {
-        console.error('OCR recognition error:', err);
-        const msg = err instanceof Error ? err.message : 'שגיאה בזיהוי הטקסט';
+        console.warn('[CloudOCR] recognizeFrameWithDetails error:', err);
+        const msg = err instanceof Error ? err.message : 'שגיאה בסריקת ענן';
         setOcrError(msg);
+        isBusyRef.current = false;
         setIsRecognizing(false);
         return null;
       }
     },
-    [initOcr]
+    []
   );
 
-  // Recognize text from HTMLVideoElement frame
   const recognizeFrame = useCallback(
     async (videoElement: HTMLVideoElement): Promise<string | null> => {
       const details = await recognizeFrameWithDetails(videoElement);
@@ -247,16 +193,6 @@ export function useOcrScanner(): UseOcrScannerResult {
     },
     [recognizeFrameWithDetails]
   );
-
-  // Clean up worker when unmounting
-  useEffect(() => {
-    return () => {
-      if (workerRef.current) {
-        void workerRef.current.terminate();
-        workerRef.current = null;
-      }
-    };
-  }, []);
 
   return {
     isOcrReady,

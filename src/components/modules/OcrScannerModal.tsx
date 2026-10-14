@@ -344,62 +344,110 @@ export default function OcrScannerModal({
   );
 
   /**
-   * Silent Dual-Engine Scanning Loop (Runs in background at top speed)
+   * ENGINE A: 60fps Continuous Barcode & QR Detection Loop
    */
-  const performDualScanCycle = useCallback(async () => {
-    if (
-      isPausedRef.current ||
-      !videoRef.current ||
-      !cameraActive ||
-      isDebounceLockedRef.current ||
-      snappedAsset
-    ) {
-      return;
-    }
+  useEffect(() => {
+    if (!isOpen || !cameraActive || snappedAsset) return;
 
-    if (videoRef.current.readyState < 2) {
-      return;
-    }
+    let animId: number;
+    let active = true;
 
-    const video = videoRef.current;
+    const qrScanLoop = () => {
+      if (!active) return;
 
-    // ENGINE A: Barcode & QR Detector
-    if (!isBarcodeBusyRef.current && !isDebounceLockedRef.current && !isPausedRef.current) {
-      isBarcodeBusyRef.current = true;
-      void detectBarcodeOrQr(video)
-        .then(async (barcodeResult) => {
-          if (barcodeResult && barcodeResult.rawValue && !isDebounceLockedRef.current && !isPausedRef.current) {
-            const cleanTag = extractTagFromBarcodePayload(barcodeResult.rawValue);
-            if (cleanTag) {
-              await claimDetection(cleanTag);
+      if (
+        !isPausedRef.current &&
+        !isDebounceLockedRef.current &&
+        !isBarcodeBusyRef.current &&
+        !snappedAsset &&
+        videoRef.current &&
+        videoRef.current.readyState >= 2
+      ) {
+        isBarcodeBusyRef.current = true;
+        detectBarcodeOrQr(videoRef.current)
+          .then(async (barcodeResult) => {
+            if (
+              barcodeResult &&
+              barcodeResult.rawValue &&
+              !isDebounceLockedRef.current &&
+              !isPausedRef.current &&
+              !snappedAsset
+            ) {
+              const cleanTag = extractTagFromBarcodePayload(barcodeResult.rawValue);
+              if (cleanTag) {
+                await claimDetection(cleanTag);
+              }
             }
-          }
-        })
-        .catch(() => {})
-        .finally(() => {
-          isBarcodeBusyRef.current = false;
-        });
+          })
+          .catch(() => {})
+          .finally(() => {
+            isBarcodeBusyRef.current = false;
+          });
+      }
+
+      animId = requestAnimationFrame(qrScanLoop);
+    };
+
+    animId = requestAnimationFrame(qrScanLoop);
+
+    return () => {
+      active = false;
+      cancelAnimationFrame(animId);
+    };
+  }, [isOpen, cameraActive, snappedAsset, claimDetection]);
+
+  /**
+   * ENGINE B: Cloud OCR (OCR.space Engine 2 + DB Whitelist) triggered every 1.2s on sharp center-cropped frames
+   */
+  useEffect(() => {
+    if (!isOpen || !cameraActive || snappedAsset) {
+      if (scanIntervalRef.current) {
+        clearInterval(scanIntervalRef.current);
+        scanIntervalRef.current = null;
+      }
+      return;
     }
 
-    // ENGINE B: Local Vision ML OCR Engine (runs actively every 700ms)
-    if (isOcrReady && !isOcrBusyRef.current && !isDebounceLockedRef.current && !isPausedRef.current) {
+    scanIntervalRef.current = setInterval(async () => {
+      if (
+        isPausedRef.current ||
+        !videoRef.current ||
+        !cameraActive ||
+        isDebounceLockedRef.current ||
+        isOcrBusyRef.current ||
+        snappedAsset ||
+        videoRef.current.readyState < 2
+      ) {
+        return;
+      }
+
       isOcrBusyRef.current = true;
-      void recognizeFrameWithDetails(video)
-        .then(async (ocrDetails) => {
-          if (ocrDetails && ocrDetails.tag && !isDebounceLockedRef.current && !isPausedRef.current) {
-            // If confidence > 85%, claim detection immediately
-            if (ocrDetails.confidence > 85 || ocrDetails.isConfident) {
-              const detectedCode = ocrDetails.normalizedTag || ocrDetails.tag;
-              await claimDetection(detectedCode);
-            }
-          }
-        })
-        .catch(() => {})
-        .finally(() => {
-          isOcrBusyRef.current = false;
-        });
-    }
-  }, [cameraActive, snappedAsset, isOcrReady, recognizeFrameWithDetails, claimDetection]);
+      try {
+        const ocrDetails = await recognizeFrameWithDetails(videoRef.current, orgId);
+        if (
+          ocrDetails &&
+          ocrDetails.tag &&
+          !isDebounceLockedRef.current &&
+          !isPausedRef.current &&
+          !snappedAsset
+        ) {
+          const detectedCode = ocrDetails.normalizedTag || ocrDetails.tag;
+          await claimDetection(detectedCode);
+        }
+      } catch (err) {
+        console.warn('[CloudOCR] Modal OCR cycle error:', err);
+      } finally {
+        isOcrBusyRef.current = false;
+      }
+    }, 1200);
+
+    return () => {
+      if (scanIntervalRef.current) {
+        clearInterval(scanIntervalRef.current);
+        scanIntervalRef.current = null;
+      }
+    };
+  }, [isOpen, cameraActive, snappedAsset, orgId, recognizeFrameWithDetails, claimDetection]);
 
   /**
    * Lifecycle: On modal open/close, pause detection without killing hardware stream,
@@ -478,30 +526,6 @@ export default function OcrScannerModal({
       }
     };
   }, [isOpen, startCamera]);
-
-  /**
-   * Cadence: runs actively every 700ms for continuous OCR & Barcode recognition
-   */
-  useEffect(() => {
-    if (!cameraActive || snappedAsset || !isOpen) {
-      if (scanIntervalRef.current) {
-        clearInterval(scanIntervalRef.current);
-        scanIntervalRef.current = null;
-      }
-      return;
-    }
-
-    scanIntervalRef.current = setInterval(() => {
-      void performDualScanCycle();
-    }, 700);
-
-    return () => {
-      if (scanIntervalRef.current) {
-        clearInterval(scanIntervalRef.current);
-        scanIntervalRef.current = null;
-      }
-    };
-  }, [cameraActive, snappedAsset, isOpen, performDualScanCycle]);
 
   /**
    * Manual Tag Search fallback

@@ -260,3 +260,46 @@ export function preprocessFrameForOcr(
   ctx.putImageData(imgData, 0, 0);
   return canvas;
 }
+
+/**
+ * Captures a clean, sharp center-cropped frame (center 60% of frame) from video/canvas for Cloud OCR.
+ */
+export function captureSharpCenterCrop(
+  source: HTMLVideoElement | HTMLCanvasElement,
+  roiRatio = 0.60,
+  scale = 2
+): HTMLCanvasElement | null {
+  if (typeof document === 'undefined') return null;
+
+  const srcWidth = source instanceof HTMLVideoElement ? source.videoWidth : source.width;
+  const srcHeight = source instanceof HTMLVideoElement ? source.videoHeight : source.height;
+
+  if (!srcWidth || !srcHeight) {
+    return null;
+  }
+
+  const roi = getCentralRoiBox(srcWidth, srcHeight, roiRatio, roiRatio);
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(roi.width * scale));
+  canvas.height = Math.max(1, Math.round(roi.height * scale));
+
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return null;
+
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+
+  ctx.drawImage(
+    source,
+    roi.x,
+    roi.y,
+    roi.width,
+    roi.height,
+    0,
+    0,
+    canvas.width,
+    canvas.height
+  );
+
+  return canvas;
+}
