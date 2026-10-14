@@ -23,6 +23,35 @@ import { snapOcrTagToAssetAction, type ScannedAssetDetails } from '@/app/actions
 export const KNOWN_TAG_PREFIXES = ['ZR', 'TOOL', 'MOHA', 'ALI', 'MH'] as const;
 
 /**
+ * Universal case-insensitive and whitespace-tolerant field tag pattern matcher:
+ * Matches: 'zr 1084', 'ZR-1084', 'zr1084', 'ZR 1084', 'zr_1084', or standalone '1084'.
+ */
+export const TAG_REGEX = /(?:zr[\s\-_]*)?(\d{3,5})/i;
+
+export interface NormalizedTagResult {
+  success: boolean;
+  tag: string | null;
+  rawDigits: string | null;
+}
+
+/**
+ * Normalization Pipeline for field tags:
+ * Extracts digits from strings like 'zr 1084' or '1084', returning primary tag 'ZR-1084' and raw '1084'.
+ */
+export function normalizeFieldTag(text: string): NormalizedTagResult {
+  if (!text) return { success: false, tag: null, rawDigits: null };
+  const cleanText = text.replace(/[\r\n\t]/g, ' ').trim();
+  const match = cleanText.match(TAG_REGEX);
+  if (match) {
+    const digits = match[1]; // e.g. "1084"
+    const primaryTag = `ZR-${digits}`;
+    const rawDigits = digits;
+    return { success: true, tag: primaryTag, rawDigits };
+  }
+  return { success: false, tag: null, rawDigits: null };
+}
+
+/**
  * Replaces common optical misreads in the numeric portion of a tag.
  * E.g., "lO99" -> "1099", "D001" -> "0001", "S02B" -> "5028", "Z099" -> "2099".
  */
@@ -88,54 +117,37 @@ export function triggerOcrHaptic(pattern: number | number[] = 50): void {
 
 /**
  * Extracts and fuzzy-corrects candidate tags from raw OCR text output.
- * 
- * Strict construction site filter:
- * - High-Priority Pattern: /(?:ZR[- ]?)?\d{3,5}/i (handles ZR-1032, ZR 1065, or standalone 3-5 digits)
- * - Optical misreads in numeric part: e.g., "ZR-lO99" -> "ZR-1099"
- * - Secondary organizational prefixes: TOOL, MOHA, ALI, MH (3-5 digits)
+ * Fully supports real-world field tag formats: 'zr 1084', 'ZR-1084', 'zr1084', 'ZR 1084', '1084'.
  */
 export function parseCandidateTags(rawText: string): string[] {
   if (!rawText) return [];
 
   const candidates: string[] = [];
-  const normalized = rawText.trim().replace(/\r?\n/g, ' ');
+  const normalized = rawText.replace(/[\r\n\t]/g, ' ').trim();
 
-  // 1. High-Priority Matcher: Allow standalone 3 to 5 digit numbers (e.g., 1099, 1065, 1032) WITHOUT requiring 'ZR-':
-  // Pattern: /(?:ZR[- ]?)?\b(\d{3,5})\b/i (handles optical misreads in numeric portion)
-  const zrPatternRegex = /(?:ZR[- ]?)?\b([0-9OoDIl|!Ss$BZ]{3,5})\b/gi;
+  // 1. High-Priority Matcher: Matches 'zr 1084', 'ZR-1084', 'zr1084', 'ZR 1084', or standalone '1084'
+  // and handles optical misreads in numeric portion:
+  const zrPatternRegex = /(?:zr[\s\-_]*)?([0-9OoDIl|!Ss$BZ]{3,5})/gi;
 
   let match: RegExpExecArray | null;
   while ((match = zrPatternRegex.exec(normalized)) !== null) {
-    const rawMatch = match[0].toUpperCase();
-    const hasZrPrefix = rawMatch.startsWith('ZR');
     const rawNumber = match[1];
     const correctedNumber = correctNumericOpticalMisreads(rawNumber);
 
-    // Verify corrected number is strictly 3 to 5 digits
     if (/^[0-9]{3,5}$/.test(correctedNumber)) {
       const zrTag = `ZR-${correctedNumber}`;
-      if (!hasZrPrefix) {
-        // If scanned as standalone number without prefix, prioritize the pure number first
-        if (!candidates.includes(correctedNumber)) {
-          candidates.push(correctedNumber);
-        }
-        if (!candidates.includes(zrTag)) {
-          candidates.push(zrTag);
-        }
-      } else {
-        if (!candidates.includes(zrTag)) {
-          candidates.push(zrTag);
-        }
-        if (!candidates.includes(correctedNumber)) {
-          candidates.push(correctedNumber);
-        }
+      if (!candidates.includes(zrTag)) {
+        candidates.push(zrTag);
+      }
+      if (!candidates.includes(correctedNumber)) {
+        candidates.push(correctedNumber);
       }
     }
   }
 
   // 2. Secondary Matcher: Other known enterprise fleet prefixes (3-5 digits)
   const enterprisePrefixRegex =
-    /(?:^|[^A-Za-z0-9])(TOOL|MOHA|ALI|MH)[-_ ]?([0-9OoDIl|!Ss$BZ]{3,5})(?:$|[^A-Za-z0-9])/gi;
+    /(?:^|[^A-Za-z0-9])(TOOL|MOHA|ALI|MH)[\s\-_]?([0-9OoDIl|!Ss$BZ]{3,5})(?:$|[^A-Za-z0-9])/gi;
 
   while ((match = enterprisePrefixRegex.exec(normalized)) !== null) {
     const prefix = match[1].toUpperCase();
@@ -147,6 +159,9 @@ export function parseCandidateTags(rawText: string): string[] {
       if (!candidates.includes(candidate)) {
         candidates.push(candidate);
       }
+      if (!candidates.includes(correctedNumber)) {
+        candidates.push(correctedNumber);
+      }
     }
   }
 
@@ -157,6 +172,10 @@ export function parseCandidateTags(rawText: string): string[] {
  * Returns the best candidate tag from raw OCR text, or null if no valid tag pattern was identified.
  */
 export function cleanAndCorrectTag(rawText: string): string | null {
+  const norm = normalizeFieldTag(rawText);
+  if (norm.success && norm.tag) {
+    return norm.tag;
+  }
   const candidates = parseCandidateTags(rawText);
   return candidates.length > 0 ? candidates[0] : null;
 }
@@ -186,25 +205,30 @@ export async function snapTagToAsset(
       return res.asset;
     }
 
-    // 2. Dual fallback: if 4-digit number, try with ZR- prefix (e.g., 1065 -> ZR-1065)
-    if (/^\d{3,5}$/.test(clean)) {
-      const zrVariant = `ZR-${clean}`;
-      const resZr = await snapOcrTagToAssetAction(zrVariant, orgId, facilityId);
-      if (resZr.success && resZr.asset) {
-        triggerOcrHaptic(50);
-        playOcrBeep();
-        return resZr.asset;
-      }
-    }
+    // 2. Normalize and check both ZR-${digits} and raw digits
+    const norm = normalizeFieldTag(clean);
+    if (norm.success && norm.rawDigits) {
+      const zrVariant = `ZR-${norm.rawDigits}`;
+      const rawDigits = norm.rawDigits;
 
-    // 3. If prefixed with ZR- (e.g. ZR-1065), try raw numeric suffix (1065)
-    if (/^ZR-\d{3,5}$/i.test(clean)) {
-      const rawNumber = clean.replace(/^ZR-/i, '');
-      const resRaw = await snapOcrTagToAssetAction(rawNumber, orgId, facilityId);
-      if (resRaw.success && resRaw.asset) {
-        triggerOcrHaptic(50);
-        playOcrBeep();
-        return resRaw.asset;
+      // Try ZR-${digits} (e.g. ZR-1084)
+      if (zrVariant !== clean) {
+        const resZr = await snapOcrTagToAssetAction(zrVariant, orgId, facilityId);
+        if (resZr.success && resZr.asset) {
+          triggerOcrHaptic(50);
+          playOcrBeep();
+          return resZr.asset;
+        }
+      }
+
+      // Try raw digits (e.g. 1084)
+      if (rawDigits !== clean) {
+        const resRaw = await snapOcrTagToAssetAction(rawDigits, orgId, facilityId);
+        if (resRaw.success && resRaw.asset) {
+          triggerOcrHaptic(50);
+          playOcrBeep();
+          return resRaw.asset;
+        }
       }
     }
   } catch (err) {

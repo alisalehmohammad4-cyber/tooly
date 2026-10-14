@@ -24,7 +24,7 @@ interface WhitelistAsset {
  * 1. Sends cropped base64 frame to https://api.ocr.space/parse/image using OCREngine 2 (specialized
  *    for numbers and industrial labels) and scale=true.
  * 2. Uses process.env.OCR_SPACE_API_KEY || 'helloworld' for zero-config free operation.
- * 3. Extracts candidate numbers matching /(?:ZR[- ]?)?\b(\d{3,5})\b/gi.
+ * 3. Extracts candidate numbers matching /(?:zr[\s\-_]*)?(\d{3,5})/gi (e.g. 'zr 1084', '1084', 'ZR-1084').
  * 4. Strictly validates against the organization's real assets whitelist (tag_number, qr_code, serial_number).
  *    NEVER accepts hallucinated or misread numbers!
  */
@@ -92,9 +92,10 @@ export async function recognizeTagWithCloudOcrAction(
     return { success: false, rawText: '', error: 'No text detected' };
   }
 
-  // 2. Extract candidate numbers matching /(?:ZR[- ]?)?\b(\d{3,5})\b/gi
-  const candidateRegex = /(?:ZR[- ]?)?\b(\d{3,5})\b/gi;
-  const matches = Array.from(rawText.matchAll(candidateRegex));
+  // 2. Extract candidate numbers matching /(?:zr[\s\-_]*)?(\d{3,5})/gi (e.g. 'zr 1084', '1084', 'ZR-1084')
+  const cleanRawText = rawText.replace(/[\r\n\t]/g, ' ').trim();
+  const candidateRegex = /(?:zr[\s\-_]*)?(\d{3,5})/gi;
+  const matches = Array.from(cleanRawText.matchAll(candidateRegex));
 
   if (!matches || matches.length === 0) {
     return {
@@ -147,12 +148,15 @@ export async function recognizeTagWithCloudOcrAction(
       const cleanField = rawField.trim().toUpperCase().replace(/\s+/g, '');
       whitelist.set(cleanField, canonicalTag);
 
-      const numMatch = cleanField.match(/(?:ZR[- ]?)?(\d{3,5})/i);
+      const numMatch = cleanField.match(/(?:zr[\s\-_]*)?(\d{3,5})/i);
       if (numMatch) {
         const num = numMatch[1];
         whitelist.set(num, canonicalTag);
         whitelist.set(`ZR-${num}`, canonicalTag);
         whitelist.set(`ZR${num}`, canonicalTag);
+        whitelist.set(`ZR ${num}`, canonicalTag);
+        whitelist.set(`zr ${num}`, canonicalTag);
+        whitelist.set(`zr-${num}`, canonicalTag);
       }
     }
   }

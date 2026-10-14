@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback } from 'react';
 import { captureSharpCenterCrop } from './imagePreprocessing';
-import { cleanAndCorrectTag } from './tagParser';
+import { cleanAndCorrectTag, TAG_REGEX, normalizeFieldTag } from './tagParser';
 import { recognizeTagWithCloudOcrAction } from '@/app/actions/ocr';
 
 export interface OcrDetailsResult {
@@ -37,17 +37,16 @@ export interface ValidatedSerialMatch {
 
 /**
  * Hardened regex validation for equipment tag recognition:
- * Allow standalone 3 to 5 digit numbers (e.g., 1099, 1065, 1032, 282) WITHOUT requiring 'ZR-':
- * const match = text.match(/(?:ZR[- ]?)?\b(\d{3,5})\b/i);
+ * Matches: 'zr 1084', 'ZR-1084', 'zr1084', 'ZR 1084', 'zr_1084', or standalone '1084'
  */
 export function validateSerialTag(rawText: string): ValidatedSerialMatch | null {
   if (!rawText) return null;
-  const clean = rawText.toUpperCase().trim().replace(/[\r\n\t]+/g, ' ');
+  const clean = rawText.replace(/[\r\n\t]/g, ' ').trim();
 
-  const match = clean.match(/(?:ZR[- ]?)?\b(\d{3,5})\b/i);
+  const match = clean.match(TAG_REGEX);
   if (match) {
     const rawNumber = match[1];
-    const hasZrPrefix = match[0].toUpperCase().startsWith('ZR');
+    const hasZrPrefix = clean.toLowerCase().includes('zr');
     return {
       tag: hasZrPrefix ? `ZR-${rawNumber}` : rawNumber,
       normalizedTag: `ZR-${rawNumber}`,
@@ -64,10 +63,10 @@ export function validateSerialTag(rawText: string): ValidatedSerialMatch | null 
 export function extractToolSerialFromText(rawText: string): string | null {
   if (!rawText) return null;
 
-  // 1. Primary Priority: Strict validation against ZR-\d{3,5} or 4-digit number
-  const validated = validateSerialTag(rawText);
-  if (validated) {
-    return validated.normalizedTag;
+  // 1. Primary Priority: Field tag normalization (e.g. 'zr 1084' -> 'ZR-1084', '1084' -> 'ZR-1084')
+  const norm = normalizeFieldTag(rawText);
+  if (norm.success && norm.tag) {
+    return norm.tag;
   }
 
   // 2. Try fuzzy pattern corrector

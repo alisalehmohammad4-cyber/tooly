@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useOcrScanner } from '@/lib/ocr/useOcrScanner';
-import { snapTagToAsset, triggerOcrHaptic, playOcrBeep } from '@/lib/ocr/tagParser';
+import { snapTagToAsset, triggerOcrHaptic, playOcrBeep, normalizeFieldTag } from '@/lib/ocr/tagParser';
 import { detectBarcodeOrQr, extractTagFromBarcodePayload } from '@/lib/ocr/barcodeDetector';
 import type { ScannedAssetDetails } from '@/app/actions/custody';
 
@@ -286,21 +286,27 @@ export default function OcrScannerModal({
       playOcrBeep(880, 140);
 
       try {
-        // Query database for asset details (supports standalone digits e.g. 1099 or ZR-1099)
+        // Query database for asset details (supports 'zr 1084', standalone digits e.g. 1084 or ZR-1084)
         let matched = await snapTagToAsset(detectedTag, orgId, warehouseId);
 
-        if (!matched && /^\d{3,5}$/.test(detectedTag)) {
-          matched = await snapTagToAsset(`ZR-${detectedTag}`, orgId, warehouseId);
+        const norm = normalizeFieldTag(detectedTag);
+        if (!matched && norm.success && norm.rawDigits) {
+          matched =
+            (await snapTagToAsset(`ZR-${norm.rawDigits}`, orgId, warehouseId)) ||
+            (await snapTagToAsset(norm.rawDigits, orgId, warehouseId));
         }
+
+        const canonicalTag = norm.success && norm.tag ? norm.tag : (detectedTag.startsWith('ZR-') ? detectedTag : `ZR-${detectedTag}`);
+        const rawDigits = norm.success && norm.rawDigits ? norm.rawDigits : detectedTag;
 
         // On valid detection: immediately open the tool passport
         const targetAsset: ScannedAssetDetails = matched || {
           id: detectedTag,
-          qrCode: detectedTag.startsWith('ZR-') ? detectedTag : `ZR-${detectedTag}`,
-          tagNumber: detectedTag,
-          toolName: `כלי ${detectedTag}`,
+          qrCode: canonicalTag,
+          tagNumber: canonicalTag,
+          toolName: `כלי ${canonicalTag}`,
           brand: 'צי כלי עבודה',
-          modelNumber: detectedTag,
+          modelNumber: rawDigits,
           status: 'available',
           condition: 'good',
           currentAssignedWorker: null,

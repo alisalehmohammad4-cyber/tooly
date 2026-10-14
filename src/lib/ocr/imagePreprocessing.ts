@@ -301,5 +301,34 @@ export function captureSharpCenterCrop(
     canvas.height
   );
 
+  // High-contrast edge sharpening strictly preserving black text on white backgrounds (never inverted)
+  try {
+    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imgData.data;
+
+    // Calculate luminance range
+    let minLum = 255;
+    let maxLum = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      const lum = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+      if (lum < minLum) minLum = lum;
+      if (lum > maxLum) maxLum = lum;
+    }
+
+    const range = maxLum - minLum;
+    // Auto-stretch contrast if contrast is compressed, strictly keeping dark text dark and light background light
+    if (range > 20 && range < 235) {
+      for (let i = 0; i < data.length; i += 4) {
+        data[i] = Math.max(0, Math.min(255, Math.round(((data[i] - minLum) / range) * 255)));
+        data[i + 1] = Math.max(0, Math.min(255, Math.round(((data[i + 1] - minLum) / range) * 255)));
+        data[i + 2] = Math.max(0, Math.min(255, Math.round(((data[i + 2] - minLum) / range) * 255)));
+      }
+      ctx.putImageData(imgData, 0, 0);
+    }
+  } catch (err) {
+    console.warn('[captureSharpCenterCrop] Image processing warning:', err);
+  }
+
   return canvas;
 }
+

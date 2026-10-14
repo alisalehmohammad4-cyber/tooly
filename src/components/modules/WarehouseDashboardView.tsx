@@ -56,7 +56,7 @@ import ChiefNotesFeedView from '@/components/modules/ChiefNotesFeedView';
 import SignaturePad from '@/components/ui/SignaturePad';
 import { useAuth } from '@/context/AuthContext';
 import { useOcrScanner } from '@/lib/ocr/useOcrScanner';
-import { snapTagToAsset, triggerOcrHaptic, playOcrBeep } from '@/lib/ocr/tagParser';
+import { snapTagToAsset, triggerOcrHaptic, playOcrBeep, normalizeFieldTag } from '@/lib/ocr/tagParser';
 import { detectBarcodeOrQr, extractTagFromBarcodePayload } from '@/lib/ocr/barcodeDetector';
 import {
   getAssetDetailsByQr,
@@ -407,17 +407,23 @@ export default function WarehouseDashboardView({
         const activeOrgId = currentOrganization?.id || user?.organizationId;
         let matched = await snapTagToAsset(detectedTag, activeOrgId, selectedWarehouseId !== 'all' ? selectedWarehouseId : undefined);
 
-        if (!matched && /^\d{3,5}$/.test(detectedTag)) {
-          matched = await snapTagToAsset(`ZR-${detectedTag}`, activeOrgId, selectedWarehouseId !== 'all' ? selectedWarehouseId : undefined);
+        const norm = normalizeFieldTag(detectedTag);
+        if (!matched && norm.success && norm.rawDigits) {
+          matched =
+            (await snapTagToAsset(`ZR-${norm.rawDigits}`, activeOrgId, selectedWarehouseId !== 'all' ? selectedWarehouseId : undefined)) ||
+            (await snapTagToAsset(norm.rawDigits, activeOrgId, selectedWarehouseId !== 'all' ? selectedWarehouseId : undefined));
         }
+
+        const canonicalTag = norm.success && norm.tag ? norm.tag : (detectedTag.startsWith('ZR-') ? detectedTag : `ZR-${detectedTag}`);
+        const rawDigits = norm.success && norm.rawDigits ? norm.rawDigits : detectedTag;
 
         const targetAsset: ScannedAssetDetails = matched || {
           id: detectedTag,
-          qrCode: detectedTag.startsWith('ZR-') ? detectedTag : `ZR-${detectedTag}`,
-          tagNumber: detectedTag,
-          toolName: `כלי ${detectedTag}`,
+          qrCode: canonicalTag,
+          tagNumber: canonicalTag,
+          toolName: `כלי ${canonicalTag}`,
           brand: 'צי כלי עבודה',
-          modelNumber: detectedTag,
+          modelNumber: rawDigits,
           status: 'available',
           condition: 'good',
           currentAssignedWorker: null,

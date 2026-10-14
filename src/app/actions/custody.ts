@@ -295,9 +295,8 @@ export async function getAssetDetailsByQr(
 
   if (isSupabaseConfigured()) {
     try {
-      const isDigitsOnly = /^\d{3,5}$/.test(cleanQr);
-      const isZrPrefix = /^ZR-\d{3,5}$/i.test(cleanQr);
-      const altCode = isDigitsOnly ? `ZR-${cleanQr}` : (isZrPrefix ? cleanQr.replace(/^ZR-/i, '') : null);
+      const digitMatch = cleanQr.match(/(?:zr[\s\-_]*)?(\d{3,5})/i);
+      const digits = digitMatch ? digitMatch[1] : null;
 
       const orConditions = [
         `qr_code.eq.${cleanQr}`,
@@ -305,11 +304,17 @@ export async function getAssetDetailsByQr(
         `id.eq.${cleanQr}`,
         `tag_number.eq.${cleanQr}`,
       ];
-      if (altCode) {
-        orConditions.push(`qr_code.eq.${altCode}`, `tag_number.eq.${altCode}`);
+
+      if (digits) {
+        orConditions.push(
+          `tag_number.ilike.ZR-${digits}`,
+          `tag_number.ilike.${digits}`,
+          `serial_number.ilike.%${digits}%`,
+          `qr_code.ilike.%${digits}%`
+        );
       }
 
-      // 1. First, attempt exact match on qr_code, nfc_uid, tag_number, or id (including altCode)
+      // 1. First, attempt exact / dual-candidate match on qr_code, nfc_uid, tag_number, or serial_number
       let exactQuery = supabase
         .from('assets')
         .select(`
@@ -346,15 +351,28 @@ export async function getAssetDetailsByQr(
             code
           )
         `)
-        .or(orConditions.join(','));
+        .or(orConditions.join(','))
+        .eq('organization_id', orgId)
+        .limit(5);
 
-      exactQuery = exactQuery.eq('organization_id', orgId);
+      const { data: matchedRows, error: exactError } = await exactQuery;
 
-      const { data: exactData, error: exactError } = await exactQuery.maybeSingle();
+      if (!exactError && matchedRows && matchedRows.length > 0) {
+        const typedRows = matchedRows as unknown as JoinedAssetData[];
+        const best = digits
+          ? typedRows.find(
+              (r) =>
+                r.tag_number === `ZR-${digits}` ||
+                r.tag_number === digits ||
+                r.qr_code === `ZR-${digits}` ||
+                r.qr_code === digits ||
+                r.qr_code === cleanQr ||
+                r.id === cleanQr
+            ) || typedRows[0]
+          : typedRows[0];
 
-      if (!exactError && exactData) {
         return enrichLastCheckoutNote(
-          mapJoinedRowToScannedAsset(exactData as unknown as JoinedAssetData),
+          mapJoinedRowToScannedAsset(best),
           orgId
         );
       }
@@ -414,12 +432,14 @@ export async function getAssetDetailsByQr(
     }
   }
 
-  // Fallback lookup from unified mockStore (with suffix, facility, and organization disambiguation)
-  const isDigitsOnly = /^\d{3,5}$/.test(cleanQr);
-  const isZrPrefix = /^ZR-\d{3,5}$/i.test(cleanQr);
-  const altCode = isDigitsOnly ? `ZR-${cleanQr}` : (isZrPrefix ? cleanQr.replace(/^ZR-/i, '') : null);
+  // Fallback lookup from unified mockStore (with dual-candidate lookup)
+  const digitMatch = cleanQr.match(/(?:zr[\s\-_]*)?(\d{3,5})/i);
+  const digits = digitMatch ? digitMatch[1] : null;
 
-  const mockItem = getMockAssetByQr(cleanQr, facilityId, orgId) || (altCode ? getMockAssetByQr(altCode, facilityId, orgId) : null);
+  const mockItem =
+    getMockAssetByQr(cleanQr, facilityId, orgId) ||
+    (digits ? getMockAssetByQr(`ZR-${digits}`, facilityId, orgId) : null) ||
+    (digits ? getMockAssetByQr(digits, facilityId, orgId) : null);
   if (mockItem) {
     return enrichLastCheckoutNote(mockItem, orgId);
   }
@@ -427,12 +447,22 @@ export async function getAssetDetailsByQr(
   // Fallback lookup from local in-memory registry:
   // 1. Exact match
   const normalized = cleanQr.toUpperCase();
-  const normalizedAlt = altCode?.toUpperCase();
+  const normalizedZr = digits ? `ZR-${digits}`.toUpperCase() : null;
+  const normalizedDigits = digits ? digits.toUpperCase() : null;
+
   for (const key of Object.keys(FALLBACK_CUSTODY_ASSETS)) {
     const a = FALLBACK_CUSTODY_ASSETS[key];
     const matchesOrg = a.organizationId === orgId;
     const kUpper = key.toUpperCase();
-    if (matchesOrg && (kUpper === normalized || (normalizedAlt && kUpper === normalizedAlt))) {
+    const tagUpper = (a.tagNumber || '').toUpperCase();
+    const snUpper = (a.serial_number || '').toUpperCase();
+
+    if (
+      matchesOrg &&
+      (kUpper === normalized ||
+        (normalizedZr && (kUpper === normalizedZr || tagUpper === normalizedZr)) ||
+        (normalizedDigits && (kUpper === normalizedDigits || tagUpper === normalizedDigits || snUpper.includes(normalizedDigits))))
+    ) {
       return enrichLastCheckoutNote({ ...a }, orgId);
     }
   }
@@ -440,7 +470,11 @@ export async function getAssetDetailsByQr(
   // 2. Suffix match in fallback registry
   const fallbackMatches = Object.values(FALLBACK_CUSTODY_ASSETS).filter((a) => {
     const matchesOrg = a.organizationId === orgId;
-    return matchesOrg && (matchesCodeSuffix(a.qrCode, cleanQr) || (altCode ? matchesCodeSuffix(a.qrCode, altCode) : false));
+    return (
+      matchesOrg &&
+      (matchesCodeSuffix(a.qrCode, cleanQr) ||
+        (digits ? matchesCodeSuffix(a.qrCode, `ZR-${digits}`) || matchesCodeSuffix(a.qrCode, digits) : false))
+    );
   });
   if (fallbackMatches.length > 0) {
     const bestFallback = pickBestAssetMatch(fallbackMatches, cleanQr, facilityId);
@@ -2738,7 +2772,22 @@ export async function snapOcrTagToAssetAction(
     return { success: true, asset: assetByCode };
   }
 
-  // Check 2: Try variant without dashes or with dashes (e.g., ZR-1099 vs ZR1099)
+  // Check 2: Field tag extraction (e.g. 'zr 1084', '1084', 'ZR-1084')
+  const digitMatch = cleanTag.match(/(?:zr[\s\-_]*)?(\d{3,5})/i);
+  const digits = digitMatch ? digitMatch[1] : null;
+
+  if (digits) {
+    const assetByZr = await getAssetDetailsByQr(`ZR-${digits}`, facilityId, orgId);
+    if (assetByZr) {
+      return { success: true, asset: assetByZr };
+    }
+    const assetByDigits = await getAssetDetailsByQr(digits, facilityId, orgId);
+    if (assetByDigits) {
+      return { success: true, asset: assetByDigits };
+    }
+  }
+
+  // Check 3: Try variant without dashes or with dashes (e.g., ZR-1099 vs ZR1099)
   const dashedVariant = cleanTag.includes('-')
     ? cleanTag.replace(/-/g, '')
     : cleanTag.replace(/^([A-Z]{2,6})([0-9]{2,6})$/i, '$1-$2');
@@ -2750,9 +2799,22 @@ export async function snapOcrTagToAssetAction(
     }
   }
 
-  // Check 3: If Supabase configured, perform direct query on tag_number
+  // Check 4: If Supabase configured, perform direct query on tag_number & serial_number
   if (isSupabaseConfigured()) {
     try {
+      const orItems = [
+        `tag_number.eq.${cleanTag}`,
+        `tag_number.eq.${dashedVariant}`,
+        `serial_number.eq.${cleanTag}`,
+      ];
+      if (digits) {
+        orItems.push(
+          `tag_number.ilike.ZR-${digits}`,
+          `tag_number.ilike.${digits}`,
+          `serial_number.ilike.%${digits}%`
+        );
+      }
+
       let query = supabase
         .from('assets')
         .select(`
@@ -2783,13 +2845,13 @@ export async function snapOcrTagToAssetAction(
             code
           )
         `)
-        .or(`tag_number.eq.${cleanTag},tag_number.eq.${dashedVariant},serial_number.eq.${cleanTag}`);
+        .or(orItems.join(','))
+        .eq('organization_id', orgId)
+        .limit(1);
 
-      query = query.eq('organization_id', orgId);
-
-      const { data, error } = await query.maybeSingle();
-      if (!error && data) {
-        const mapped = mapJoinedRowToScannedAsset(data as unknown as JoinedAssetData);
+      const { data, error } = await query;
+      if (!error && data && data.length > 0) {
+        const mapped = mapJoinedRowToScannedAsset(data[0] as unknown as JoinedAssetData);
         return { success: true, asset: mapped };
       }
     } catch (err) {
