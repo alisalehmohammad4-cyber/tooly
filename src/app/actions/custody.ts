@@ -295,7 +295,21 @@ export async function getAssetDetailsByQr(
 
   if (isSupabaseConfigured()) {
     try {
-      // 1. First, attempt exact match on qr_code, nfc_uid, or id
+      const isDigitsOnly = /^\d{3,5}$/.test(cleanQr);
+      const isZrPrefix = /^ZR-\d{3,5}$/i.test(cleanQr);
+      const altCode = isDigitsOnly ? `ZR-${cleanQr}` : (isZrPrefix ? cleanQr.replace(/^ZR-/i, '') : null);
+
+      const orConditions = [
+        `qr_code.eq.${cleanQr}`,
+        `nfc_uid.eq.${cleanQr}`,
+        `id.eq.${cleanQr}`,
+        `tag_number.eq.${cleanQr}`,
+      ];
+      if (altCode) {
+        orConditions.push(`qr_code.eq.${altCode}`, `tag_number.eq.${altCode}`);
+      }
+
+      // 1. First, attempt exact match on qr_code, nfc_uid, tag_number, or id (including altCode)
       let exactQuery = supabase
         .from('assets')
         .select(`
@@ -332,7 +346,7 @@ export async function getAssetDetailsByQr(
             code
           )
         `)
-        .or(`qr_code.eq.${cleanQr},nfc_uid.eq.${cleanQr},id.eq.${cleanQr}`);
+        .or(orConditions.join(','));
 
       exactQuery = exactQuery.eq('organization_id', orgId);
 
@@ -401,7 +415,11 @@ export async function getAssetDetailsByQr(
   }
 
   // Fallback lookup from unified mockStore (with suffix, facility, and organization disambiguation)
-  const mockItem = getMockAssetByQr(cleanQr, facilityId, orgId);
+  const isDigitsOnly = /^\d{3,5}$/.test(cleanQr);
+  const isZrPrefix = /^ZR-\d{3,5}$/i.test(cleanQr);
+  const altCode = isDigitsOnly ? `ZR-${cleanQr}` : (isZrPrefix ? cleanQr.replace(/^ZR-/i, '') : null);
+
+  const mockItem = getMockAssetByQr(cleanQr, facilityId, orgId) || (altCode ? getMockAssetByQr(altCode, facilityId, orgId) : null);
   if (mockItem) {
     return enrichLastCheckoutNote(mockItem, orgId);
   }
@@ -409,10 +427,12 @@ export async function getAssetDetailsByQr(
   // Fallback lookup from local in-memory registry:
   // 1. Exact match
   const normalized = cleanQr.toUpperCase();
+  const normalizedAlt = altCode?.toUpperCase();
   for (const key of Object.keys(FALLBACK_CUSTODY_ASSETS)) {
     const a = FALLBACK_CUSTODY_ASSETS[key];
     const matchesOrg = a.organizationId === orgId;
-    if (matchesOrg && key.toUpperCase() === normalized) {
+    const kUpper = key.toUpperCase();
+    if (matchesOrg && (kUpper === normalized || (normalizedAlt && kUpper === normalizedAlt))) {
       return enrichLastCheckoutNote({ ...a }, orgId);
     }
   }
@@ -420,7 +440,7 @@ export async function getAssetDetailsByQr(
   // 2. Suffix match in fallback registry
   const fallbackMatches = Object.values(FALLBACK_CUSTODY_ASSETS).filter((a) => {
     const matchesOrg = a.organizationId === orgId;
-    return matchesOrg && matchesCodeSuffix(a.qrCode, cleanQr);
+    return matchesOrg && (matchesCodeSuffix(a.qrCode, cleanQr) || (altCode ? matchesCodeSuffix(a.qrCode, altCode) : false));
   });
   if (fallbackMatches.length > 0) {
     const bestFallback = pickBestAssetMatch(fallbackMatches, cleanQr, facilityId);

@@ -41,11 +41,13 @@ export default function OcrScannerModal({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const scanIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const watchdogIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Concurrency & Debounce Lock refs (1.5s lock prevents double-scanning)
   const isDebounceLockedRef = useRef<boolean>(false);
   const isBarcodeBusyRef = useRef<boolean>(false);
   const isOcrBusyRef = useRef<boolean>(false);
+  const isPausedRef = useRef<boolean>(false);
 
   // Hardware Camera & Stream State
   const [cameraActive, setCameraActive] = useState<boolean>(false);
@@ -104,6 +106,10 @@ export default function OcrScannerModal({
       clearInterval(scanIntervalRef.current);
       scanIntervalRef.current = null;
     }
+    if (watchdogIntervalRef.current) {
+      clearInterval(watchdogIntervalRef.current);
+      watchdogIntervalRef.current = null;
+    }
 
     if (streamRef.current) {
       try {
@@ -143,6 +149,26 @@ export default function OcrScannerModal({
       setCameraError(null);
       void initOcr();
 
+      // If existing stream has live tracks, reuse it directly to avoid black-screen race conditions
+      if (
+        streamRef.current &&
+        streamRef.current.getVideoTracks().some((t) => t.readyState === 'live')
+      ) {
+        if (videoRef.current) {
+          if (videoRef.current.srcObject !== streamRef.current) {
+            videoRef.current.srcObject = streamRef.current;
+          }
+          try {
+            await videoRef.current.play();
+          } catch {
+            // ignore
+          }
+        }
+        setCameraActive(true);
+        isPausedRef.current = false;
+        return;
+      }
+
       const activeFacing = requestedFacing || facingMode;
       let stream: MediaStream | null = null;
 
@@ -178,7 +204,7 @@ export default function OcrScannerModal({
       }
 
       if (!stream) {
-        setCameraError('לא ניתן לגשת למצלמת המכשיר. אנא אשר גישה למצלמה.');
+        setCameraError('לא ניתן לגשת למצלמת המכשיר. לחץ על המסך לחידוש או אשר גישה.');
         setCameraActive(false);
         return;
       }
@@ -186,10 +212,15 @@ export default function OcrScannerModal({
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        await videoRef.current.play();
+        try {
+          await videoRef.current.play();
+        } catch (playErr) {
+          console.warn('[Camera] video.play() error:', playErr);
+        }
       }
 
       setCameraActive(true);
+      isPausedRef.current = false;
 
       // Check torch capability on active video track
       const track = stream.getVideoTracks()[0];
@@ -207,6 +238,26 @@ export default function OcrScannerModal({
   );
 
   /**
+   * Manual Tap-To-Wake: Clicking anywhere on the video viewfinder restarts the stream if paused/stopped
+   */
+  const handleTapToWake = useCallback(async () => {
+    isPausedRef.current = false;
+    setCameraError(null);
+    const noStream = !streamRef.current;
+    const tracksEnded = streamRef.current?.getVideoTracks().some((t) => t.readyState === 'ended');
+
+    if (noStream || tracksEnded) {
+      await startCamera();
+    } else if (videoRef.current) {
+      try {
+        await videoRef.current.play();
+      } catch {
+        await startCamera();
+      }
+    }
+  }, [startCamera]);
+
+  /**
    * Standard Camera Flip (Back ↔ Front only)
    */
   const handleFlipCamera = useCallback(async () => {
@@ -222,10 +273,11 @@ export default function OcrScannerModal({
    */
   const claimDetection = useCallback(
     async (detectedTag: string) => {
-      if (isDebounceLockedRef.current || snappedAsset) return;
+      if (isDebounceLockedRef.current || snappedAsset || isPausedRef.current) return;
 
-      // 1. Lock immediately to prevent double-scanning (debounce 1.5s)
+      // 1. Lock immediately and pause further scan cycles without killing the camera stream tracks
       isDebounceLockedRef.current = true;
+      isPausedRef.current = true;
       setIsTargetLocked(true);
       setCandidateTag(detectedTag);
 
@@ -234,10 +286,10 @@ export default function OcrScannerModal({
       playOcrBeep(880, 140);
 
       try {
-        // Query database for asset details
+        // Query database for asset details (supports standalone digits e.g. 1099 or ZR-1099)
         let matched = await snapTagToAsset(detectedTag, orgId, warehouseId);
 
-        if (!matched && /^\d{4}$/.test(detectedTag)) {
+        if (!matched && /^\d{3,5}$/.test(detectedTag)) {
           matched = await snapTagToAsset(`ZR-${detectedTag}`, orgId, warehouseId);
         }
 
@@ -295,7 +347,13 @@ export default function OcrScannerModal({
    * Silent Dual-Engine Scanning Loop (Runs in background at top speed)
    */
   const performDualScanCycle = useCallback(async () => {
-    if (!videoRef.current || !cameraActive || isDebounceLockedRef.current || snappedAsset) {
+    if (
+      isPausedRef.current ||
+      !videoRef.current ||
+      !cameraActive ||
+      isDebounceLockedRef.current ||
+      snappedAsset
+    ) {
       return;
     }
 
@@ -306,11 +364,11 @@ export default function OcrScannerModal({
     const video = videoRef.current;
 
     // ENGINE A: Barcode & QR Detector
-    if (!isBarcodeBusyRef.current && !isDebounceLockedRef.current) {
+    if (!isBarcodeBusyRef.current && !isDebounceLockedRef.current && !isPausedRef.current) {
       isBarcodeBusyRef.current = true;
       void detectBarcodeOrQr(video)
         .then(async (barcodeResult) => {
-          if (barcodeResult && barcodeResult.rawValue && !isDebounceLockedRef.current) {
+          if (barcodeResult && barcodeResult.rawValue && !isDebounceLockedRef.current && !isPausedRef.current) {
             const cleanTag = extractTagFromBarcodePayload(barcodeResult.rawValue);
             if (cleanTag) {
               await claimDetection(cleanTag);
@@ -323,12 +381,12 @@ export default function OcrScannerModal({
         });
     }
 
-    // ENGINE B: Local Vision ML OCR Engine (requires zero external API keys)
-    if (isOcrReady && !isOcrBusyRef.current && !isDebounceLockedRef.current) {
+    // ENGINE B: Local Vision ML OCR Engine (runs actively every 700ms)
+    if (isOcrReady && !isOcrBusyRef.current && !isDebounceLockedRef.current && !isPausedRef.current) {
       isOcrBusyRef.current = true;
       void recognizeFrameWithDetails(video)
         .then(async (ocrDetails) => {
-          if (ocrDetails && ocrDetails.tag && !isDebounceLockedRef.current) {
+          if (ocrDetails && ocrDetails.tag && !isDebounceLockedRef.current && !isPausedRef.current) {
             // If confidence > 85%, claim detection immediately
             if (ocrDetails.confidence > 85 || ocrDetails.isConfident) {
               const detectedCode = ocrDetails.normalizedTag || ocrDetails.tag;
@@ -344,7 +402,8 @@ export default function OcrScannerModal({
   }, [cameraActive, snappedAsset, isOcrReady, recognizeFrameWithDetails, claimDetection]);
 
   /**
-   * Lifecycle
+   * Lifecycle: On modal open/close, pause detection without killing hardware stream,
+   * and unpause + play immediately when modal opens to prevent black screens.
    */
   useEffect(() => {
     if (isOpen) {
@@ -352,22 +411,79 @@ export default function OcrScannerModal({
       setCandidateTag(null);
       setIsTargetLocked(false);
       isDebounceLockedRef.current = false;
-      void startCamera();
+      isPausedRef.current = false;
+      if (
+        videoRef.current &&
+        streamRef.current &&
+        streamRef.current.getVideoTracks().some((t) => t.readyState === 'live')
+      ) {
+        videoRef.current.play().catch(() => {
+          void startCamera();
+        });
+      } else {
+        void startCamera();
+      }
     } else {
-      void stopCamera();
-      void terminateOcr();
+      isPausedRef.current = true;
+      // Do not stopCamera() tracks permanently; pause detection and video so re-open is instantaneous
+      if (videoRef.current) {
+        try {
+          videoRef.current.pause();
+        } catch {
+          // ignore
+        }
+      }
     }
+  }, [isOpen, startCamera]);
 
+  // Clean cleanup on component unmount only
+  useEffect(() => {
     return () => {
       void stopCamera();
     };
-  }, [isOpen, startCamera, stopCamera, terminateOcr]);
+  }, [stopCamera]);
 
   /**
-   * Cadence: runs every 200ms in background
+   * Automatic Stream Watchdog Interval (Runs every 1000ms):
+   * If the scanner is visible and stream tracks ended or stream is missing, revive immediately!
    */
   useEffect(() => {
-    if (!cameraActive || snappedAsset) {
+    if (!isOpen) {
+      if (watchdogIntervalRef.current) {
+        clearInterval(watchdogIntervalRef.current);
+        watchdogIntervalRef.current = null;
+      }
+      return;
+    }
+
+    watchdogIntervalRef.current = setInterval(() => {
+      if (!isOpen) return;
+
+      const noStream = !streamRef.current;
+      const tracksEnded = streamRef.current?.getVideoTracks().some((t) => t.readyState === 'ended');
+      const videoPaused = videoRef.current && videoRef.current.paused && !isPausedRef.current;
+
+      if (noStream || tracksEnded) {
+        console.warn('[Watchdog] Modal camera stream ended or missing, reviving...');
+        void startCamera();
+      } else if (videoPaused) {
+        void videoRef.current?.play().catch(() => {});
+      }
+    }, 1000);
+
+    return () => {
+      if (watchdogIntervalRef.current) {
+        clearInterval(watchdogIntervalRef.current);
+        watchdogIntervalRef.current = null;
+      }
+    };
+  }, [isOpen, startCamera]);
+
+  /**
+   * Cadence: runs actively every 700ms for continuous OCR & Barcode recognition
+   */
+  useEffect(() => {
+    if (!cameraActive || snappedAsset || !isOpen) {
       if (scanIntervalRef.current) {
         clearInterval(scanIntervalRef.current);
         scanIntervalRef.current = null;
@@ -377,7 +493,7 @@ export default function OcrScannerModal({
 
     scanIntervalRef.current = setInterval(() => {
       void performDualScanCycle();
-    }, 200);
+    }, 700);
 
     return () => {
       if (scanIntervalRef.current) {
@@ -385,7 +501,7 @@ export default function OcrScannerModal({
         scanIntervalRef.current = null;
       }
     };
-  }, [cameraActive, snappedAsset, performDualScanCycle]);
+  }, [cameraActive, snappedAsset, isOpen, performDualScanCycle]);
 
   /**
    * Manual Tag Search fallback
@@ -417,10 +533,12 @@ export default function OcrScannerModal({
     }
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4">
+    <div
+      className={`fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 transition-opacity duration-150 ${
+        isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none hidden'
+      }`}
+    >
       <div className="bg-slate-950 border border-white/10 rounded-3xl max-w-md w-full shadow-2xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-150">
         {/* 1. TOP: SMALL CLEAN HEADER */}
         <div className="px-4 py-3 bg-slate-950/80 border-b border-white/5 flex items-center justify-between">
@@ -439,12 +557,19 @@ export default function OcrScannerModal({
         </div>
 
         {/* 2. CENTER: FULL-VIEW CLEAN CAMERA FEED WITH THIN MODERN FOCUS FRAME */}
-        <div className="relative bg-black aspect-[4/3] sm:aspect-[1/1] max-h-[380px] overflow-hidden flex items-center justify-center">
+        <div
+          onClick={() => void handleTapToWake()}
+          className="relative bg-black aspect-[4/3] sm:aspect-[1/1] max-h-[380px] overflow-hidden flex items-center justify-center cursor-pointer select-none"
+          title="לחץ בכל מקום במסך להפעלת / חידוש המצלמה"
+        >
           <video
             ref={videoRef}
             playsInline
             muted
             autoPlay
+            onLoadedMetadata={() => {
+              void videoRef.current?.play().catch(() => {});
+            }}
             className="w-full h-full object-cover"
           />
 
@@ -505,7 +630,7 @@ export default function OcrScannerModal({
           {/* Floating Controls on Camera Feed (Flashlight + Flip Camera) */}
           <div className="absolute bottom-3 inset-x-4 flex items-center justify-between pointer-events-none z-10">
             {/* Flashlight toggle (⚡) */}
-            <div className="pointer-events-auto">
+            <div className="pointer-events-auto" onClick={(e) => e.stopPropagation()}>
               {torchSupported ? (
                 <button
                   type="button"
@@ -529,7 +654,7 @@ export default function OcrScannerModal({
             </div>
 
             {/* Flip camera toggle (🔄 Back ↔ Front) */}
-            <div className="pointer-events-auto">
+            <div className="pointer-events-auto" onClick={(e) => e.stopPropagation()}>
               <button
                 type="button"
                 onClick={() => void handleFlipCamera()}

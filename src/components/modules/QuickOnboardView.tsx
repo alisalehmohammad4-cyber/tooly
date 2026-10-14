@@ -122,6 +122,8 @@ export default function QuickOnboardView({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const scanIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const watchdogIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const isPausedRef = useRef<boolean>(false);
 
   // Concurrency & Debounce Lock refs
   const isDebounceLockedRef = useRef<boolean>(false);
@@ -248,6 +250,26 @@ export default function QuickOnboardView({
       setCameraError(null);
       void initOcr();
 
+      // If existing stream has live tracks, reuse it directly to avoid black-screen race conditions
+      if (
+        streamRef.current &&
+        streamRef.current.getVideoTracks().some((t) => t.readyState === 'live')
+      ) {
+        if (videoRef.current) {
+          if (videoRef.current.srcObject !== streamRef.current) {
+            videoRef.current.srcObject = streamRef.current;
+          }
+          try {
+            await videoRef.current.play();
+          } catch {
+            // ignore
+          }
+        }
+        setScannerActive(true);
+        isPausedRef.current = false;
+        return;
+      }
+
       const activeFacing = requestedFacing || facingMode;
       let stream: MediaStream | null = null;
 
@@ -283,7 +305,7 @@ export default function QuickOnboardView({
       }
 
       if (!stream) {
-        setCameraError('לא ניתן לגשת למצלמת המכשיר. אנא אשר גישה למצלמה.');
+        setCameraError('לא ניתן לגשת למצלמת המכשיר. לחץ על המסך לחידוש או אשר גישה.');
         setScannerActive(false);
         return;
       }
@@ -291,10 +313,15 @@ export default function QuickOnboardView({
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        await videoRef.current.play();
+        try {
+          await videoRef.current.play();
+        } catch (playErr) {
+          console.warn('[Camera] video.play() error:', playErr);
+        }
       }
 
       setScannerActive(true);
+      isPausedRef.current = false;
 
       // Check torch capability on active video track
       const track = stream.getVideoTracks()[0];
@@ -310,6 +337,24 @@ export default function QuickOnboardView({
     },
     [facingMode, initOcr]
   );
+
+  // Manual Tap-To-Wake on video viewfinder
+  const handleTapToWake = useCallback(async () => {
+    isPausedRef.current = false;
+    setCameraError(null);
+    const noStream = !streamRef.current;
+    const tracksEnded = streamRef.current?.getVideoTracks().some((t) => t.readyState === 'ended');
+
+    if (noStream || tracksEnded) {
+      await startCamera();
+    } else if (videoRef.current) {
+      try {
+        await videoRef.current.play();
+      } catch {
+        await startCamera();
+      }
+    }
+  }, [startCamera]);
 
   // Flip Camera (Back ↔ Front only, strictly no 7-camera carousel)
   const handleFlipCamera = useCallback(async () => {
@@ -466,7 +511,14 @@ export default function QuickOnboardView({
               return;
             } else {
               // Asset is checked out or needs repair — pause and alert operator
-              await stopScanner();
+              isPausedRef.current = true;
+              if (videoRef.current) {
+                try {
+                  videoRef.current.pause();
+                } catch {
+                  // ignore
+                }
+              }
               setScannedRegisteredAsset(existing);
               setIsModalOpen(true);
               setQrWarning(null);
@@ -476,7 +528,14 @@ export default function QuickOnboardView({
 
           // WORKER MODE -> Show WorkerToolCard directly without custody management modals
           if (role === 'worker') {
-            await stopScanner();
+            isPausedRef.current = true;
+            if (videoRef.current) {
+              try {
+                videoRef.current.pause();
+              } catch {
+                // ignore
+              }
+            }
             setQrCode(cleanQr);
             setManualQrInput(cleanQr);
             setScannedRegisteredAsset(existing);
@@ -486,7 +545,14 @@ export default function QuickOnboardView({
           }
 
           // SUPERVISOR / ADMIN MODE -> Open custody action modal
-          await stopScanner();
+          isPausedRef.current = true;
+          if (videoRef.current) {
+            try {
+              videoRef.current.pause();
+            } catch {
+              // ignore
+            }
+          }
           setQrCode(cleanQr);
           setManualQrInput(cleanQr);
           setScannedRegisteredAsset(existing);
@@ -497,7 +563,14 @@ export default function QuickOnboardView({
 
         // TOOL NOT FOUND IN WORKER MODE -> Inform worker to contact storekeeper
         if (role === 'worker') {
-          await stopScanner();
+          isPausedRef.current = true;
+          if (videoRef.current) {
+            try {
+              videoRef.current.pause();
+            } catch {
+              // ignore
+            }
+          }
           setQrCode(cleanQr);
           setManualQrInput(cleanQr);
           setWorkerUnregisteredWarning(cleanQr);
@@ -563,7 +636,15 @@ export default function QuickOnboardView({
 
   // Parallel Dual-Engine Background Loop (Top speed, First Match Wins)
   const performDualScanCycle = useCallback(async () => {
-    if (!videoRef.current || !scannerActive || isDebounceLockedRef.current || qrCode) {
+    if (
+      isPausedRef.current ||
+      !videoRef.current ||
+      !scannerActive ||
+      isDebounceLockedRef.current ||
+      qrCode ||
+      isModalOpen ||
+      isPassportOpen
+    ) {
       return;
     }
 
@@ -574,11 +655,11 @@ export default function QuickOnboardView({
     const video = videoRef.current;
 
     // ENGINE A: Barcode & QR Detector
-    if (!isBarcodeBusyRef.current && !isDebounceLockedRef.current) {
+    if (!isBarcodeBusyRef.current && !isDebounceLockedRef.current && !isPausedRef.current) {
       isBarcodeBusyRef.current = true;
       void detectBarcodeOrQr(video)
         .then(async (barcodeResult) => {
-          if (barcodeResult && barcodeResult.rawValue && !isDebounceLockedRef.current) {
+          if (barcodeResult && barcodeResult.rawValue && !isDebounceLockedRef.current && !isPausedRef.current) {
             const cleanTag = extractTagFromBarcodePayload(barcodeResult.rawValue);
             if (cleanTag) {
               await claimDetection(cleanTag);
@@ -591,12 +672,12 @@ export default function QuickOnboardView({
         });
     }
 
-    // ENGINE B: Heavy-Duty Local OCR Engine (zero external API keys)
-    if (isOcrReady && !isOcrBusyRef.current && !isDebounceLockedRef.current) {
+    // ENGINE B: Heavy-Duty Local OCR Engine (runs every 700ms)
+    if (isOcrReady && !isOcrBusyRef.current && !isDebounceLockedRef.current && !isPausedRef.current) {
       isOcrBusyRef.current = true;
       void recognizeFrameWithDetails(video)
         .then(async (ocrDetails) => {
-          if (ocrDetails && ocrDetails.tag && !isDebounceLockedRef.current) {
+          if (ocrDetails && ocrDetails.tag && !isDebounceLockedRef.current && !isPausedRef.current) {
             // If confidence > 85%, claim detection immediately
             if (ocrDetails.confidence > 85 || ocrDetails.isConfident) {
               await claimDetection(ocrDetails.normalizedTag || ocrDetails.tag);
@@ -608,7 +689,15 @@ export default function QuickOnboardView({
           isOcrBusyRef.current = false;
         });
     }
-  }, [scannerActive, qrCode, isOcrReady, recognizeFrameWithDetails, claimDetection]);
+  }, [
+    scannerActive,
+    qrCode,
+    isModalOpen,
+    isPassportOpen,
+    isOcrReady,
+    recognizeFrameWithDetails,
+    claimDetection,
+  ]);
 
   // 1. Universal iOS Background NFC Resolver & URL Deep-Link listener (?nfc=... or ?tool=...)
   useEffect(() => {
@@ -650,11 +739,11 @@ export default function QuickOnboardView({
     handleScanSuccess,
   ]);
 
-  // Camera stream lifecycle
+  // Camera stream lifecycle: keep stream alive across modal opens
   useEffect(() => {
-    if (!qrCode && scannerActive && !showOnboardForm) {
+    if (!showOnboardForm && scannerActive) {
       void startCamera();
-    } else {
+    } else if (showOnboardForm) {
       void stopScanner();
       void terminateOcr();
     }
@@ -662,11 +751,11 @@ export default function QuickOnboardView({
     return () => {
       void stopScanner();
     };
-  }, [qrCode, scannerActive, showOnboardForm, startCamera, stopScanner, terminateOcr]);
+  }, [scannerActive, showOnboardForm, startCamera, stopScanner, terminateOcr]);
 
-  // Background Dual-Engine Cadence: 200ms
+  // Background Dual-Engine Cadence: 700ms
   useEffect(() => {
-    if (!scannerActive || qrCode || showOnboardForm) {
+    if (!scannerActive || qrCode || showOnboardForm || isModalOpen || isPassportOpen) {
       if (scanIntervalRef.current) {
         clearInterval(scanIntervalRef.current);
         scanIntervalRef.current = null;
@@ -676,7 +765,7 @@ export default function QuickOnboardView({
 
     scanIntervalRef.current = setInterval(() => {
       void performDualScanCycle();
-    }, 200);
+    }, 700);
 
     return () => {
       if (scanIntervalRef.current) {
@@ -684,7 +773,64 @@ export default function QuickOnboardView({
         scanIntervalRef.current = null;
       }
     };
-  }, [scannerActive, qrCode, showOnboardForm, performDualScanCycle]);
+  }, [scannerActive, qrCode, showOnboardForm, isModalOpen, isPassportOpen, performDualScanCycle]);
+
+  // Stream Watchdog: Revives dead or ended camera stream every 1000ms
+  useEffect(() => {
+    if (showOnboardForm) {
+      if (watchdogIntervalRef.current) {
+        clearInterval(watchdogIntervalRef.current);
+        watchdogIntervalRef.current = null;
+      }
+      return;
+    }
+
+    watchdogIntervalRef.current = setInterval(() => {
+      if (showOnboardForm) return;
+
+      const noStream = !streamRef.current;
+      const tracksEnded = streamRef.current?.getVideoTracks().some((t) => t.readyState === 'ended');
+      const videoPaused =
+        videoRef.current &&
+        videoRef.current.paused &&
+        !isPausedRef.current &&
+        !isModalOpen &&
+        !isPassportOpen &&
+        !isBulkModalOpen;
+
+      if (noStream || tracksEnded) {
+        console.warn('[Watchdog] QuickOnboard camera stream ended or missing, reviving...');
+        void startCamera();
+      } else if (videoPaused) {
+        void videoRef.current?.play().catch(() => {});
+      }
+    }, 1000);
+
+    return () => {
+      if (watchdogIntervalRef.current) {
+        clearInterval(watchdogIntervalRef.current);
+        watchdogIntervalRef.current = null;
+      }
+    };
+  }, [showOnboardForm, isModalOpen, isPassportOpen, isBulkModalOpen, startCamera]);
+
+  // Auto-resume stream and detection when action modals close
+  useEffect(() => {
+    if (!isModalOpen && !isPassportOpen && !isBulkModalOpen && !showOnboardForm && scannerActive) {
+      isPausedRef.current = false;
+      if (
+        videoRef.current &&
+        streamRef.current &&
+        streamRef.current.getVideoTracks().some((t) => t.readyState === 'live')
+      ) {
+        videoRef.current.play().catch(() => {
+          void startCamera();
+        });
+      } else {
+        void startCamera();
+      }
+    }
+  }, [isModalOpen, isPassportOpen, isBulkModalOpen, showOnboardForm, scannerActive, startCamera]);
 
   // Reset QR state and re-open scanner
   const handleReScan = useCallback(async () => {
@@ -1175,12 +1321,19 @@ export default function QuickOnboardView({
           ) : (
             /* CAMERA VIEWFINDER & SCAN BOX */
             <div className="space-y-3">
-              <div className="relative bg-black aspect-[4/3] sm:aspect-[1/1] max-h-[380px] rounded-2xl overflow-hidden flex items-center justify-center shadow-inner">
+              <div
+                onClick={() => void handleTapToWake()}
+                className="relative bg-black aspect-[4/3] sm:aspect-[1/1] max-h-[380px] rounded-2xl overflow-hidden flex items-center justify-center shadow-inner cursor-pointer select-none"
+                title="לחץ בכל מקום במסך להפעלת / חידוש המצלמה"
+              >
                 <video
                   ref={videoRef}
                   playsInline
                   muted
                   autoPlay
+                  onLoadedMetadata={() => {
+                    void videoRef.current?.play().catch(() => {});
+                  }}
                   className="w-full h-full object-cover"
                 />
 
@@ -1232,7 +1385,7 @@ export default function QuickOnboardView({
                 {/* Floating Controls on Camera Feed (Flashlight + Flip Camera) */}
                 <div className="absolute bottom-3 inset-x-4 flex items-center justify-between pointer-events-none z-10">
                   {/* Flashlight toggle (⚡) */}
-                  <div className="pointer-events-auto">
+                  <div className="pointer-events-auto" onClick={(e) => e.stopPropagation()}>
                     {torchSupported ? (
                       <button
                         type="button"
@@ -1256,7 +1409,7 @@ export default function QuickOnboardView({
                   </div>
 
                   {/* Flip camera toggle (🔄 Back ↔ Front) */}
-                  <div className="pointer-events-auto">
+                  <div className="pointer-events-auto" onClick={(e) => e.stopPropagation()}>
                     <button
                       type="button"
                       onClick={() => void handleFlipCamera()}

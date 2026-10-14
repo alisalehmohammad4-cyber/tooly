@@ -161,6 +161,25 @@ export default function ManualCheckinModal({
   const startCameraScanner = useCallback(
     async (requestedFacing?: 'environment' | 'user') => {
       setScannerError(null);
+
+      if (
+        streamRef.current &&
+        streamRef.current.getVideoTracks().some((t) => t.readyState === 'live')
+      ) {
+        if (videoRef.current) {
+          if (videoRef.current.srcObject !== streamRef.current) {
+            videoRef.current.srcObject = streamRef.current;
+          }
+          try {
+            await videoRef.current.play();
+          } catch {
+            // ignore
+          }
+        }
+        setScannerStarted(true);
+        return;
+      }
+
       const activeFacing = requestedFacing || facingMode;
       let stream: MediaStream | null = null;
 
@@ -193,7 +212,7 @@ export default function ManualCheckinModal({
       }
 
       if (!stream) {
-        setScannerError('לא ניתן לגשת למצלמת המכשיר. אנא אשר גישה למצלמה.');
+        setScannerError('לא ניתן לגשת למצלמת המכשיר. לחץ על המסך לחידוש או אשר גישה.');
         setScannerStarted(false);
         return;
       }
@@ -201,13 +220,34 @@ export default function ManualCheckinModal({
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        await videoRef.current.play();
+        try {
+          await videoRef.current.play();
+        } catch (playErr) {
+          console.warn('[ManualCheckin] video.play() error:', playErr);
+        }
       }
 
       setScannerStarted(true);
     },
     [facingMode]
   );
+
+  // Manual Tap-to-wake on viewfinder
+  const handleTapToWake = useCallback(async () => {
+    setScannerError(null);
+    const noStream = !streamRef.current;
+    const tracksEnded = streamRef.current?.getVideoTracks().some((t) => t.readyState === 'ended');
+
+    if (noStream || tracksEnded) {
+      await startCameraScanner();
+    } else if (videoRef.current) {
+      try {
+        await videoRef.current.play();
+      } catch {
+        await startCameraScanner();
+      }
+    }
+  }, [startCameraScanner]);
 
   // Flip Camera (Back ↔ Front only)
   const handleFlipCamera = useCallback(async () => {
@@ -259,7 +299,7 @@ export default function ManualCheckinModal({
     };
   }, [isOpen, activeTab, selectedAsset, startCameraScanner, stopCameraScanner]);
 
-  // Periodic interval
+  // Periodic scan interval: 700ms
   useEffect(() => {
     if (!scannerStarted || selectedAsset || !isOpen || activeTab !== 'scanner') {
       if (scanIntervalRef.current) {
@@ -271,7 +311,7 @@ export default function ManualCheckinModal({
 
     scanIntervalRef.current = setInterval(() => {
       void performScanCheck();
-    }, 200);
+    }, 700);
 
     return () => {
       if (scanIntervalRef.current) {
@@ -280,6 +320,26 @@ export default function ManualCheckinModal({
       }
     };
   }, [scannerStarted, selectedAsset, isOpen, activeTab, performScanCheck]);
+
+  // Stream Watchdog: Revives dead or ended camera stream every 1000ms
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'scanner' || selectedAsset) return;
+
+    const watchdog = setInterval(() => {
+      const noStream = !streamRef.current;
+      const tracksEnded = streamRef.current?.getVideoTracks().some((t) => t.readyState === 'ended');
+      const videoPaused = videoRef.current && videoRef.current.paused && !selectedAsset;
+
+      if (noStream || tracksEnded) {
+        console.warn('[Watchdog] ManualCheckin camera stream ended or missing, reviving...');
+        void startCameraScanner();
+      } else if (videoPaused) {
+        void videoRef.current?.play().catch(() => {});
+      }
+    }, 1000);
+
+    return () => clearInterval(watchdog);
+  }, [isOpen, activeTab, selectedAsset, startCameraScanner]);
 
   // Handle Manual Barcode Lookup in Tab 1
   const handleBarcodeManualSearch = async () => {
@@ -695,12 +755,19 @@ export default function ManualCheckinModal({
               {/* TAB 1: CAMERA SCANNER */}
               {activeTab === 'scanner' && (
                 <div className="space-y-3 animate-in fade-in">
-                  <div className="relative w-full aspect-[4/3] max-w-sm mx-auto bg-black rounded-2xl overflow-hidden border border-slate-800 shadow-inner flex items-center justify-center">
+                  <div
+                    onClick={() => void handleTapToWake()}
+                    className="relative w-full aspect-[4/3] max-w-sm mx-auto bg-black rounded-2xl overflow-hidden border border-slate-800 shadow-inner flex items-center justify-center cursor-pointer select-none"
+                    title="לחץ בכל מקום במסך להפעלת / חידוש המצלמה"
+                  >
                     <video
                       ref={videoRef}
                       playsInline
                       muted
                       autoPlay
+                      onLoadedMetadata={() => {
+                        void videoRef.current?.play().catch(() => {});
+                      }}
                       className="w-full h-full object-cover"
                     />
 

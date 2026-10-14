@@ -36,35 +36,21 @@ export interface ValidatedSerialMatch {
 
 /**
  * Hardened regex validation for local industrial equipment tag recognition:
- * - Match pattern: ZR-\d{3,5} (e.g., ZR-1065, ZR-001, ZR-12345)
- * - OR any 4-digit number (\b\d{4}\b, e.g., 1065, 2048, 0024)
+ * Allow standalone 3 to 5 digit numbers (e.g., 1099, 1065, 1032, 282) WITHOUT requiring 'ZR-':
+ * const match = text.match(/(?:ZR[- ]?)?\b(\d{3,5})\b/i);
  */
 export function validateSerialTag(rawText: string): ValidatedSerialMatch | null {
   if (!rawText) return null;
   const clean = rawText.toUpperCase().trim().replace(/[\r\n\t]+/g, ' ');
 
-  // 1. Strict pattern: ZR-\d{3,5}
-  const zrMatch = clean.match(/(?:^|[^0-9A-Z])(ZR-\d{3,5})(?:$|[^0-9A-Z])/i);
-  if (zrMatch) {
-    const tag = zrMatch[1].toUpperCase();
-    return { tag, normalizedTag: tag, patternType: 'ZR_PREFIX' };
-  }
-
-  // Also support ZR without hyphen or with space (e.g., "ZR 1065" or "ZR1065" -> "ZR-1065")
-  const zrFuzzyMatch = clean.match(/(?:^|[^0-9A-Z])ZR[\s-]?(\d{3,5})(?:$|[^0-9A-Z])/i);
-  if (zrFuzzyMatch) {
-    const tag = `ZR-${zrFuzzyMatch[1]}`;
-    return { tag, normalizedTag: tag, patternType: 'ZR_PREFIX' };
-  }
-
-  // 2. Any 4-digit number: \b\d{4}\b
-  const fourDigitMatch = clean.match(/(?:^|[^0-9A-Z])(\d{4})(?:$|[^0-9A-Z])/);
-  if (fourDigitMatch) {
-    const digits = fourDigitMatch[1];
+  const match = clean.match(/(?:ZR[- ]?)?\b(\d{3,5})\b/i);
+  if (match) {
+    const rawNumber = match[1];
+    const hasZrPrefix = match[0].toUpperCase().startsWith('ZR');
     return {
-      tag: digits,
-      normalizedTag: `ZR-${digits}`,
-      patternType: 'FOUR_DIGIT',
+      tag: hasZrPrefix ? `ZR-${rawNumber}` : rawNumber,
+      normalizedTag: `ZR-${rawNumber}`,
+      patternType: hasZrPrefix ? 'ZR_PREFIX' : 'FOUR_DIGIT',
     };
   }
 
@@ -220,8 +206,14 @@ export function useOcrScanner(): UseOcrScannerResult {
         const rawText = result?.data?.text || '';
         const confidence = result?.data?.confidence || 0;
 
-        // Regex validation: match pattern ZR-\d{3,5} or any 4-digit number
-        const validated = validateSerialTag(rawText);
+        // Regex validation: match pattern ZR-\d{3,5} or standalone 3 to 5 digit numbers
+        let validated = validateSerialTag(rawText);
+        if (!validated) {
+          const fuzzy = cleanAndCorrectTag(rawText);
+          if (fuzzy) {
+            validated = validateSerialTag(fuzzy);
+          }
+        }
         const isValid = Boolean(validated);
         // If confidence > 85%, claim detection immediately
         const isConfident = confidence > 85;

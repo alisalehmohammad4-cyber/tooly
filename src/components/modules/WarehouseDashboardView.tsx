@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -15,6 +15,7 @@ import {
   ChevronDown,
   Loader2,
   Zap,
+  ZapOff,
   FileText,
   Scan,
   Printer,
@@ -54,6 +55,9 @@ import OcrScannerModal from '@/components/modules/OcrScannerModal';
 import ChiefNotesFeedView from '@/components/modules/ChiefNotesFeedView';
 import SignaturePad from '@/components/ui/SignaturePad';
 import { useAuth } from '@/context/AuthContext';
+import { useOcrScanner } from '@/lib/ocr/useOcrScanner';
+import { snapTagToAsset, triggerOcrHaptic, playOcrBeep } from '@/lib/ocr/tagParser';
+import { detectBarcodeOrQr, extractTagFromBarcodePayload } from '@/lib/ocr/barcodeDetector';
 import {
   getAssetDetailsByQr,
   transferAssetAction,
@@ -210,6 +214,390 @@ export default function WarehouseDashboardView({
     text: string;
     type: 'success' | 'error';
   } | null>(null);
+
+  // Inline Camera Scanner State & Hardware Watchdog
+  const [isInlineScannerOpen, setIsInlineScannerOpen] = useState<boolean>(false);
+  const inlineVideoRef = useRef<HTMLVideoElement | null>(null);
+  const inlineStreamRef = useRef<MediaStream | null>(null);
+  const inlineScanIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const inlineWatchdogIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const inlineIsPausedRef = useRef<boolean>(false);
+  const inlineIsDebounceLockedRef = useRef<boolean>(false);
+  const inlineIsBarcodeBusyRef = useRef<boolean>(false);
+  const inlineIsOcrBusyRef = useRef<boolean>(false);
+
+  const [inlineFacingMode, setInlineFacingMode] = useState<'environment' | 'user'>('environment');
+  const [inlineTorchSupported, setInlineTorchSupported] = useState<boolean>(false);
+  const [inlineTorchEnabled, setInlineTorchEnabled] = useState<boolean>(false);
+  const [inlineTargetLocked, setInlineTargetLocked] = useState<boolean>(false);
+  const [inlineCandidateTag, setInlineCandidateTag] = useState<string | null>(null);
+  const [inlineCameraError, setInlineCameraError] = useState<string | null>(null);
+
+  // Background OCR hook for inline scanner
+  const {
+    isOcrReady: isInlineOcrReady,
+    initOcr: initInlineOcr,
+    recognizeFrameWithDetails: recognizeInlineFrame,
+  } = useOcrScanner();
+
+  const toggleInlineTorch = useCallback(async (track: MediaStreamTrack, enabled: boolean) => {
+    try {
+      await track.applyConstraints({
+        advanced: [{ torch: enabled } as unknown as MediaTrackConstraintSet],
+      });
+      setInlineTorchEnabled(enabled);
+    } catch {
+      setInlineTorchSupported(false);
+    }
+  }, []);
+
+  const handleToggleInlineTorch = useCallback(() => {
+    if (!inlineStreamRef.current) return;
+    const track = inlineStreamRef.current.getVideoTracks()[0];
+    if (track) {
+      void toggleInlineTorch(track, !inlineTorchEnabled);
+    }
+  }, [inlineTorchEnabled, toggleInlineTorch]);
+
+  const stopInlineCamera = useCallback(async () => {
+    if (inlineScanIntervalRef.current) {
+      clearInterval(inlineScanIntervalRef.current);
+      inlineScanIntervalRef.current = null;
+    }
+    if (inlineWatchdogIntervalRef.current) {
+      clearInterval(inlineWatchdogIntervalRef.current);
+      inlineWatchdogIntervalRef.current = null;
+    }
+    if (inlineStreamRef.current) {
+      try {
+        inlineStreamRef.current.getTracks().forEach((t) => t.stop());
+      } catch (err) {
+        console.warn('Error stopping inline stream:', err);
+      } finally {
+        inlineStreamRef.current = null;
+      }
+    }
+    if (inlineVideoRef.current) {
+      inlineVideoRef.current.srcObject = null;
+    }
+    setInlineTorchEnabled(false);
+  }, []);
+
+  const startInlineCamera = useCallback(
+    async (requestedFacing?: 'environment' | 'user') => {
+      setInlineCameraError(null);
+      void initInlineOcr();
+
+      if (
+        inlineStreamRef.current &&
+        inlineStreamRef.current.getVideoTracks().some((t) => t.readyState === 'live')
+      ) {
+        if (inlineVideoRef.current) {
+          if (inlineVideoRef.current.srcObject !== inlineStreamRef.current) {
+            inlineVideoRef.current.srcObject = inlineStreamRef.current;
+          }
+          try {
+            await inlineVideoRef.current.play();
+          } catch {
+            // ignore
+          }
+        }
+        inlineIsPausedRef.current = false;
+        return;
+      }
+
+      const activeFacing = requestedFacing || inlineFacingMode;
+      let stream: MediaStream | null = null;
+
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: activeFacing },
+            width: { ideal: 1920, min: 640 },
+            height: { ideal: 1080, min: 480 },
+          },
+          audio: false,
+        });
+      } catch {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: activeFacing },
+            audio: false,
+          });
+        } catch {
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: true,
+              audio: false,
+            });
+          } catch (e3) {
+            console.error('[InlineCamera] getUserMedia failed completely:', e3);
+          }
+        }
+      }
+
+      if (!stream) {
+        setInlineCameraError('לא ניתן לגשת למצלמת המכשיר. לחץ על המסך לחידוש או אשר גישה.');
+        return;
+      }
+
+      inlineStreamRef.current = stream;
+      if (inlineVideoRef.current) {
+        inlineVideoRef.current.srcObject = stream;
+        try {
+          await inlineVideoRef.current.play();
+        } catch (playErr) {
+          console.warn('[InlineCamera] video.play() error:', playErr);
+        }
+      }
+
+      inlineIsPausedRef.current = false;
+
+      const track = stream.getVideoTracks()[0];
+      if (track) {
+        const getCaps = (track as unknown as { getCapabilities?: () => { torch?: boolean } }).getCapabilities;
+        if (typeof getCaps === 'function') {
+          const caps = getCaps.call(track);
+          setInlineTorchSupported(Boolean(caps?.torch));
+        } else {
+          setInlineTorchSupported(false);
+        }
+      }
+    },
+    [inlineFacingMode, initInlineOcr]
+  );
+
+  const handleInlineTapToWake = useCallback(async () => {
+    inlineIsPausedRef.current = false;
+    setInlineCameraError(null);
+    const noStream = !inlineStreamRef.current;
+    const tracksEnded = inlineStreamRef.current?.getVideoTracks().some((t) => t.readyState === 'ended');
+
+    if (noStream || tracksEnded) {
+      await startInlineCamera();
+    } else if (inlineVideoRef.current) {
+      try {
+        await inlineVideoRef.current.play();
+      } catch {
+        await startInlineCamera();
+      }
+    }
+  }, [startInlineCamera]);
+
+  const handleFlipInlineCamera = useCallback(async () => {
+    const nextFacing = inlineFacingMode === 'environment' ? 'user' : 'environment';
+    setInlineFacingMode(nextFacing);
+    await stopInlineCamera();
+    await startInlineCamera(nextFacing);
+  }, [inlineFacingMode, stopInlineCamera, startInlineCamera]);
+
+  const claimInlineDetection = useCallback(
+    async (detectedTag: string) => {
+      if (inlineIsDebounceLockedRef.current || inlineIsPausedRef.current) return;
+
+      inlineIsDebounceLockedRef.current = true;
+      inlineIsPausedRef.current = true;
+      setInlineTargetLocked(true);
+      setInlineCandidateTag(detectedTag);
+
+      triggerOcrHaptic([60, 40, 60]);
+      playOcrBeep(880, 140);
+
+      try {
+        const activeOrgId = currentOrganization?.id || user?.organizationId;
+        let matched = await snapTagToAsset(detectedTag, activeOrgId, selectedWarehouseId !== 'all' ? selectedWarehouseId : undefined);
+
+        if (!matched && /^\d{3,5}$/.test(detectedTag)) {
+          matched = await snapTagToAsset(`ZR-${detectedTag}`, activeOrgId, selectedWarehouseId !== 'all' ? selectedWarehouseId : undefined);
+        }
+
+        const targetAsset: ScannedAssetDetails = matched || {
+          id: detectedTag,
+          qrCode: detectedTag.startsWith('ZR-') ? detectedTag : `ZR-${detectedTag}`,
+          tagNumber: detectedTag,
+          toolName: `כלי ${detectedTag}`,
+          brand: 'צי כלי עבודה',
+          modelNumber: detectedTag,
+          status: 'available',
+          condition: 'good',
+          currentAssignedWorker: null,
+          currentWarehouseId: selectedWarehouseId !== 'all' ? selectedWarehouseId : 'wh-main-01',
+          warehouseName: data?.warehouse?.name || 'מחסן ראשי',
+          warehouseCode: 'WH',
+          version: 1,
+        };
+
+        setTimeout(() => {
+          setPassportAsset(targetAsset);
+          setIsPassportOpen(true);
+          inlineIsDebounceLockedRef.current = false;
+          setInlineTargetLocked(false);
+          setInlineCandidateTag(null);
+        }, 220);
+      } catch (err) {
+        console.warn('Error in inline detection asset snap:', err);
+        inlineIsDebounceLockedRef.current = false;
+        setInlineTargetLocked(false);
+        setInlineCandidateTag(null);
+        inlineIsPausedRef.current = false;
+      }
+    },
+    [currentOrganization, user, selectedWarehouseId, data]
+  );
+
+  const performInlineScanCycle = useCallback(async () => {
+    if (
+      inlineIsPausedRef.current ||
+      !inlineVideoRef.current ||
+      !isInlineScannerOpen ||
+      inlineIsDebounceLockedRef.current ||
+      isPassportOpen
+    ) {
+      return;
+    }
+
+    if (inlineVideoRef.current.readyState < 2) {
+      return;
+    }
+
+    const video = inlineVideoRef.current;
+
+    // ENGINE A: Barcode & QR Detector
+    if (!inlineIsBarcodeBusyRef.current && !inlineIsDebounceLockedRef.current && !inlineIsPausedRef.current) {
+      inlineIsBarcodeBusyRef.current = true;
+      void detectBarcodeOrQr(video)
+        .then(async (barcodeResult) => {
+          if (barcodeResult && barcodeResult.rawValue && !inlineIsDebounceLockedRef.current && !inlineIsPausedRef.current) {
+            const cleanTag = extractTagFromBarcodePayload(barcodeResult.rawValue);
+            if (cleanTag) {
+              await claimInlineDetection(cleanTag);
+            }
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          inlineIsBarcodeBusyRef.current = false;
+        });
+    }
+
+    // ENGINE B: OCR Engine (cadence: runs actively every 700ms)
+    if (isInlineOcrReady && !inlineIsOcrBusyRef.current && !inlineIsDebounceLockedRef.current && !inlineIsPausedRef.current) {
+      inlineIsOcrBusyRef.current = true;
+      void recognizeInlineFrame(video)
+        .then(async (ocrDetails) => {
+          if (ocrDetails && ocrDetails.tag && !inlineIsDebounceLockedRef.current && !inlineIsPausedRef.current) {
+            if (ocrDetails.confidence > 85 || ocrDetails.isConfident) {
+              const detectedCode = ocrDetails.normalizedTag || ocrDetails.tag;
+              await claimInlineDetection(detectedCode);
+            }
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          inlineIsOcrBusyRef.current = false;
+        });
+    }
+  }, [isInlineScannerOpen, isPassportOpen, isInlineOcrReady, recognizeInlineFrame, claimInlineDetection]);
+
+  // Lifecycle when isInlineScannerOpen toggles
+  useEffect(() => {
+    if (isInlineScannerOpen) {
+      inlineIsPausedRef.current = false;
+      void startInlineCamera();
+    } else {
+      inlineIsPausedRef.current = true;
+      if (inlineVideoRef.current) {
+        try {
+          inlineVideoRef.current.pause();
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    return () => {
+      if (!isInlineScannerOpen) {
+        void stopInlineCamera();
+      }
+    };
+  }, [isInlineScannerOpen, startInlineCamera, stopInlineCamera]);
+
+  // Active 700ms OCR cadence loop
+  useEffect(() => {
+    if (!isInlineScannerOpen || isPassportOpen) {
+      if (inlineScanIntervalRef.current) {
+        clearInterval(inlineScanIntervalRef.current);
+        inlineScanIntervalRef.current = null;
+      }
+      return;
+    }
+
+    inlineScanIntervalRef.current = setInterval(() => {
+      void performInlineScanCycle();
+    }, 700);
+
+    return () => {
+      if (inlineScanIntervalRef.current) {
+        clearInterval(inlineScanIntervalRef.current);
+        inlineScanIntervalRef.current = null;
+      }
+    };
+  }, [isInlineScannerOpen, isPassportOpen, performInlineScanCycle]);
+
+  // Stream Watchdog: Revives dead or ended camera stream every 1000ms
+  useEffect(() => {
+    if (!isInlineScannerOpen) {
+      if (inlineWatchdogIntervalRef.current) {
+        clearInterval(inlineWatchdogIntervalRef.current);
+        inlineWatchdogIntervalRef.current = null;
+      }
+      return;
+    }
+
+    inlineWatchdogIntervalRef.current = setInterval(() => {
+      if (!isInlineScannerOpen) return;
+
+      const noStream = !inlineStreamRef.current;
+      const tracksEnded = inlineStreamRef.current?.getVideoTracks().some((t) => t.readyState === 'ended');
+      const videoPaused =
+        inlineVideoRef.current &&
+        inlineVideoRef.current.paused &&
+        !inlineIsPausedRef.current &&
+        !isPassportOpen;
+
+      if (noStream || tracksEnded) {
+        console.warn('[Watchdog] Inline camera stream ended or missing, reviving...');
+        void startInlineCamera();
+      } else if (videoPaused) {
+        void inlineVideoRef.current?.play().catch(() => {});
+      }
+    }, 1000);
+
+    return () => {
+      if (inlineWatchdogIntervalRef.current) {
+        clearInterval(inlineWatchdogIntervalRef.current);
+        inlineWatchdogIntervalRef.current = null;
+      }
+    };
+  }, [isInlineScannerOpen, isPassportOpen, startInlineCamera]);
+
+  // Resume stream immediately when ToolPassportModal closes
+  useEffect(() => {
+    if (!isPassportOpen && isInlineScannerOpen) {
+      inlineIsPausedRef.current = false;
+      if (
+        inlineVideoRef.current &&
+        inlineStreamRef.current &&
+        inlineStreamRef.current.getVideoTracks().some((t) => t.readyState === 'live')
+      ) {
+        inlineVideoRef.current.play().catch(() => {
+          void startInlineCamera();
+        });
+      } else {
+        void startInlineCamera();
+      }
+    }
+  }, [isPassportOpen, isInlineScannerOpen, startInlineCamera]);
 
   // Pending Inter-site Transfer Requests (Chief Operations / Operations Manager Approval)
   const [pendingTransfers, setPendingTransfers] = useState<PendingTransferItem[]>([]);
@@ -1650,11 +2038,11 @@ export default function WarehouseDashboardView({
               {/* Button 4: סורק שטח / בדיקת כלי */}
               <button
                 type="button"
-                onClick={() => setIsQuickOcrOpen(true)}
+                onClick={() => setIsInlineScannerOpen((prev) => !prev)}
                 className="min-h-[56px] sm:min-h-[64px] p-3 rounded-2xl bg-gradient-to-br from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white font-black text-xs sm:text-sm flex flex-col items-center justify-center text-center gap-1.5 shadow-md shadow-emerald-600/20 active:scale-95 transition-all cursor-pointer"
               >
                 <Sparkles className="w-5 h-5 sm:w-6 sm:h-6 text-amber-300 stroke-[2.5]" />
-                <span>🔦 סריקת כלי</span>
+                <span>{isInlineScannerOpen ? '📷 סגור סורק' : '🔦 סריקת כלי'}</span>
               </button>
             </div>
 
@@ -1684,7 +2072,7 @@ export default function WarehouseDashboardView({
                       const val = e.target.value;
                       setPassportLookupInput(val);
                       setPassportLookupFeedback(null);
-                      if (/^ZR-\d{3,6}$/i.test(val.trim())) {
+                      if (/^(?:ZR[- ]?)?\d{3,6}$/i.test(val.trim())) {
                         void handleOpenPassport(val.trim());
                       }
                     }}
@@ -1706,12 +2094,16 @@ export default function WarehouseDashboardView({
                 </div>
                 <button
                   type="button"
-                  onClick={() => setIsQuickOcrOpen(true)}
-                  className="h-9 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 font-bold text-xs flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0"
-                  title="סריקה דו-מנועית מהירה (QR + OCR)"
+                  onClick={() => setIsInlineScannerOpen((prev) => !prev)}
+                  className={`h-9 px-3 rounded-xl border font-bold text-xs flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0 ${
+                    isInlineScannerOpen
+                      ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-md'
+                      : 'bg-slate-800 hover:bg-slate-700 text-emerald-400 border-slate-700'
+                  }`}
+                  title="סריקת מצלמה מהירה (QR + OCR)"
                 >
                   <ScanLine className="w-3.5 h-3.5" />
-                  <span>סרוק</span>
+                  <span>{isInlineScannerOpen ? 'סגור מצלמה' : 'סרוק'}</span>
                 </button>
                 <button
                   type="submit"
@@ -1722,6 +2114,123 @@ export default function WarehouseDashboardView({
                 </button>
               </form>
             </div>
+
+            {/* INLINE LIVE SCANNER VIEWFINDER */}
+            {isInlineScannerOpen && (
+              <div className="bg-slate-950 border-2 border-emerald-500/40 rounded-2xl p-3 space-y-2.5 animate-in fade-in zoom-in-95 duration-150 shadow-xl">
+                <div className="flex items-center justify-between text-xs text-slate-300 font-bold px-1">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    <span>סורק שטח חי פעיל (700ms OCR & QR) &bull; לחץ על המסך לחידוש</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsInlineScannerOpen(false)}
+                    className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-white/10 cursor-pointer"
+                    title="סגור סורק"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div
+                  onClick={() => void handleInlineTapToWake()}
+                  className="relative bg-black aspect-[4/3] sm:aspect-[16/9] max-h-[320px] rounded-xl overflow-hidden flex items-center justify-center cursor-pointer select-none border border-white/10 shadow-inner"
+                  title="לחץ בכל מקום במסך להפעלת / חידוש המצלמה"
+                >
+                  <video
+                    ref={inlineVideoRef}
+                    playsInline
+                    muted
+                    autoPlay
+                    onLoadedMetadata={() => {
+                      void inlineVideoRef.current?.play().catch(() => {});
+                    }}
+                    className="w-full h-full object-cover"
+                  />
+
+                  {/* 60% Focus Target Box with Instant Green Flash on Valid Detection */}
+                  <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                    <div
+                      className={`w-[60%] h-[60%] max-w-[260px] max-h-[260px] relative rounded-2xl flex items-center justify-center transition-all duration-150 ${
+                        inlineTargetLocked
+                          ? 'border-4 border-emerald-400 bg-emerald-500/30 shadow-[0_0_40px_rgba(16,185,129,0.9)] scale-105'
+                          : 'border-2 border-white/40 bg-white/[0.02]'
+                      }`}
+                    >
+                      <div className="absolute top-0 left-0 w-5 h-5 border-t-4 border-l-4 border-white/80 rounded-tl-lg" />
+                      <div className="absolute top-0 right-0 w-5 h-5 border-t-4 border-r-4 border-white/80 rounded-tr-lg" />
+                      <div className="absolute bottom-0 left-0 w-5 h-5 border-b-4 border-l-4 border-white/80 rounded-bl-lg" />
+                      <div className="absolute bottom-0 right-0 w-5 h-5 border-b-4 border-r-4 border-white/80 rounded-br-lg" />
+
+                      {inlineTargetLocked ? (
+                        <div className="flex flex-col items-center justify-center text-center animate-in zoom-in-95 duration-150">
+                          <CheckCircle2 className="w-8 h-8 text-emerald-400 mb-1 drop-shadow-md" />
+                          <span className="font-mono text-sm font-black text-white tracking-widest drop-shadow-md" dir="ltr">
+                            {inlineCandidateTag}
+                          </span>
+                          <span className="text-[10px] font-bold text-emerald-300 mt-0.5">פותח תיק כלי...</span>
+                        </div>
+                      ) : (
+                        <div className="absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-emerald-400/80 to-transparent shadow-[0_0_8px_#34d399] animate-[bounce_2.5s_infinite]" />
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Floating Controls on Camera Feed (Flashlight + Flip Camera) */}
+                  <div className="absolute bottom-2.5 inset-x-3 flex items-center justify-between pointer-events-none z-10">
+                    <div className="pointer-events-auto" onClick={(e) => e.stopPropagation()}>
+                      {inlineTorchSupported ? (
+                        <button
+                          type="button"
+                          onClick={handleToggleInlineTorch}
+                          className={`w-9 h-9 rounded-full flex items-center justify-center backdrop-blur-md border shadow-md transition-all cursor-pointer ${
+                            inlineTorchEnabled
+                              ? 'bg-amber-500 text-slate-950 border-amber-300'
+                              : 'bg-black/50 text-white border-white/20 hover:bg-black/70'
+                          }`}
+                          title={inlineTorchEnabled ? 'כיבוי פנס' : 'הפעל פנס'}
+                        >
+                          {inlineTorchEnabled ? (
+                            <ZapOff className="w-3.5 h-3.5 fill-slate-950" />
+                          ) : (
+                            <Zap className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                      ) : (
+                        <div />
+                      )}
+                    </div>
+
+                    <div className="pointer-events-auto" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={() => void handleFlipInlineCamera()}
+                        className="w-9 h-9 rounded-full bg-black/50 hover:bg-black/70 text-white border border-white/20 flex items-center justify-center backdrop-blur-md shadow-md transition-all active:scale-90 cursor-pointer"
+                        title="החלף מצלמה (Flip Camera)"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {inlineCameraError && (
+                    <div className="absolute inset-0 bg-slate-950/95 flex flex-col items-center justify-center p-4 text-center space-y-2 z-20">
+                      <AlertTriangle className="w-8 h-8 text-rose-500" />
+                      <p className="text-xs font-bold text-rose-300">{inlineCameraError}</p>
+                      <button
+                        type="button"
+                        onClick={() => void startInlineCamera()}
+                        className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>נסה שוב</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
             {passportLookupFeedback && (
               <div className="p-2 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-bold flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
@@ -3254,6 +3763,12 @@ export default function WarehouseDashboardView({
         onClose={() => {
           setIsPassportOpen(false);
           setPassportAsset(null);
+          inlineIsPausedRef.current = false;
+          if (isInlineScannerOpen) {
+            void inlineVideoRef.current?.play().catch(() => {
+              void startInlineCamera();
+            });
+          }
         }}
         onAssetUpdated={(updated) => {
           setPassportAsset(updated);

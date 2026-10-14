@@ -100,25 +100,35 @@ export function parseCandidateTags(rawText: string): string[] {
   const candidates: string[] = [];
   const normalized = rawText.trim().replace(/\r?\n/g, ' ');
 
-  // 1. High-Priority Matcher: Strict ZR-XXXX or standalone 3-5 digit tags
-  // Regex strictly enforces: /(?:ZR[- ]?)?\d{3,5}/i with optical misread lookalikes
-  const zrPatternRegex =
-    /(?:^|[^A-Za-z0-9])(?:(ZR)[-_ ]?)?([0-9OoDIl|!Ss$BZ]{3,5})(?:$|[^A-Za-z0-9])/gi;
+  // 1. High-Priority Matcher: Allow standalone 3 to 5 digit numbers (e.g., 1099, 1065, 1032) WITHOUT requiring 'ZR-':
+  // Pattern: /(?:ZR[- ]?)?\b(\d{3,5})\b/i (handles optical misreads in numeric portion)
+  const zrPatternRegex = /(?:ZR[- ]?)?\b([0-9OoDIl|!Ss$BZ]{3,5})\b/gi;
 
   let match: RegExpExecArray | null;
   while ((match = zrPatternRegex.exec(normalized)) !== null) {
-    const hasZrPrefix = Boolean(match[1]);
-    const rawNumber = match[2];
+    const rawMatch = match[0].toUpperCase();
+    const hasZrPrefix = rawMatch.startsWith('ZR');
+    const rawNumber = match[1];
     const correctedNumber = correctNumericOpticalMisreads(rawNumber);
 
     // Verify corrected number is strictly 3 to 5 digits
     if (/^[0-9]{3,5}$/.test(correctedNumber)) {
       const zrTag = `ZR-${correctedNumber}`;
-      if (!candidates.includes(zrTag)) {
-        candidates.push(zrTag);
-      }
-      if (!hasZrPrefix && !candidates.includes(correctedNumber)) {
-        candidates.push(correctedNumber);
+      if (!hasZrPrefix) {
+        // If scanned as standalone number without prefix, prioritize the pure number first
+        if (!candidates.includes(correctedNumber)) {
+          candidates.push(correctedNumber);
+        }
+        if (!candidates.includes(zrTag)) {
+          candidates.push(zrTag);
+        }
+      } else {
+        if (!candidates.includes(zrTag)) {
+          candidates.push(zrTag);
+        }
+        if (!candidates.includes(correctedNumber)) {
+          candidates.push(correctedNumber);
+        }
       }
     }
   }
