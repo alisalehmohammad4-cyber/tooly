@@ -168,15 +168,34 @@ export async function snapTagToAsset(
   if (!clean) return null;
 
   try {
+    // 1. Direct query with scanned tag
     const res = await snapOcrTagToAssetAction(clean, orgId, facilityId);
     if (res.success && res.asset) {
-      // Trigger instant haptic vibration (50ms pulse)
       triggerOcrHaptic(50);
-
-      // Play audio beep confirmation
       playOcrBeep();
-
       return res.asset;
+    }
+
+    // 2. Dual fallback: if 4-digit number, try with ZR- prefix (e.g., 1065 -> ZR-1065)
+    if (/^\d{3,5}$/.test(clean)) {
+      const zrVariant = `ZR-${clean}`;
+      const resZr = await snapOcrTagToAssetAction(zrVariant, orgId, facilityId);
+      if (resZr.success && resZr.asset) {
+        triggerOcrHaptic(50);
+        playOcrBeep();
+        return resZr.asset;
+      }
+    }
+
+    // 3. If prefixed with ZR- (e.g. ZR-1065), try raw numeric suffix (1065)
+    if (/^ZR-\d{3,5}$/i.test(clean)) {
+      const rawNumber = clean.replace(/^ZR-/i, '');
+      const resRaw = await snapOcrTagToAssetAction(rawNumber, orgId, facilityId);
+      if (resRaw.success && resRaw.asset) {
+        triggerOcrHaptic(50);
+        playOcrBeep();
+        return resRaw.asset;
+      }
     }
   } catch (err) {
     console.warn('[snapTagToAsset] Error querying asset by tag:', err);

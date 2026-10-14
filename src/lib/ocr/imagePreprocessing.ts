@@ -9,14 +9,16 @@
  */
 
 export interface PreprocessOptions {
-  /** Width ratio of central ROI (Default: 0.70 = 70%) */
+  /** Width ratio of central ROI (Default: 0.60 = 60% of frame) */
   roiWidthRatio?: number;
-  /** Height ratio of central ROI (Default: 0.25 = 25%) */
+  /** Height ratio of central ROI (Default: 0.60 = 60% of frame) */
   roiHeightRatio?: number;
   /** Scaling factor for crisp optical density (Default: 2 = 2x) */
   scale?: number;
   /** Invert output (white text on black background). Default: false (black text on white) */
   invert?: boolean;
+  /** Amount of unsharp mask sharpening (Default: 1.5) */
+  unsharpAmount?: number;
 }
 
 export interface RoiBox {
@@ -29,7 +31,7 @@ export interface RoiBox {
 /**
  * Computes optimal Otsu threshold for binarization.
  * Maximizes inter-class variance between dark text characters and bright label background.
- * Clamps result between 45 and 215 to prevent degenerating in extreme glare or deep shadows.
+ * Clamps result between 40 and 220 to prevent degenerating in extreme glare or deep shadows.
  */
 export function calculateOtsuThreshold(grayData: Uint8Array | Uint8ClampedArray): number {
   const total = grayData.length;
@@ -75,32 +77,89 @@ export function calculateOtsuThreshold(grayData: Uint8Array | Uint8ClampedArray)
   }
 
   // Clamped threshold to avoid complete black-out or white-out under blinding flash/glare
-  return Math.max(45, Math.min(215, optimalThreshold));
+  return Math.max(40, Math.min(220, optimalThreshold));
 }
 
 /**
  * Calculates central Region Of Interest (ROI) box coordinates for a given video/canvas dimension.
+ * Defaults strictly to the center 60% of the frame (both width and height).
  */
 export function getCentralRoiBox(
   sourceWidth: number,
   sourceHeight: number,
-  widthRatio = 0.70,
-  heightRatio = 0.25
+  widthRatio = 0.60,
+  heightRatio = 0.60
 ): RoiBox {
-  const width = Math.round(sourceWidth * widthRatio);
-  const height = Math.round(sourceHeight * heightRatio);
-  const x = Math.round((sourceWidth - width) / 2);
-  const y = Math.round((sourceHeight - height) / 2);
+  const width = Math.max(1, Math.round(sourceWidth * widthRatio));
+  const height = Math.max(1, Math.round(sourceHeight * heightRatio));
+  const x = Math.max(0, Math.round((sourceWidth - width) / 2));
+  const y = Math.max(0, Math.round((sourceHeight - height) / 2));
 
   return { x, y, width, height };
 }
 
 /**
+ * High-performance 2D Unsharp Masking filter.
+ * Sharpening edges of worn/dirty numbers and dot-matrix serial tags before OCR:
+ * sharp = original + amount * (original - blur).
+ */
+export function applyUnsharpMask(
+  grayData: Uint8Array,
+  width: number,
+  height: number,
+  amount = 1.5
+): Uint8Array {
+  const len = grayData.length;
+  const output = new Uint8Array(len);
+  const w = width;
+  const h = height;
+
+  for (let y = 0; y < h; y++) {
+    const yPrev = y > 0 ? y - 1 : 0;
+    const yNext = y < h - 1 ? y + 1 : h - 1;
+
+    const rowCur = y * w;
+    const rowPrev = yPrev * w;
+    const rowNext = yNext * w;
+
+    for (let x = 0; x < w; x++) {
+      const xPrev = x > 0 ? x - 1 : 0;
+      const xNext = x < w - 1 ? x + 1 : w - 1;
+
+      const idx = rowCur + x;
+      const original = grayData[idx];
+
+      // 3x3 weighted Gaussian-approximated blur kernel
+      // [ 1, 2, 1 ]
+      // [ 2, 4, 2 ] / 16
+      // [ 1, 2, 1 ]
+      const blur =
+        (grayData[rowPrev + xPrev] +
+          (grayData[rowPrev + x] << 1) +
+          grayData[rowPrev + xNext] +
+          (grayData[rowCur + xPrev] << 1) +
+          (original << 2) +
+          (grayData[rowCur + xNext] << 1) +
+          grayData[rowNext + xPrev] +
+          (grayData[rowNext + x] << 1) +
+          grayData[rowNext + xNext]) >> 4;
+
+      const diff = original - blur;
+      const sharpened = original + amount * diff;
+      output[idx] = Math.max(0, Math.min(255, Math.round(sharpened)));
+    }
+  }
+
+  return output;
+}
+
+/**
  * Preprocesses a video frame or canvas for industrial field OCR:
- * 1. ROI Cropping: Extracts central 70% width × 25% height region of interest.
- * 2. 2x Scale Up: Enhances optical character stroke definition for Tesseract.
+ * 1. ROI Cropping: Extracts central 60% width × 60% height region of interest (center 60% of frame).
+ * 2. 2x Scale Up: Enhances optical stroke resolution for dot-matrix / printed serial text.
  * 3. Grayscale conversion: Uses ITU-R BT.601 perceptual luminance weights.
- * 4. Otsu Adaptive Binarization: High-contrast binarization that wipes out dirt,
+ * 4. Unsharp Masking: Sharpens high-frequency edges of serial numbers and printed digits.
+ * 5. Dynamic Otsu Adaptive Binarization: High-contrast binarization that wipes out dirt,
  *    dust smudges, and metallic reflections while keeping tag numbers razor sharp.
  */
 export function preprocessFrameForOcr(
@@ -116,15 +175,16 @@ export function preprocessFrameForOcr(
     return null;
   }
 
-  const widthRatio = options?.roiWidthRatio ?? 0.70;
-  const heightRatio = options?.roiHeightRatio ?? 0.25;
+  // 1. Crop strictly to the target bounding box (center 60% of frame)
+  const widthRatio = options?.roiWidthRatio ?? 0.60;
+  const heightRatio = options?.roiHeightRatio ?? 0.60;
   const scale = options?.scale ?? 2;
   const invert = options?.invert ?? false;
+  const unsharpAmount = options?.unsharpAmount ?? 1.5;
 
-  // 1. Central ROI Cropping coordinates
   const roi = getCentralRoiBox(srcWidth, srcHeight, widthRatio, heightRatio);
 
-  // 2. High-density offscreen canvas
+  // 2. Scale up the image by 2x to enhance resolution of dot-matrix / printed serial text
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(roi.width * scale));
   canvas.height = Math.max(1, Math.round(roi.height * scale));
@@ -136,7 +196,7 @@ export function preprocessFrameForOcr(
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
 
-  // Draw only the central ROI scaled onto the canvas
+  // Draw strictly the central 60% ROI scaled 2x onto the canvas
   ctx.drawImage(
     source,
     roi.x,
@@ -149,38 +209,46 @@ export function preprocessFrameForOcr(
     canvas.height
   );
 
-  // 3. Pixel Manipulation for Grayscale & Otsu Thresholding
+  // 3. Pixel Manipulation for Grayscale, Unsharp Masking & Dynamic Otsu Thresholding
   const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const data = imgData.data;
   const pixelCount = data.length / 4;
 
-  const grayArray = new Uint8Array(pixelCount);
+  const rawGray = new Uint8Array(pixelCount);
 
-  // Step A: Convert to grayscale and build pixel array with min/max tracking
+  // Step A: Convert to grayscale using ITU-R BT.601: 0.299 R + 0.587 G + 0.114 B
+  for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+    rawGray[p] = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+  }
+
+  // Step B: Apply Unsharp Masking to sharpen edges of worn numbers and dot-matrix digits
+  const sharpGray = applyUnsharpMask(rawGray, canvas.width, canvas.height, unsharpAmount);
+
+  // Step C: Dynamic Range Auto-Stretching on sharpened image
   let minGray = 255;
   let maxGray = 0;
-  for (let i = 0, p = 0; i < data.length; i += 4, p++) {
-    // ITU-R BT.601: 0.299 R + 0.587 G + 0.114 B
-    const gray = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
-    grayArray[p] = gray;
-    if (gray < minGray) minGray = gray;
-    if (gray > maxGray) maxGray = gray;
+  for (let p = 0; p < pixelCount; p++) {
+    const val = sharpGray[p];
+    if (val < minGray) minGray = val;
+    if (val > maxGray) maxGray = val;
   }
 
-  // Step A.2: Dynamic Range Auto-Stretching (enhances faint or dirty numbers under direct sunlight or dim container lighting)
   const range = maxGray - minGray;
+  const contrastEnhanced = new Uint8Array(pixelCount);
   if (range > 15 && range < 235) {
     for (let p = 0; p < pixelCount; p++) {
-      grayArray[p] = Math.round(((grayArray[p] - minGray) / range) * 255);
+      contrastEnhanced[p] = Math.round(((sharpGray[p] - minGray) / range) * 255);
     }
+  } else {
+    contrastEnhanced.set(sharpGray);
   }
 
-  // Step B: Calculate optimal Otsu threshold on contrast-enhanced grayscale
-  const threshold = calculateOtsuThreshold(grayArray);
+  // Step D: Calculate optimal dynamic Otsu threshold
+  const threshold = calculateOtsuThreshold(contrastEnhanced);
 
-  // Step C: High-contrast binarization (Black text on crisp white background)
+  // Step E: Dynamic Otsu High-Contrast Binarization (Crisp black text on pure white background)
   for (let i = 0, p = 0; i < data.length; i += 4, p++) {
-    const isDark = grayArray[p] < threshold;
+    const isDark = contrastEnhanced[p] < threshold;
     const finalVal = invert ? (isDark ? 255 : 0) : (isDark ? 0 : 255);
 
     data[i] = finalVal;

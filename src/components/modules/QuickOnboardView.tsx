@@ -591,13 +591,16 @@ export default function QuickOnboardView({
         });
     }
 
-    // ENGINE B: Heavy-Duty OCR Engine
+    // ENGINE B: Heavy-Duty Local OCR Engine (zero external API keys)
     if (isOcrReady && !isOcrBusyRef.current && !isDebounceLockedRef.current) {
       isOcrBusyRef.current = true;
       void recognizeFrameWithDetails(video)
         .then(async (ocrDetails) => {
           if (ocrDetails && ocrDetails.tag && !isDebounceLockedRef.current) {
-            await claimDetection(ocrDetails.tag);
+            // If confidence > 85%, claim detection immediately
+            if (ocrDetails.confidence > 85 || ocrDetails.isConfident) {
+              await claimDetection(ocrDetails.normalizedTag || ocrDetails.tag);
+            }
           }
         })
         .catch(() => {})

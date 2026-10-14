@@ -5,6 +5,15 @@ import { createWorker, PSM, type Worker } from 'tesseract.js';
 import { preprocessFrameForOcr } from './imagePreprocessing';
 import { cleanAndCorrectTag } from './tagParser';
 
+export interface OcrDetailsResult {
+  tag: string | null;
+  normalizedTag: string | null;
+  rawText: string;
+  confidence: number;
+  isValid: boolean;
+  isConfident: boolean;
+}
+
 export interface UseOcrScannerResult {
   isOcrReady: boolean;
   isInitializing: boolean;
@@ -16,21 +25,65 @@ export interface UseOcrScannerResult {
   recognizeFrame: (videoElement: HTMLVideoElement) => Promise<string | null>;
   recognizeFrameWithDetails: (
     videoElement: HTMLVideoElement
-  ) => Promise<{ tag: string | null; rawText: string; confidence: number } | null>;
+  ) => Promise<OcrDetailsResult | null>;
+}
+
+export interface ValidatedSerialMatch {
+  tag: string;
+  normalizedTag: string;
+  patternType: 'ZR_PREFIX' | 'FOUR_DIGIT';
+}
+
+/**
+ * Hardened regex validation for local industrial equipment tag recognition:
+ * - Match pattern: ZR-\d{3,5} (e.g., ZR-1065, ZR-001, ZR-12345)
+ * - OR any 4-digit number (\b\d{4}\b, e.g., 1065, 2048, 0024)
+ */
+export function validateSerialTag(rawText: string): ValidatedSerialMatch | null {
+  if (!rawText) return null;
+  const clean = rawText.toUpperCase().trim().replace(/[\r\n\t]+/g, ' ');
+
+  // 1. Strict pattern: ZR-\d{3,5}
+  const zrMatch = clean.match(/(?:^|[^0-9A-Z])(ZR-\d{3,5})(?:$|[^0-9A-Z])/i);
+  if (zrMatch) {
+    const tag = zrMatch[1].toUpperCase();
+    return { tag, normalizedTag: tag, patternType: 'ZR_PREFIX' };
+  }
+
+  // Also support ZR without hyphen or with space (e.g., "ZR 1065" or "ZR1065" -> "ZR-1065")
+  const zrFuzzyMatch = clean.match(/(?:^|[^0-9A-Z])ZR[\s-]?(\d{3,5})(?:$|[^0-9A-Z])/i);
+  if (zrFuzzyMatch) {
+    const tag = `ZR-${zrFuzzyMatch[1]}`;
+    return { tag, normalizedTag: tag, patternType: 'ZR_PREFIX' };
+  }
+
+  // 2. Any 4-digit number: \b\d{4}\b
+  const fourDigitMatch = clean.match(/(?:^|[^0-9A-Z])(\d{4})(?:$|[^0-9A-Z])/);
+  if (fourDigitMatch) {
+    const digits = fourDigitMatch[1];
+    return {
+      tag: digits,
+      normalizedTag: `ZR-${digits}`,
+      patternType: 'FOUR_DIGIT',
+    };
+  }
+
+  return null;
 }
 
 /**
  * Extracts equipment barcode / QR serial patterns from raw OCR text.
- * Covers patterns like:
- * - TOOL-WLD-001, TOOL-DRL-030 (triple segment)
- * - TOOL-0024, TOOL-102 (double segment)
- * - BAT-001, SITE-005
- * - Standalone numeric suffixes with prefix normalization
  */
 export function extractToolSerialFromText(rawText: string): string | null {
   if (!rawText) return null;
 
-  // 1. Try fuzzy pattern corrector first (corrects optical misreads like O->0, l->1, S->5, etc.)
+  // 1. Primary Priority: Strict validation against ZR-\d{3,5} or 4-digit number
+  const validated = validateSerialTag(rawText);
+  if (validated) {
+    return validated.normalizedTag;
+  }
+
+  // 2. Try fuzzy pattern corrector
   const fuzzyTag = cleanAndCorrectTag(rawText);
   if (fuzzyTag) {
     return fuzzyTag;
@@ -43,42 +96,17 @@ export function extractToolSerialFromText(rawText: string): string | null {
     .replace(/\s+/g, ' ')
     .trim();
 
-  // 2. Triple-segment equipment code (e.g., TOOL-WLD-001 or TOOL-CUT-021)
+  // 3. Fallback matching for other enterprise fleet equipment prefixes
   const tripleMatch = normalized.match(/\b([A-Z0-9]{2,6}-[A-Z0-9]{2,6}-\d{1,6})\b/);
   if (tripleMatch) {
     return tripleMatch[1];
   }
 
-  // 3. Standard double-segment equipment code (e.g., TOOL-0024, BAT-101, SITE-002)
   const doubleMatch = normalized.match(/\b([A-Z]{2,6}-\d{1,6})\b/);
   if (doubleMatch) {
     return doubleMatch[1];
   }
 
-  // 4. Fallback: segments separated by spaces where hyphen was missed (e.g., "TOOL WLD 001" -> "TOOL-WLD-001")
-  const spaceSegmentMatch = normalized.match(/\b(TOOL\s+[A-Z]{2,5}\s+\d{1,6})\b/);
-  if (spaceSegmentMatch) {
-    return spaceSegmentMatch[1].replace(/\s+/g, '-');
-  }
-
-  const spaceSimpleMatch = normalized.match(/\b(TOOL\s+\d{1,6})\b/);
-  if (spaceSimpleMatch) {
-    return spaceSimpleMatch[1].replace(/\s+/g, '-');
-  }
-
-  // 5. Compact TOOL prefix without hyphen (e.g., "TOOL001" or "TOOL102" -> "TOOL-001")
-  const compactToolMatch = normalized.match(/\bTOOL(\d{1,6})\b/);
-  if (compactToolMatch) {
-    return `TOOL-${compactToolMatch[1]}`;
-  }
-
-  // 6. Any general uppercase alphanumeric code with hyphen (e.g., "WLD-001" or "ABC-1234")
-  const generalMatch = normalized.match(/\b([A-Z0-9]{2,6}-[A-Z0-9]{2,8})\b/);
-  if (generalMatch) {
-    return generalMatch[1];
-  }
-
-  // 7. Fallback numeric suffix: 3 to 8 standalone digits (e.g., "0001", "0024")
   const numericMatch = normalized.match(/\b(\d{3,8})\b/);
   if (numericMatch) {
     return numericMatch[1];
@@ -89,7 +117,8 @@ export function extractToolSerialFromText(rawText: string): string | null {
 
 /**
  * Dedicated React hook for offline-ready client-side optical character recognition (OCR)
- * using Tesseract.js with Otsu adaptive binarization and fuzzy tag corrector.
+ * using Tesseract.js with high-contrast 60% ROI cropping, 2x scale, unsharp masking,
+ * Otsu dynamic binarization, and character constraint [0-9, Z, R, -].
  */
 export function useOcrScanner(): UseOcrScannerResult {
   const [isOcrReady, setIsOcrReady] = useState<boolean>(false);
@@ -118,7 +147,7 @@ export function useOcrScanner(): UseOcrScannerResult {
     setOcrProgress(10);
 
     try {
-      // Initialize Tesseract worker with English model and industrial parameters
+      // Initialize local Tesseract worker with English model
       const worker = await createWorker('eng', undefined, {
         logger: (m) => {
           if (m && typeof m.progress === 'number') {
@@ -127,9 +156,9 @@ export function useOcrScanner(): UseOcrScannerResult {
         },
       });
 
-      // Whitelist common characters and optical misread lookalikes (including !, |, $)
+      // Constrain recognition strictly to characters: [0-9, Z, R, -]
       await worker.setParameters({
-        tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_!|$ ',
+        tessedit_char_whitelist: '0123456789ZR-',
         tessedit_pageseg_mode: PSM.SINGLE_LINE,
       });
 
@@ -166,7 +195,7 @@ export function useOcrScanner(): UseOcrScannerResult {
   const recognizeFrameWithDetails = useCallback(
     async (
       videoElement: HTMLVideoElement
-    ): Promise<{ tag: string | null; rawText: string; confidence: number } | null> => {
+    ): Promise<OcrDetailsResult | null> => {
       if (!videoElement) return null;
 
       if (!workerRef.current) {
@@ -180,7 +209,7 @@ export function useOcrScanner(): UseOcrScannerResult {
       setOcrError(null);
 
       try {
-        // Preprocess frame using industrial 70%x25% ROI crop and Otsu binarization filter
+        // Preprocess frame: 60% center ROI crop, 2x scale, unsharp mask, Otsu binarization
         const canvas = preprocessFrameForOcr(videoElement);
         if (!canvas) {
           setIsRecognizing(false);
@@ -191,13 +220,21 @@ export function useOcrScanner(): UseOcrScannerResult {
         const rawText = result?.data?.text || '';
         const confidence = result?.data?.confidence || 0;
 
-        const matchedCode = extractToolSerialFromText(rawText);
+        // Regex validation: match pattern ZR-\d{3,5} or any 4-digit number
+        const validated = validateSerialTag(rawText);
+        const isValid = Boolean(validated);
+        // If confidence > 85%, claim detection immediately
+        const isConfident = confidence > 85;
+
         setIsRecognizing(false);
 
         return {
-          tag: matchedCode,
+          tag: validated ? validated.tag : null,
+          normalizedTag: validated ? validated.normalizedTag : null,
           rawText,
           confidence,
+          isValid,
+          isConfident,
         };
       } catch (err: unknown) {
         console.error('OCR recognition error:', err);
