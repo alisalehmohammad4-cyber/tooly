@@ -231,6 +231,7 @@ export default function WarehouseDashboardView({
   const [inlineTargetLocked, setInlineTargetLocked] = useState<boolean>(false);
   const [inlineCandidateTag, setInlineCandidateTag] = useState<string | null>(null);
   const [inlineCameraError, setInlineCameraError] = useState<string | null>(null);
+  const [inlineScanMode, setInlineScanMode] = useState<'qr' | 'ocr'>('qr');
 
   // Ref to invoke handleOpenPassport safely from callbacks
   const handleOpenPassportRef = useRef<((qrCode: string, fallbackItem?: unknown) => Promise<void>) | null>(null);
@@ -243,7 +244,7 @@ export default function WarehouseDashboardView({
   } = useLaserStripOcr({
     videoRef: inlineVideoRef,
     isActive: isInlineScannerOpen,
-    isPaused: isPassportOpen || inlineIsDebounceLockedRef.current,
+    isPaused: inlineScanMode !== 'ocr' || isPassportOpen || inlineIsDebounceLockedRef.current,
     organizationId: currentOrganization?.id || user?.organizationId,
     onTagDetected: async (tag, digits) => {
       // a) Audio beep + haptic pulse handled in hook
@@ -2125,10 +2126,40 @@ export default function WarehouseDashboardView({
             {isInlineScannerOpen && (
               <div className="bg-slate-950 border-2 border-emerald-500/40 rounded-2xl p-3 space-y-2.5 animate-in fade-in zoom-in-95 duration-150 shadow-xl">
                 <div className="flex items-center justify-between text-xs text-slate-300 font-bold px-1">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                    <span>סורק לייזר חי (450ms Tesseract + גיבוי ענן) &bull; לחץ על המסך לחידוש</span>
+                  {/* Segmented Mode Selector: QR vs OCR */}
+                  <div className="flex items-center p-0.5 bg-slate-900 rounded-xl border border-white/10 shadow-inner">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setInlineScanMode('qr');
+                        resetInlineOcrStatus();
+                      }}
+                      className={`px-3 py-1 rounded-lg text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${
+                        inlineScanMode === 'qr'
+                          ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/50'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <QrCode className="w-3.5 h-3.5" />
+                      <span>סריקת QR</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setInlineScanMode('ocr');
+                        resetInlineOcrStatus();
+                      }}
+                      className={`px-3 py-1 rounded-lg text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${
+                        inlineScanMode === 'ocr'
+                          ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-500/50'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>סריקת OCR</span>
+                    </button>
                   </div>
+
                   <button
                     type="button"
                     onClick={() => setIsInlineScannerOpen(false)}
@@ -2155,43 +2186,76 @@ export default function WarehouseDashboardView({
                     className="w-full h-full object-cover"
                   />
 
-                  {/* Laser-Strip ROI Target Box: middle 75% width, middle 30% height */}
-                  <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                    <div
-                      className={`w-[75%] h-[30%] min-h-[75px] max-h-[120px] relative rounded-2xl flex items-center justify-center transition-all duration-150 ${
-                        inlineOcrMatchedTag || inlineTargetLocked
-                          ? 'border-4 border-emerald-400 bg-emerald-500/30 shadow-[0_0_40px_rgba(16,185,129,0.9)] scale-102'
-                          : 'border-2 border-emerald-400/60 bg-emerald-950/10'
-                      }`}
-                    >
-                      {/* 4 Precision Corner Guides */}
-                      <div className="absolute top-0 left-0 w-4 h-4 border-t-3 border-l-3 border-emerald-400 rounded-tl-lg" />
-                      <div className="absolute top-0 right-0 w-4 h-4 border-t-3 border-r-3 border-emerald-400 rounded-tr-lg" />
-                      <div className="absolute bottom-0 left-0 w-4 h-4 border-b-3 border-l-3 border-emerald-400 rounded-bl-lg" />
-                      <div className="absolute bottom-0 right-0 w-4 h-4 border-b-3 border-r-3 border-emerald-400 rounded-br-lg" />
+                  {inlineScanMode === 'qr' ? (
+                    /* QR Viewfinder (Square 2D Framing) */
+                    <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                      <div
+                        className={`w-[68%] aspect-square max-w-[220px] relative rounded-3xl flex items-center justify-center transition-all duration-200 ${
+                          inlineTargetLocked || inlineCandidateTag
+                            ? 'border-4 border-blue-400 bg-blue-500/20 shadow-[0_0_35px_rgba(59,130,246,0.8)] scale-[1.02]'
+                            : 'border-2 border-white/50 bg-white/[0.02]'
+                        }`}
+                      >
+                        {/* 4 Precision Corner Brackets */}
+                        <div className="absolute top-0 left-0 w-5 h-5 border-t-3 border-l-3 border-blue-400 rounded-tl-xl" />
+                        <div className="absolute top-0 right-0 w-5 h-5 border-t-3 border-r-3 border-blue-400 rounded-tr-xl" />
+                        <div className="absolute bottom-0 left-0 w-5 h-5 border-b-3 border-l-3 border-blue-400 rounded-bl-xl" />
+                        <div className="absolute bottom-0 right-0 w-5 h-5 border-b-3 border-r-3 border-blue-400 rounded-br-xl" />
 
-                      {/* Continuous Pulsing Laser Line Centered in Strip */}
-                      <div className="absolute inset-x-2 h-0.5 bg-emerald-400 shadow-[0_0_12px_#10b981] animate-pulse" />
-
-                      {(inlineOcrMatchedTag || inlineCandidateTag) && (
-                        <div className="flex flex-col items-center justify-center text-center animate-in zoom-in-95 duration-150 z-10">
-                          <CheckCircle2 className="w-8 h-8 text-emerald-400 mb-0.5 drop-shadow-md" />
-                          <span className="font-mono text-sm font-black text-white tracking-widest drop-shadow-md" dir="ltr">
-                            {inlineOcrMatchedTag || inlineCandidateTag}
-                          </span>
-                          <span className="text-[10px] font-bold text-emerald-300">פותח תיק כלי...</span>
-                        </div>
-                      )}
+                        {inlineTargetLocked || inlineCandidateTag ? (
+                          <div className="flex flex-col items-center justify-center text-center animate-in zoom-in-95 duration-150 z-10">
+                            <CheckCircle2 className="w-9 h-9 text-blue-400 mb-1 drop-shadow-md" />
+                            <span className="font-mono text-sm font-black text-white tracking-widest drop-shadow-md" dir="ltr">
+                              {inlineCandidateTag}
+                            </span>
+                            <span className="text-[10px] font-bold text-blue-300">פותח תיק כלי...</span>
+                          </div>
+                        ) : (
+                          <div className="absolute inset-x-2 h-0.5 bg-gradient-to-r from-transparent via-blue-400 to-transparent shadow-[0_0_10px_#60a5fa] animate-[bounce_2s_infinite]" />
+                        )}
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    /* Laser-Strip ROI Target Box: middle 75% width, middle 30% height */
+                    <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                      <div
+                        className={`w-[75%] h-[30%] min-h-[75px] max-h-[120px] relative rounded-2xl flex items-center justify-center transition-all duration-150 ${
+                          inlineOcrMatchedTag || inlineTargetLocked
+                            ? 'border-4 border-emerald-400 bg-emerald-500/30 shadow-[0_0_40px_rgba(16,185,129,0.9)] scale-102'
+                            : 'border-2 border-emerald-400/60 bg-emerald-950/10'
+                        }`}
+                      >
+                        {/* 4 Precision Corner Guides */}
+                        <div className="absolute top-0 left-0 w-4 h-4 border-t-3 border-l-3 border-emerald-400 rounded-tl-lg" />
+                        <div className="absolute top-0 right-0 w-4 h-4 border-t-3 border-r-3 border-emerald-400 rounded-tr-lg" />
+                        <div className="absolute bottom-0 left-0 w-4 h-4 border-b-3 border-l-3 border-emerald-400 rounded-bl-lg" />
+                        <div className="absolute bottom-0 right-0 w-4 h-4 border-b-3 border-r-3 border-emerald-400 rounded-br-lg" />
 
-                  {/* Live On-Screen OCR Status Pill inside bottom of camera viewfinder */}
+                        {/* Continuous Pulsing Laser Line Centered in Strip */}
+                        <div className="absolute inset-x-2 h-0.5 bg-emerald-400 shadow-[0_0_12px_#10b981] animate-pulse" />
+
+                        {(inlineOcrMatchedTag || inlineCandidateTag) && (
+                          <div className="flex flex-col items-center justify-center text-center animate-in zoom-in-95 duration-150 z-10">
+                            <CheckCircle2 className="w-8 h-8 text-emerald-400 mb-0.5 drop-shadow-md" />
+                            <span className="font-mono text-sm font-black text-white tracking-widest drop-shadow-md" dir="ltr">
+                              {inlineOcrMatchedTag || inlineCandidateTag}
+                            </span>
+                            <span className="text-[10px] font-bold text-emerald-300">פותח תיק כלי...</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Live On-Screen Status Pill inside bottom of camera viewfinder */}
                   <div className="absolute bottom-12 inset-x-0 flex justify-center items-center pointer-events-none z-20 px-3">
                     <div
                       className={`px-3.5 py-1.5 rounded-full backdrop-blur-md border text-xs font-bold flex items-center gap-2 shadow-lg transition-all duration-200 max-w-[92%] truncate ${
                         inlineOcrMatchedTag || inlineCandidateTag
-                          ? 'bg-emerald-950/90 border-emerald-400 text-white shadow-[0_0_20px_rgba(16,185,129,0.7)] animate-pulse'
-                          : inlineLastRawOcrText
+                          ? inlineScanMode === 'qr'
+                            ? 'bg-blue-950/90 border-blue-400 text-white shadow-[0_0_20px_rgba(59,130,246,0.7)] animate-pulse'
+                            : 'bg-emerald-950/90 border-emerald-400 text-white shadow-[0_0_20px_rgba(16,185,129,0.7)] animate-pulse'
+                          : inlineScanMode === 'ocr' && inlineLastRawOcrText
                           ? 'bg-slate-950/90 border-amber-500/60 text-amber-200'
                           : 'bg-black/80 border-white/20 text-slate-200'
                       }`}
@@ -2200,10 +2264,15 @@ export default function WarehouseDashboardView({
                         <span className="flex items-center gap-1.5 text-emerald-300 font-black">
                           <span>✅ זוהה: {inlineOcrMatchedTag || inlineCandidateTag} - פותח כלי!</span>
                         </span>
-                      ) : inlineLastRawOcrText ? (
+                      ) : inlineScanMode === 'ocr' && inlineLastRawOcrText ? (
                         <span className="flex items-center gap-1.5 font-mono text-[11px]">
                           <span className="text-amber-400">👁️ נקרא:</span>
                           <span className="text-white font-bold tracking-wider">{inlineLastRawOcrText}</span>
+                        </span>
+                      ) : inlineScanMode === 'qr' ? (
+                        <span className="flex items-center gap-1.5 text-[11px] text-blue-300 font-bold">
+                          <span className="w-2 h-2 rounded-full bg-blue-400 animate-ping inline-block" />
+                          <span>🔍 סורק קוד QR או ברקود...</span>
                         </span>
                       ) : (
                         <span className="flex items-center gap-1.5 text-[11px] text-emerald-300 font-bold">

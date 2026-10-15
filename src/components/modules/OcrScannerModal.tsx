@@ -11,6 +11,8 @@ import {
   RotateCcw,
   ScanLine,
   ArrowRight,
+  QrCode,
+  Sparkles,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useLaserStripOcr } from '@/lib/ocr/useLaserStripOcr';
@@ -36,6 +38,9 @@ export default function OcrScannerModal({
 }: OcrScannerModalProps) {
   const { currentOrganization } = useAuth();
   const orgId = currentOrganization?.id;
+
+  // Scan Mode: 'qr' | 'ocr' (defaults to 'qr')
+  const [scanMode, setScanMode] = useState<'qr' | 'ocr'>('qr');
 
   // Video & Stream refs
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -345,7 +350,7 @@ export default function OcrScannerModal({
   } = useLaserStripOcr({
     videoRef,
     isActive: isOpen && cameraActive,
-    isPaused: isPausedRef.current || !!snappedAsset || isTargetLocked,
+    isPaused: scanMode !== 'ocr' || isPausedRef.current || !!snappedAsset || isTargetLocked,
     organizationId: orgId,
     onTagDetected: async (tag) => {
       // Auto-fill manual search input state below camera
@@ -356,10 +361,10 @@ export default function OcrScannerModal({
   });
 
   /**
-   * ENGINE A: 60fps Continuous Barcode & QR Detection Loop
+   * ENGINE A: Continuous Barcode & QR Detection Loop (runs when in QR mode)
    */
   useEffect(() => {
-    if (!isOpen || !cameraActive || snappedAsset) return;
+    if (!isOpen || !cameraActive || snappedAsset || scanMode !== 'qr') return;
 
     let animId: number;
     let active = true;
@@ -407,7 +412,7 @@ export default function OcrScannerModal({
       active = false;
       cancelAnimationFrame(animId);
     };
-  }, [isOpen, cameraActive, snappedAsset, claimDetection]);
+  }, [isOpen, cameraActive, snappedAsset, scanMode, claimDetection]);
 
   /**
    * Lifecycle: On modal open/close, pause detection without killing hardware stream,
@@ -526,23 +531,52 @@ export default function OcrScannerModal({
       }`}
     >
       <div className="bg-slate-950 border border-white/10 rounded-3xl max-w-md w-full shadow-2xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-150">
-        {/* 1. TOP: SMALL CLEAN HEADER */}
-        <div className="px-4 py-3 bg-slate-950/80 border-b border-white/5 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-white font-bold text-sm">
+        {/* 1. TOP: SMALL CLEAN HEADER WITH DUAL MODE SWITCH */}
+        <div className="px-4 py-3 bg-slate-950/80 border-b border-white/5 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-white font-bold text-sm shrink-0">
             <ScanLine className="w-4 h-4 text-emerald-400" />
-            <span>{title}</span>
+            <span className="hidden sm:inline">{title}</span>
           </div>
+
+          {/* Segmented Switch: QR vs OCR */}
+          <div className="flex items-center bg-black/60 p-0.5 rounded-xl border border-white/10 shadow-inner">
+            <button
+              type="button"
+              onClick={() => setScanMode('qr')}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                scanMode === 'qr'
+                  ? 'bg-blue-600 text-white shadow-[0_0_12px_rgba(37,99,235,0.7)]'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <QrCode className="w-3.5 h-3.5" />
+              <span>סריקת QR</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setScanMode('ocr')}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                scanMode === 'ocr'
+                  ? 'bg-emerald-600 text-white shadow-[0_0_12px_rgba(16,185,129,0.7)]'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>סריקת OCR</span>
+            </button>
+          </div>
+
           <button
             type="button"
             onClick={onClose}
-            className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
+            className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-white/5 transition-colors cursor-pointer shrink-0"
             title="סגור"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* 2. CENTER: FULL-VIEW CLEAN CAMERA FEED WITH HORIZONTAL LASER STRIP ROI */}
+        {/* 2. CENTER: FULL-VIEW CLEAN CAMERA FEED WITH DUAL QR / LASER STRIP ROI */}
         <div
           onClick={() => void handleTapToWake()}
           className="relative bg-black aspect-[4/3] sm:aspect-[1/1] max-h-[380px] overflow-hidden flex items-center justify-center cursor-pointer select-none"
@@ -559,72 +593,118 @@ export default function OcrScannerModal({
             className="w-full h-full object-cover"
           />
 
-          {/* Laser-Strip ROI Target Box: middle 75% width, middle 30% height */}
-          <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-            <div
-              className={`w-[75%] h-[30%] min-h-[75px] max-h-[130px] relative rounded-2xl flex items-center justify-center transition-all duration-150 ${
-                isTargetLocked || ocrMatchedTag
-                  ? 'border-4 border-emerald-400 bg-emerald-500/30 shadow-[0_0_50px_rgba(16,185,129,0.95)] scale-[1.03]'
-                  : 'border-2 border-emerald-400/60 bg-emerald-950/10'
-              }`}
-            >
-              {/* 4 Precision Corner Guides */}
+          {/* Viewfinder ROI target box */}
+          {scanMode === 'qr' ? (
+            /* Square 2D Viewfinder for QR / Barcode */
+            <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
               <div
-                className={`absolute top-0 left-0 w-4 h-4 border-t-3 border-l-3 transition-colors duration-150 ${
-                  isTargetLocked || ocrMatchedTag
-                    ? 'border-emerald-400 shadow-[0_0_15px_#34d399]'
-                    : 'border-emerald-400/90'
-                } rounded-tl-lg`}
-              />
-              <div
-                className={`absolute top-0 right-0 w-4 h-4 border-t-3 border-r-3 transition-colors duration-150 ${
-                  isTargetLocked || ocrMatchedTag
-                    ? 'border-emerald-400 shadow-[0_0_15px_#34d399]'
-                    : 'border-emerald-400/90'
-                } rounded-tr-lg`}
-              />
-              <div
-                className={`absolute bottom-0 left-0 w-4 h-4 border-b-3 border-l-3 transition-colors duration-150 ${
-                  isTargetLocked || ocrMatchedTag
-                    ? 'border-emerald-400 shadow-[0_0_15px_#34d399]'
-                    : 'border-emerald-400/90'
-                } rounded-bl-lg`}
-              />
-              <div
-                className={`absolute bottom-0 right-0 w-4 h-4 border-b-3 border-r-3 transition-colors duration-150 ${
-                  isTargetLocked || ocrMatchedTag
-                    ? 'border-emerald-400 shadow-[0_0_15px_#34d399]'
-                    : 'border-emerald-400/90'
-                } rounded-br-lg`}
-              />
+                className={`w-48 h-48 sm:w-56 sm:h-56 relative rounded-2xl flex items-center justify-center transition-all duration-150 ${
+                  isTargetLocked || candidateTag
+                    ? 'border-4 border-blue-400 bg-blue-500/30 shadow-[0_0_50px_rgba(59,130,246,0.95)] scale-[1.03]'
+                    : 'border-2 border-blue-400/80 bg-blue-950/10 shadow-[0_0_25px_rgba(59,130,246,0.3)]'
+                }`}
+              >
+                {/* 4 Precision Corner Guides */}
+                <div className="absolute top-0 left-0 w-5 h-5 border-t-3 border-l-3 border-blue-400 rounded-tl-lg" />
+                <div className="absolute top-0 right-0 w-5 h-5 border-t-3 border-r-3 border-blue-400 rounded-tr-lg" />
+                <div className="absolute bottom-0 left-0 w-5 h-5 border-b-3 border-l-3 border-blue-400 rounded-bl-lg" />
+                <div className="absolute bottom-0 right-0 w-5 h-5 border-b-3 border-r-3 border-blue-400 rounded-br-lg" />
 
-              {/* Instant feedback on detection */}
-              {isTargetLocked || ocrMatchedTag ? (
-                <div className="flex flex-col items-center justify-center text-center animate-in zoom-in-95 duration-150">
-                  <CheckCircle2 className="w-8 h-8 text-emerald-400 mb-0.5 drop-shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
-                  <span className="font-mono text-base font-black text-white tracking-widest drop-shadow-md" dir="ltr">
-                    {candidateTag || ocrMatchedTag}
-                  </span>
-                  <span className="text-[10px] font-bold text-emerald-300">פותח כלי...</span>
-                </div>
-              ) : (
-                <div className="absolute inset-x-2 h-0.5 bg-emerald-400 shadow-[0_0_12px_#34d399] animate-pulse" />
-              )}
+                {/* Sweeping Blue Laser */}
+                {isTargetLocked || candidateTag ? (
+                  <div className="flex flex-col items-center justify-center text-center animate-in zoom-in-95 duration-150">
+                    <CheckCircle2 className="w-8 h-8 text-blue-400 mb-0.5 drop-shadow-[0_0_8px_rgba(59,130,246,0.8)]" />
+                    <span className="font-mono text-base font-black text-white tracking-widest drop-shadow-md" dir="ltr">
+                      {candidateTag}
+                    </span>
+                    <span className="text-[10px] font-bold text-blue-300">פותח כלי...</span>
+                  </div>
+                ) : (
+                  <div className="absolute inset-x-2 h-0.5 bg-blue-400 shadow-[0_0_12px_#3b82f6] animate-pulse" />
+                )}
+              </div>
             </div>
-          </div>
+          ) : (
+            /* Laser-Strip ROI Target Box: middle 75% width, middle 30% height */
+            <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+              <div
+                className={`w-[75%] h-[30%] min-h-[75px] max-h-[130px] relative rounded-2xl flex items-center justify-center transition-all duration-150 ${
+                  isTargetLocked || ocrMatchedTag
+                    ? 'border-4 border-emerald-400 bg-emerald-500/30 shadow-[0_0_50px_rgba(16,185,129,0.95)] scale-[1.03]'
+                    : 'border-2 border-emerald-400/60 bg-emerald-950/10'
+                }`}
+              >
+                {/* 4 Precision Corner Guides */}
+                <div
+                  className={`absolute top-0 left-0 w-4 h-4 border-t-3 border-l-3 transition-colors duration-150 ${
+                    isTargetLocked || ocrMatchedTag
+                      ? 'border-emerald-400 shadow-[0_0_15px_#34d399]'
+                      : 'border-emerald-400/90'
+                  } rounded-tl-lg`}
+                />
+                <div
+                  className={`absolute top-0 right-0 w-4 h-4 border-t-3 border-r-3 transition-colors duration-150 ${
+                    isTargetLocked || ocrMatchedTag
+                      ? 'border-emerald-400 shadow-[0_0_15px_#34d399]'
+                      : 'border-emerald-400/90'
+                  } rounded-tr-lg`}
+                />
+                <div
+                  className={`absolute bottom-0 left-0 w-4 h-4 border-b-3 border-l-3 transition-colors duration-150 ${
+                    isTargetLocked || ocrMatchedTag
+                      ? 'border-emerald-400 shadow-[0_0_15px_#34d399]'
+                      : 'border-emerald-400/90'
+                  } rounded-bl-lg`}
+                />
+                <div
+                  className={`absolute bottom-0 right-0 w-4 h-4 border-b-3 border-r-3 transition-colors duration-150 ${
+                    isTargetLocked || ocrMatchedTag
+                      ? 'border-emerald-400 shadow-[0_0_15px_#34d399]'
+                      : 'border-emerald-400/90'
+                  } rounded-br-lg`}
+                />
 
-          {/* Live On-Screen OCR Status Pill inside bottom of camera viewfinder */}
+                {/* Instant feedback on detection */}
+                {isTargetLocked || ocrMatchedTag ? (
+                  <div className="flex flex-col items-center justify-center text-center animate-in zoom-in-95 duration-150">
+                    <CheckCircle2 className="w-8 h-8 text-emerald-400 mb-0.5 drop-shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
+                    <span className="font-mono text-base font-black text-white tracking-widest drop-shadow-md" dir="ltr">
+                      {candidateTag || ocrMatchedTag}
+                    </span>
+                    <span className="text-[10px] font-bold text-emerald-300">פותח כלי...</span>
+                  </div>
+                ) : (
+                  <div className="absolute inset-x-2 h-0.5 bg-emerald-400 shadow-[0_0_12px_#34d399] animate-pulse" />
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Live On-Screen Status Pill inside bottom of camera viewfinder */}
           <div className="absolute bottom-16 inset-x-0 flex justify-center items-center pointer-events-none z-20 px-3">
             <div
               className={`px-3.5 py-1.5 rounded-full backdrop-blur-md border text-xs font-bold flex items-center gap-2 shadow-lg transition-all duration-200 max-w-[92%] truncate ${
-                ocrMatchedTag || candidateTag
+                scanMode === 'qr'
+                  ? 'bg-blue-950/85 border-blue-500/40 text-blue-200'
+                  : ocrMatchedTag || candidateTag
                   ? 'bg-emerald-950/90 border-emerald-400 text-white shadow-[0_0_20px_rgba(16,185,129,0.7)] animate-pulse'
                   : lastRawOcrText
                   ? 'bg-slate-950/90 border-amber-500/60 text-amber-200'
                   : 'bg-black/80 border-white/20 text-slate-200'
               }`}
             >
-              {ocrMatchedTag || candidateTag ? (
+              {scanMode === 'qr' ? (
+                candidateTag ? (
+                  <span className="flex items-center gap-1.5 text-blue-300 font-black">
+                    <span>✅ זוהה: {candidateTag} - פותח כלי!</span>
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1.5 text-[11px] text-blue-300 font-bold">
+                    <span className="w-2 h-2 rounded-full bg-blue-400 animate-ping inline-block" />
+                    <span>🔍 סורק קוד QR או ברקוד...</span>
+                  </span>
+                )
+              ) : ocrMatchedTag || candidateTag ? (
                 <span className="flex items-center gap-1.5 text-emerald-300 font-black">
                   <span>✅ זוהה: {ocrMatchedTag || candidateTag} - פותח כלי!</span>
                 </span>

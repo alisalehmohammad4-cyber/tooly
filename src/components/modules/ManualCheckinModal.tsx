@@ -19,6 +19,7 @@ import {
   Check,
   RotateCcw,
   FileText,
+  QrCode,
 } from 'lucide-react';
 import {
   checkinFromWorkerAction,
@@ -84,6 +85,7 @@ export default function ManualCheckinModal({
   const [isSearchingBarcode, setIsSearchingBarcode] = useState<boolean>(false);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [torchEnabled, setTorchEnabled] = useState<boolean>(false);
+  const [scanMode, setScanMode] = useState<'qr' | 'ocr'>('qr');
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -294,7 +296,7 @@ export default function ManualCheckinModal({
   } = useLaserStripOcr({
     videoRef,
     isActive: isOpen && activeTab === 'scanner' && !selectedAsset && scannerStarted,
-    isPaused: Boolean(selectedAsset || !isOpen || activeTab !== 'scanner'),
+    isPaused: scanMode !== 'ocr' || Boolean(selectedAsset || !isOpen || activeTab !== 'scanner'),
     organizationId: orgId,
     onTagDetected: async (tag) => {
       setManualBarcodeScanInput(tag);
@@ -342,7 +344,7 @@ export default function ManualCheckinModal({
     };
   }, [isOpen, activeTab, selectedAsset, startCameraScanner, stopCameraScanner]);
 
-  // Periodic scan interval: 700ms
+  // Periodic scan interval: 180ms in QR mode (instantaneous snap), 500ms in OCR mode
   useEffect(() => {
     if (!scannerStarted || selectedAsset || !isOpen || activeTab !== 'scanner') {
       if (scanIntervalRef.current) {
@@ -352,9 +354,10 @@ export default function ManualCheckinModal({
       return;
     }
 
+    const intervalMs = scanMode === 'qr' ? 180 : 500;
     scanIntervalRef.current = setInterval(() => {
       void performScanCheck();
-    }, 700);
+    }, intervalMs);
 
     return () => {
       if (scanIntervalRef.current) {
@@ -362,7 +365,7 @@ export default function ManualCheckinModal({
         scanIntervalRef.current = null;
       }
     };
-  }, [scannerStarted, selectedAsset, isOpen, activeTab, performScanCheck]);
+  }, [scannerStarted, selectedAsset, isOpen, activeTab, scanMode, performScanCheck]);
 
   // Stream Watchdog: Revives dead or ended camera stream every 1000ms
   useEffect(() => {
@@ -779,7 +782,41 @@ export default function ManualCheckinModal({
 
               {/* TAB 1: CAMERA SCANNER */}
               {activeTab === 'scanner' && (
-                <div className="space-y-3 animate-in fade-in">
+                <div className="space-y-2.5 animate-in fade-in">
+                  {/* Segmented Mode Selector: QR vs OCR */}
+                  <div className="flex items-center justify-center p-1 bg-slate-900/90 backdrop-blur-md rounded-2xl border border-white/10 shadow-md max-w-xs mx-auto">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setScanMode('qr');
+                        resetOcrStatus();
+                      }}
+                      className={`flex-1 py-1.5 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                        scanMode === 'qr'
+                          ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/50'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <QrCode className="w-3.5 h-3.5" />
+                      <span>סריקת QR</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setScanMode('ocr');
+                        resetOcrStatus();
+                      }}
+                      className={`flex-1 py-1.5 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                        scanMode === 'ocr'
+                          ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-500/50'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>סריקת OCR</span>
+                    </button>
+                  </div>
+
                   <div
                     onClick={() => void handleTapToWake()}
                     className="relative w-full aspect-[4/3] max-w-sm mx-auto bg-black rounded-2xl overflow-hidden border border-slate-800 shadow-inner flex items-center justify-center cursor-pointer select-none"
@@ -796,43 +833,76 @@ export default function ManualCheckinModal({
                       className="w-full h-full object-cover"
                     />
 
-                    {/* Laser-Strip ROI Target Box: middle 75% width, middle 30% height */}
-                    <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                      <div
-                        className={`w-[75%] h-[30%] min-h-[75px] max-h-[120px] relative rounded-2xl flex items-center justify-center transition-all duration-150 ${
-                          ocrMatchedTag
-                            ? 'border-4 border-emerald-400 bg-emerald-500/30 shadow-[0_0_40px_rgba(16,185,129,0.9)] scale-102'
-                            : 'border-2 border-emerald-400/60 bg-emerald-950/10'
-                        }`}
-                      >
-                        {/* 4 Precision Corner Guides */}
-                        <div className="absolute top-0 left-0 w-4 h-4 border-t-3 border-l-3 border-emerald-400 rounded-tl-lg" />
-                        <div className="absolute top-0 right-0 w-4 h-4 border-t-3 border-r-3 border-emerald-400 rounded-tr-lg" />
-                        <div className="absolute bottom-0 left-0 w-4 h-4 border-b-3 border-l-3 border-emerald-400 rounded-bl-lg" />
-                        <div className="absolute bottom-0 right-0 w-4 h-4 border-b-3 border-r-3 border-emerald-400 rounded-br-lg" />
+                    {scanMode === 'qr' ? (
+                      /* QR Viewfinder (Square 2D Framing) */
+                      <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                        <div
+                          className={`w-[68%] aspect-square max-w-[220px] relative rounded-3xl flex items-center justify-center transition-all duration-200 ${
+                            ocrMatchedTag
+                              ? 'border-4 border-blue-400 bg-blue-500/20 shadow-[0_0_35px_rgba(59,130,246,0.8)] scale-[1.02]'
+                              : 'border-2 border-white/50 bg-white/[0.02]'
+                          }`}
+                        >
+                          {/* 4 Precision Corner Brackets */}
+                          <div className="absolute top-0 left-0 w-5 h-5 border-t-3 border-l-3 border-blue-400 rounded-tl-xl" />
+                          <div className="absolute top-0 right-0 w-5 h-5 border-t-3 border-r-3 border-blue-400 rounded-tr-xl" />
+                          <div className="absolute bottom-0 left-0 w-5 h-5 border-b-3 border-l-3 border-blue-400 rounded-bl-xl" />
+                          <div className="absolute bottom-0 right-0 w-5 h-5 border-b-3 border-r-3 border-blue-400 rounded-br-xl" />
 
-                        {/* Continuous Pulsing Laser Line Centered in Strip */}
-                        <div className="absolute inset-x-2 h-0.5 bg-emerald-400 shadow-[0_0_12px_#10b981] animate-pulse" />
-
-                        {ocrMatchedTag && (
-                          <div className="flex flex-col items-center justify-center text-center animate-in zoom-in-95 duration-150 z-10">
-                            <CheckCircle2 className="w-8 h-8 text-emerald-400 mb-0.5 drop-shadow-md" />
-                            <span className="font-mono text-sm font-black text-white tracking-widest drop-shadow-md" dir="ltr">
-                              {ocrMatchedTag}
-                            </span>
-                            <span className="text-[10px] font-bold text-emerald-300">פותח כלי...</span>
-                          </div>
-                        )}
+                          {ocrMatchedTag ? (
+                            <div className="flex flex-col items-center justify-center text-center animate-in zoom-in-95 duration-150 z-10">
+                              <CheckCircle2 className="w-9 h-9 text-blue-400 mb-1 drop-shadow-md" />
+                              <span className="font-mono text-sm font-black text-white tracking-widest drop-shadow-md" dir="ltr">
+                                {ocrMatchedTag}
+                              </span>
+                              <span className="text-[10px] font-bold text-blue-300">פותח כלי...</span>
+                            </div>
+                          ) : (
+                            <div className="absolute inset-x-2 h-0.5 bg-gradient-to-r from-transparent via-blue-400 to-transparent shadow-[0_0_10px_#60a5fa] animate-[bounce_2s_infinite]" />
+                          )}
+                        </div>
                       </div>
-                    </div>
+                    ) : (
+                      /* Laser-Strip ROI Target Box: middle 75% width, middle 30% height */
+                      <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                        <div
+                          className={`w-[75%] h-[30%] min-h-[75px] max-h-[120px] relative rounded-2xl flex items-center justify-center transition-all duration-150 ${
+                            ocrMatchedTag
+                              ? 'border-4 border-emerald-400 bg-emerald-500/30 shadow-[0_0_40px_rgba(16,185,129,0.9)] scale-102'
+                              : 'border-2 border-emerald-400/60 bg-emerald-950/10'
+                          }`}
+                        >
+                          {/* 4 Precision Corner Guides */}
+                          <div className="absolute top-0 left-0 w-4 h-4 border-t-3 border-l-3 border-emerald-400 rounded-tl-lg" />
+                          <div className="absolute top-0 right-0 w-4 h-4 border-t-3 border-r-3 border-emerald-400 rounded-tr-lg" />
+                          <div className="absolute bottom-0 left-0 w-4 h-4 border-b-3 border-l-3 border-emerald-400 rounded-bl-lg" />
+                          <div className="absolute bottom-0 right-0 w-4 h-4 border-b-3 border-r-3 border-emerald-400 rounded-br-lg" />
 
-                    {/* Live On-Screen OCR Status Pill inside bottom of camera viewfinder */}
+                          {/* Continuous Pulsing Laser Line Centered in Strip */}
+                          <div className="absolute inset-x-2 h-0.5 bg-emerald-400 shadow-[0_0_12px_#10b981] animate-pulse" />
+
+                          {ocrMatchedTag && (
+                            <div className="flex flex-col items-center justify-center text-center animate-in zoom-in-95 duration-150 z-10">
+                              <CheckCircle2 className="w-8 h-8 text-emerald-400 mb-0.5 drop-shadow-md" />
+                              <span className="font-mono text-sm font-black text-white tracking-widest drop-shadow-md" dir="ltr">
+                                {ocrMatchedTag}
+                              </span>
+                              <span className="text-[10px] font-bold text-emerald-300">פותח כלי...</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Live On-Screen Status Pill inside bottom of camera viewfinder */}
                     <div className="absolute bottom-14 inset-x-0 flex justify-center items-center pointer-events-none z-20 px-3">
                       <div
                         className={`px-3.5 py-1.5 rounded-full backdrop-blur-md border text-xs font-bold flex items-center gap-2 shadow-lg transition-all duration-200 max-w-[92%] truncate ${
                           ocrMatchedTag
-                            ? 'bg-emerald-950/90 border-emerald-400 text-white shadow-[0_0_20px_rgba(16,185,129,0.7)] animate-pulse'
-                            : lastRawOcrText
+                            ? scanMode === 'qr'
+                              ? 'bg-blue-950/90 border-blue-400 text-white shadow-[0_0_20px_rgba(59,130,246,0.7)] animate-pulse'
+                              : 'bg-emerald-950/90 border-emerald-400 text-white shadow-[0_0_20px_rgba(16,185,129,0.7)] animate-pulse'
+                            : scanMode === 'ocr' && lastRawOcrText
                             ? 'bg-slate-950/90 border-amber-500/60 text-amber-200'
                             : 'bg-black/80 border-white/20 text-slate-200'
                         }`}
@@ -841,10 +911,15 @@ export default function ManualCheckinModal({
                           <span className="flex items-center gap-1.5 text-emerald-300 font-black">
                             <span>✅ זוהה: {ocrMatchedTag} - פותח כלי!</span>
                           </span>
-                        ) : lastRawOcrText ? (
+                        ) : scanMode === 'ocr' && lastRawOcrText ? (
                           <span className="flex items-center gap-1.5 font-mono text-[11px]">
                             <span className="text-amber-400">👁️ נקרא:</span>
                             <span className="text-white font-bold tracking-wider">{lastRawOcrText}</span>
+                          </span>
+                        ) : scanMode === 'qr' ? (
+                          <span className="flex items-center gap-1.5 text-[11px] text-blue-300 font-bold">
+                            <span className="w-2 h-2 rounded-full bg-blue-400 animate-ping inline-block" />
+                            <span>🔍 סורק קוד QR או ברקוד...</span>
                           </span>
                         ) : (
                           <span className="flex items-center gap-1.5 text-[11px] text-emerald-300 font-bold">

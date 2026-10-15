@@ -25,6 +25,7 @@ import {
   PackagePlus,
   Radio,
   Barcode,
+  Sparkles,
 } from 'lucide-react';
 import type { Category, Warehouse, AssetCondition } from '@/types/domain';
 import {
@@ -140,6 +141,7 @@ export default function QuickOnboardView({
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [candidateTag, setCandidateTag] = useState<string | null>(null);
   const [isTargetLocked, setIsTargetLocked] = useState<boolean>(false);
+  const [scanMode, setScanMode] = useState<'qr' | 'ocr'>('qr');
 
   // Silent Background OCR Hook
   const {
@@ -196,7 +198,7 @@ export default function QuickOnboardView({
   } = useLaserStripOcr({
     videoRef,
     isActive: scannerActive && !showOnboardForm,
-    isPaused: Boolean(qrCode || isModalOpen || isPassportOpen || isDebounceLockedRef.current || isPausedRef.current),
+    isPaused: scanMode !== 'ocr' || Boolean(qrCode || isModalOpen || isPassportOpen || isDebounceLockedRef.current || isPausedRef.current),
     organizationId: currentOrganization?.id,
     onTagDetected: async (tag) => {
       setManualQrInput(tag);
@@ -694,7 +696,7 @@ export default function QuickOnboardView({
             }
           }
         })
-        .catch(() => {})
+        .catch(() => { })
         .finally(() => {
           isBarcodeBusyRef.current = false;
         });
@@ -712,7 +714,7 @@ export default function QuickOnboardView({
             }
           }
         })
-        .catch(() => {})
+        .catch(() => { })
         .finally(() => {
           isOcrBusyRef.current = false;
         });
@@ -781,7 +783,7 @@ export default function QuickOnboardView({
     };
   }, [scannerActive, showOnboardForm, startCamera, stopScanner, terminateOcr]);
 
-  // Background Dual-Engine Cadence: 700ms
+  // Background Dual-Engine Cadence: 180ms in QR mode (instantaneous snap), 500ms in OCR mode
   useEffect(() => {
     if (!scannerActive || qrCode || showOnboardForm || isModalOpen || isPassportOpen) {
       if (scanIntervalRef.current) {
@@ -791,9 +793,10 @@ export default function QuickOnboardView({
       return;
     }
 
+    const intervalMs = scanMode === 'qr' ? 180 : 500;
     scanIntervalRef.current = setInterval(() => {
       void performDualScanCycle();
-    }, 700);
+    }, intervalMs);
 
     return () => {
       if (scanIntervalRef.current) {
@@ -801,7 +804,7 @@ export default function QuickOnboardView({
         scanIntervalRef.current = null;
       }
     };
-  }, [scannerActive, qrCode, showOnboardForm, isModalOpen, isPassportOpen, performDualScanCycle]);
+  }, [scannerActive, qrCode, showOnboardForm, isModalOpen, isPassportOpen, scanMode, performDualScanCycle]);
 
   // Stream Watchdog: Revives dead or ended camera stream every 1000ms
   useEffect(() => {
@@ -830,7 +833,7 @@ export default function QuickOnboardView({
         console.warn('[Watchdog] QuickOnboard camera stream ended or missing, reviving...');
         void startCamera();
       } else if (videoPaused) {
-        void videoRef.current?.play().catch(() => {});
+        void videoRef.current?.play().catch(() => { });
       }
     }, 1000);
 
@@ -1039,11 +1042,10 @@ export default function QuickOnboardView({
                 value={selectedWarehouseId}
                 disabled={isStorekeeperScoped}
                 onChange={(e) => setSelectedWarehouseId(e.target.value)}
-                className={`w-full h-8 text-[11px] font-black px-2 pr-5 rounded-lg border focus:outline-none appearance-none truncate transition-colors ${
-                  isStorekeeperScoped
+                className={`w-full h-8 text-[11px] font-black px-2 pr-5 rounded-lg border focus:outline-none appearance-none truncate transition-colors ${isStorekeeperScoped
                     ? 'bg-slate-100 border-slate-300 text-slate-700 cursor-not-allowed'
                     : 'bg-blue-50/80 border-blue-200 text-blue-950 focus:border-blue-600 cursor-pointer shadow-2xs'
-                }`}
+                  }`}
                 title="אתר / מחסן פעיל"
               >
                 {warehouses.map((wh) => (
@@ -1079,11 +1081,10 @@ export default function QuickOnboardView({
                 value={selectedWarehouseId}
                 disabled={isStorekeeperScoped}
                 onChange={(e) => setSelectedWarehouseId(e.target.value)}
-                className={`w-full min-h-[56px] bg-white text-blue-950 font-bold text-base px-4 py-3 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none appearance-none transition-colors shadow-sm ${
-                  isStorekeeperScoped
+                className={`w-full min-h-[56px] bg-white text-blue-950 font-bold text-base px-4 py-3 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none appearance-none transition-colors shadow-sm ${isStorekeeperScoped
                     ? 'cursor-not-allowed bg-slate-100 text-slate-700 border-slate-300 opacity-90'
                     : 'cursor-pointer'
-                }`}
+                  }`}
               >
                 {warehouses.length > 0 ? (
                   warehouses.map((wh) => (
@@ -1166,17 +1167,15 @@ export default function QuickOnboardView({
                 <button
                   type="button"
                   onClick={() => setIsRapidDispatchMode(!isRapidDispatchMode)}
-                  className={`px-2.5 py-1.5 rounded-lg text-xs font-black transition-all border flex items-center gap-1.5 cursor-pointer ${
-                    isRapidDispatchMode
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-black transition-all border flex items-center gap-1.5 cursor-pointer ${isRapidDispatchMode
                       ? 'bg-amber-100 text-amber-950 border-amber-400 shadow-sm'
                       : 'bg-slate-50 text-slate-600 border-slate-200 hover:border-blue-300'
-                  }`}
+                    }`}
                   title="תפעול מצב סריקה מהירה לסל ניפוק"
                 >
                   <Zap
-                    className={`w-3.5 h-3.5 ${
-                      isRapidDispatchMode ? 'text-amber-600 fill-amber-500' : 'text-slate-400'
-                    }`}
+                    className={`w-3.5 h-3.5 ${isRapidDispatchMode ? 'text-amber-600 fill-amber-500' : 'text-slate-400'
+                      }`}
                   />
                   <span>{isRapidDispatchMode ? 'ניפוק מהיר: פעיל' : 'ניפוק מרוכז'}</span>
                 </button>
@@ -1249,31 +1248,31 @@ export default function QuickOnboardView({
                   {(scannedRegisteredAsset.isLocked ||
                     (scannedRegisteredAsset.safetyInspectionDue &&
                       new Date(scannedRegisteredAsset.safetyInspectionDue).getTime() <
-                        new Date().getTime()) ||
+                      new Date().getTime()) ||
                     scannedRegisteredAsset.reservation) && (
-                    <div className="flex flex-wrap gap-1.5 pt-1">
-                      {scannedRegisteredAsset.isLocked && (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded bg-red-100 text-red-800 border border-red-300">
-                          <Lock className="w-3 h-3 text-red-600" />
-                          כלי נעול מנהלתית
-                        </span>
-                      )}
-                      {scannedRegisteredAsset.safetyInspectionDue &&
-                        new Date(scannedRegisteredAsset.safetyInspectionDue).getTime() <
-                          new Date().getTime() && (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-300">
-                            <AlertTriangle className="w-3 h-3 text-rose-600" />
-                            בדיקת בטיחות פגה
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {scannedRegisteredAsset.isLocked && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded bg-red-100 text-red-800 border border-red-300">
+                            <Lock className="w-3 h-3 text-red-600" />
+                            כלי נעול מנהלתית
                           </span>
                         )}
-                      {scannedRegisteredAsset.reservation && (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300">
-                          <BookmarkCheck className="w-3 h-3 text-amber-600" />
-                          משוריין: {scannedRegisteredAsset.reservation.projectName}
-                        </span>
-                      )}
-                    </div>
-                  )}
+                        {scannedRegisteredAsset.safetyInspectionDue &&
+                          new Date(scannedRegisteredAsset.safetyInspectionDue).getTime() <
+                          new Date().getTime() && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-300">
+                              <AlertTriangle className="w-3 h-3 text-rose-600" />
+                              בדיקת בטיחות פגה
+                            </span>
+                          )}
+                        {scannedRegisteredAsset.reservation && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300">
+                            <BookmarkCheck className="w-3 h-3 text-amber-600" />
+                            משוריין: {scannedRegisteredAsset.reservation.projectName}
+                          </span>
+                        )}
+                      </div>
+                    )}
 
                   <div className="pt-2 border-t border-blue-200 flex flex-wrap gap-2">
                     <button
@@ -1349,8 +1348,42 @@ export default function QuickOnboardView({
               )}
             </div>
           ) : (
-            /* CAMERA VIEWFINDER & SCAN BOX */
-            <div className="space-y-3">
+            <div className="space-y-2">
+              {/* CAMERA VIEWFINDER & SCAN BOX */}
+              {/* Scan Mode Segmented Switch: QR vs OCR */}
+              <div className="flex items-center justify-center p-1 bg-slate-900/90 backdrop-blur-md rounded-2xl border border-white/10 shadow-md max-w-xs mx-auto">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setScanMode('qr');
+                    resetOcrStatus();
+                  }}
+                  className={`flex-1 py-1.5 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    scanMode === 'qr'
+                      ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/50'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <QrCode className="w-3.5 h-3.5" />
+                  <span>סריקת QR</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setScanMode('ocr');
+                    resetOcrStatus();
+                  }}
+                  className={`flex-1 py-1.5 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    scanMode === 'ocr'
+                      ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-500/50'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>סריקת OCR</span>
+                </button>
+              </div>
+
               <div
                 onClick={() => void handleTapToWake()}
                 className="relative bg-black aspect-[4/3] sm:aspect-[1/1] max-h-[380px] rounded-2xl overflow-hidden flex items-center justify-center shadow-inner cursor-pointer select-none"
@@ -1362,60 +1395,103 @@ export default function QuickOnboardView({
                   muted
                   autoPlay
                   onLoadedMetadata={() => {
-                    void videoRef.current?.play().catch(() => {});
+                    void videoRef.current?.play().catch(() => { });
                   }}
                   className="w-full h-full object-cover"
                 />
 
-                {/* Laser-Strip ROI Target Box: middle 75% width, middle 30% height */}
-                <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                  <div
-                    className={`w-[75%] h-[30%] min-h-[75px] max-h-[120px] relative rounded-2xl flex items-center justify-center transition-all duration-150 ${
-                      ocrMatchedTag || isTargetLocked || candidateTag
-                        ? 'border-4 border-emerald-400 bg-emerald-500/30 shadow-[0_0_40px_rgba(16,185,129,0.9)] scale-102'
-                        : 'border-2 border-emerald-400/60 bg-emerald-950/10'
-                    }`}
-                  >
-                    {/* 4 Precision Corner Guides */}
-                    <div className="absolute top-0 left-0 w-4 h-4 border-t-3 border-l-3 border-emerald-400 rounded-tl-lg" />
-                    <div className="absolute top-0 right-0 w-4 h-4 border-t-3 border-r-3 border-emerald-400 rounded-tr-lg" />
-                    <div className="absolute bottom-0 left-0 w-4 h-4 border-b-3 border-l-3 border-emerald-400 rounded-bl-lg" />
-                    <div className="absolute bottom-0 right-0 w-4 h-4 border-b-3 border-r-3 border-emerald-400 rounded-br-lg" />
+                {scanMode === 'qr' ? (
+                  /* ======================================================== */
+                  /* QR / BARCODE VIEWFINDER OVERLAY (Square 2D Framing)      */
+                  /* ======================================================== */
+                  <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                    <div
+                      className={`w-[68%] aspect-square max-w-[240px] relative rounded-3xl flex items-center justify-center transition-all duration-200 ${
+                        isTargetLocked || candidateTag
+                          ? 'border-4 border-blue-400 bg-blue-500/20 shadow-[0_0_35px_rgba(59,130,246,0.8)] scale-[1.02]'
+                          : 'border-2 border-white/50 bg-white/[0.02]'
+                      }`}
+                    >
+                      {/* 4 Precision Corner Brackets */}
+                      <div className="absolute top-0 left-0 w-5 h-5 border-t-3 border-l-3 border-blue-400 rounded-tl-xl" />
+                      <div className="absolute top-0 right-0 w-5 h-5 border-t-3 border-r-3 border-blue-400 rounded-tr-xl" />
+                      <div className="absolute bottom-0 left-0 w-5 h-5 border-b-3 border-l-3 border-blue-400 rounded-bl-xl" />
+                      <div className="absolute bottom-0 right-0 w-5 h-5 border-b-3 border-r-3 border-blue-400 rounded-br-xl" />
 
-                    {/* Continuous Pulsing Laser Line Centered in Strip */}
-                    <div className="absolute inset-x-2 h-0.5 bg-emerald-400 shadow-[0_0_12px_#10b981] animate-pulse" />
-
-                    {(ocrMatchedTag || isTargetLocked || candidateTag) && (
-                      <div className="flex flex-col items-center justify-center text-center animate-in zoom-in-95 duration-150 z-10">
-                        <CheckCircle2 className="w-8 h-8 text-emerald-400 mb-0.5 drop-shadow-md" />
-                        <span className="font-mono text-sm font-black text-white tracking-widest drop-shadow-md" dir="ltr">
-                          {ocrMatchedTag || candidateTag}
-                        </span>
-                        <span className="text-[10px] font-bold text-emerald-300">פותח כלי...</span>
-                      </div>
-                    )}
+                      {/* Sweeping Laser Line for QR */}
+                      {isTargetLocked || candidateTag ? (
+                        <div className="flex flex-col items-center justify-center text-center animate-in zoom-in-95 duration-150 z-10">
+                          <CheckCircle2 className="w-9 h-9 text-blue-400 mb-1 drop-shadow-md" />
+                          <span className="font-mono text-sm font-black text-white tracking-widest drop-shadow-md" dir="ltr">
+                            {candidateTag}
+                          </span>
+                          <span className="text-[10px] font-bold text-blue-300">פותח כלי...</span>
+                        </div>
+                      ) : (
+                        <div className="absolute inset-x-2 h-0.5 bg-gradient-to-r from-transparent via-blue-400 to-transparent shadow-[0_0_10px_#60a5fa] animate-[bounce_2s_infinite]" />
+                      )}
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  /* ======================================================== */
+                  /* OCR LASER-STRIP VIEWFINDER OVERLAY (Horizontal Strip)    */
+                  /* ======================================================== */
+                  <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                    <div
+                      className={`w-[75%] h-[30%] min-h-[75px] max-h-[120px] relative rounded-2xl flex items-center justify-center transition-all duration-150 ${
+                        ocrMatchedTag || isTargetLocked || candidateTag
+                          ? 'border-4 border-emerald-400 bg-emerald-500/30 shadow-[0_0_40px_rgba(16,185,129,0.9)] scale-102'
+                          : 'border-2 border-emerald-400/60 bg-emerald-950/10'
+                      }`}
+                    >
+                      {/* 4 Precision Corner Guides */}
+                      <div className="absolute top-0 left-0 w-4 h-4 border-t-3 border-l-3 border-emerald-400 rounded-tl-lg" />
+                      <div className="absolute top-0 right-0 w-4 h-4 border-t-3 border-r-3 border-emerald-400 rounded-tr-lg" />
+                      <div className="absolute bottom-0 left-0 w-4 h-4 border-b-3 border-l-3 border-emerald-400 rounded-bl-lg" />
+                      <div className="absolute bottom-0 right-0 w-4 h-4 border-b-3 border-r-3 border-emerald-400 rounded-br-lg" />
 
-                {/* Live On-Screen OCR Status Pill inside bottom of camera viewfinder */}
+                      {/* Continuous Pulsing Laser Line Centered in Strip */}
+                      <div className="absolute inset-x-2 h-0.5 bg-emerald-400 shadow-[0_0_12px_#10b981] animate-pulse" />
+
+                      {(ocrMatchedTag || isTargetLocked || candidateTag) && (
+                        <div className="flex flex-col items-center justify-center text-center animate-in zoom-in-95 duration-150 z-10">
+                          <CheckCircle2 className="w-8 h-8 text-emerald-400 mb-0.5 drop-shadow-md" />
+                          <span className="font-mono text-sm font-black text-white tracking-widest drop-shadow-md" dir="ltr">
+                            {ocrMatchedTag || candidateTag}
+                          </span>
+                          <span className="text-[10px] font-bold text-emerald-300">פותח כלי...</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Live On-Screen Status Pill inside bottom of camera viewfinder */}
                 <div className="absolute bottom-16 inset-x-0 flex justify-center items-center pointer-events-none z-20 px-3">
                   <div
                     className={`px-3.5 py-1.5 rounded-full backdrop-blur-md border text-xs font-bold flex items-center gap-2 shadow-lg transition-all duration-200 max-w-[92%] truncate ${
-                      ocrMatchedTag || candidateTag
-                        ? 'bg-emerald-950/90 border-emerald-400 text-white shadow-[0_0_20px_rgba(16,185,129,0.7)] animate-pulse'
-                        : lastRawOcrText
+                      candidateTag || ocrMatchedTag
+                        ? scanMode === 'qr'
+                          ? 'bg-blue-950/90 border-blue-400 text-white shadow-[0_0_20px_rgba(59,130,246,0.7)] animate-pulse'
+                          : 'bg-emerald-950/90 border-emerald-400 text-white shadow-[0_0_20px_rgba(16,185,129,0.7)] animate-pulse'
+                        : scanMode === 'ocr' && lastRawOcrText
                         ? 'bg-slate-950/90 border-amber-500/60 text-amber-200'
                         : 'bg-black/80 border-white/20 text-slate-200'
                     }`}
                   >
-                    {ocrMatchedTag || candidateTag ? (
-                      <span className="flex items-center gap-1.5 text-emerald-300 font-black">
-                        <span>✅ זוהה: {ocrMatchedTag || candidateTag} - פותח כלי!</span>
+                    {candidateTag || ocrMatchedTag ? (
+                      <span className="flex items-center gap-1.5 font-black text-emerald-300">
+                        <span>✅ זוהה: {candidateTag || ocrMatchedTag} - פותח כלי!</span>
                       </span>
-                    ) : lastRawOcrText ? (
+                    ) : scanMode === 'ocr' && lastRawOcrText ? (
                       <span className="flex items-center gap-1.5 font-mono text-[11px]">
                         <span className="text-amber-400">👁️ נקרא:</span>
                         <span className="text-white font-bold tracking-wider">{lastRawOcrText}</span>
+                      </span>
+                    ) : scanMode === 'qr' ? (
+                      <span className="flex items-center gap-1.5 text-[11px] text-blue-300 font-bold">
+                        <span className="w-2 h-2 rounded-full bg-blue-400 animate-ping inline-block" />
+                        <span>🔍 סורק קוד QR או ברקוד...</span>
                       </span>
                     ) : (
                       <span className="flex items-center gap-1.5 text-[11px] text-emerald-300 font-bold">
@@ -1434,11 +1510,10 @@ export default function QuickOnboardView({
                       <button
                         type="button"
                         onClick={handleToggleTorch}
-                        className={`w-10 h-10 rounded-full flex items-center justify-center backdrop-blur-md border shadow-lg transition-all cursor-pointer ${
-                          torchEnabled
+                        className={`w-10 h-10 rounded-full flex items-center justify-center backdrop-blur-md border shadow-lg transition-all cursor-pointer ${torchEnabled
                             ? 'bg-amber-500 text-slate-950 border-amber-300 shadow-amber-500/40'
                             : 'bg-black/50 text-white border-white/20 hover:bg-black/70'
-                        }`}
+                          }`}
                         title={torchEnabled ? 'כיבוי פנס' : 'הפעל פנס'}
                       >
                         {torchEnabled ? (
@@ -1705,11 +1780,10 @@ export default function QuickOnboardView({
                     }
                   }}
                   placeholder="לדוגמה: ZR-1099 או סרוק ברקוד יצרן"
-                  className={`w-full min-h-[56px] bg-white text-blue-950 font-mono font-bold text-base px-4 rounded-xl border-2 transition-colors placeholder:text-slate-400 shadow-sm ${
-                    qrWarning
+                  className={`w-full min-h-[56px] bg-white text-blue-950 font-mono font-bold text-base px-4 rounded-xl border-2 transition-colors placeholder:text-slate-400 shadow-sm ${qrWarning
                       ? 'border-amber-400 focus:border-amber-600'
                       : 'border-blue-200 focus:border-blue-600'
-                  } focus:outline-none`}
+                    } focus:outline-none`}
                   dir="ltr"
                 />
               </div>
@@ -1746,11 +1820,10 @@ export default function QuickOnboardView({
                       key={cat.id}
                       type="button"
                       onClick={() => setSelectedCategoryId(cat.id)}
-                      className={`min-h-[56px] px-3 py-2 rounded-xl text-sm font-black transition-all flex items-center justify-center text-center border-2 cursor-pointer ${
-                        isSelected
+                      className={`min-h-[56px] px-3 py-2 rounded-xl text-sm font-black transition-all flex items-center justify-center text-center border-2 cursor-pointer ${isSelected
                           ? 'bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-600/20 scale-[1.02]'
                           : 'bg-slate-50 text-blue-950 border-slate-200 hover:border-blue-300 hover:bg-blue-50/50 active:bg-blue-100'
-                      }`}
+                        }`}
                     >
                       {cat.name}
                     </button>
@@ -1787,11 +1860,10 @@ export default function QuickOnboardView({
                     key={b}
                     type="button"
                     onClick={() => setBrand(b)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
-                      brand.toLowerCase() === b.toLowerCase()
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${brand.toLowerCase() === b.toLowerCase()
                         ? 'bg-blue-600 text-white border-blue-600 font-black shadow-sm'
                         : 'bg-slate-50 text-blue-900 border-slate-200 hover:border-blue-300'
-                    }`}
+                      }`}
                   >
                     {b}
                   </button>
@@ -1869,11 +1941,10 @@ export default function QuickOnboardView({
                       key={cond.value}
                       type="button"
                       onClick={() => setCondition(cond.value)}
-                      className={`min-h-[56px] px-2 rounded-xl text-xs sm:text-sm font-black transition-all border-2 flex items-center justify-center text-center cursor-pointer ${
-                        isSelected
+                      className={`min-h-[56px] px-2 rounded-xl text-xs sm:text-sm font-black transition-all border-2 flex items-center justify-center text-center cursor-pointer ${isSelected
                           ? 'bg-blue-600 text-white border-blue-600 shadow-md'
                           : 'bg-slate-50 text-blue-900 border-slate-200 hover:border-blue-300'
-                      }`}
+                        }`}
                     >
                       {cond.label}
                     </button>
@@ -1942,13 +2013,12 @@ export default function QuickOnboardView({
               type="button"
               onClick={handleSubmitAndNext}
               disabled={isSubmitting || Boolean(qrWarning) || !qrCode}
-              className={`w-full min-h-[64px] rounded-xl font-black text-lg uppercase tracking-wider flex items-center justify-center gap-3 shadow-xl transition-all active:scale-[0.98] cursor-pointer ${
-                !qrCode || Boolean(qrWarning)
+              className={`w-full min-h-[64px] rounded-xl font-black text-lg uppercase tracking-wider flex items-center justify-center gap-3 shadow-xl transition-all active:scale-[0.98] cursor-pointer ${!qrCode || Boolean(qrWarning)
                   ? 'bg-slate-100 text-slate-400 border-2 border-slate-200 cursor-not-allowed'
                   : isSubmitting
-                  ? 'bg-blue-400 text-white cursor-wait'
-                  : 'bg-blue-600 hover:bg-blue-700 text-white border-2 border-blue-600 shadow-blue-600/25'
-              }`}
+                    ? 'bg-blue-400 text-white cursor-wait'
+                    : 'bg-blue-600 hover:bg-blue-700 text-white border-2 border-blue-600 shadow-blue-600/25'
+                }`}
             >
               {isSubmitting ? (
                 <>

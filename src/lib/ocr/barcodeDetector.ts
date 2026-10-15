@@ -37,12 +37,32 @@ async function getNativeDetector(): Promise<NativeBarcodeDetectorInstance | null
     try {
       const BD = (
         window as unknown as {
-          BarcodeDetector: new (opts: { formats: string[] }) => NativeBarcodeDetectorInstance;
+          BarcodeDetector: {
+            new (opts: { formats: string[] }): NativeBarcodeDetectorInstance;
+            getSupportedFormats?: () => Promise<string[]>;
+          };
         }
       ).BarcodeDetector;
 
+      let formatsToUse = ['qr_code', 'code_128', 'code_39', 'ean_13', 'data_matrix'];
+      if (typeof BD.getSupportedFormats === 'function') {
+        try {
+          const supported = await BD.getSupportedFormats();
+          if (Array.isArray(supported) && supported.length > 0) {
+            const filtered = supported.filter((f) =>
+              ['qr_code', 'code_128', 'code_39', 'ean_13', 'data_matrix', 'upc_a', 'upc_e', 'itf'].includes(f)
+            );
+            if (filtered.length > 0) {
+              formatsToUse = filtered;
+            }
+          }
+        } catch {
+          // fallback
+        }
+      }
+
       nativeDetectorInstance = new BD({
-        formats: ['qr_code'],
+        formats: formatsToUse,
       });
       return nativeDetectorInstance;
     } catch (err) {
@@ -55,7 +75,7 @@ async function getNativeDetector(): Promise<NativeBarcodeDetectorInstance | null
 
 /**
  * Fallback software decoder using ZXing from html5-qrcode for Safari / Firefox.
- * Restricts decoding exclusively to QR Codes.
+ * Supports QR Codes, Code 128, Code 39, and EAN-13.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function getZxingDecoder(): Promise<any> {
@@ -70,6 +90,10 @@ async function getZxingDecoder(): Promise<any> {
     );
     const formats = [
       Html5QrcodeSupportedFormats.QR_CODE,
+      Html5QrcodeSupportedFormats.CODE_128,
+      Html5QrcodeSupportedFormats.CODE_39,
+      Html5QrcodeSupportedFormats.EAN_13,
+      Html5QrcodeSupportedFormats.DATA_MATRIX,
     ];
 
     zxingDecoderInstance = new ZXingHtml5QrcodeDecoder(formats, false, {
