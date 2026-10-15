@@ -27,6 +27,7 @@ import {
 } from '@/app/actions/organizations';
 import { detectBarcodeOrQr, extractTagFromBarcodePayload } from '@/lib/ocr/barcodeDetector';
 import { playOcrBeep, triggerOcrHaptic } from '@/lib/ocr/tagParser';
+import { useLaserStripOcr } from '@/lib/ocr/useLaserStripOcr';
 
 interface MasterScanModalProps {
   isOpen: boolean;
@@ -46,6 +47,7 @@ export default function MasterScanModal({ isOpen, onClose }: MasterScanModalProp
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const scanIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const resetOcrStatusRef = useRef<(() => void) | null>(null);
 
   // Search execution
   const executeLookup = useCallback(async (searchQuery: string) => {
@@ -111,8 +113,29 @@ export default function MasterScanModal({ isOpen, onClose }: MasterScanModalProp
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
+    resetOcrStatusRef.current?.();
     setIsCameraActive(false);
   }, []);
+
+  // High-Speed Laser-Strip OCR Scanner Hook (450ms Persistent Tesseract + 2.5s Cloud Fallback)
+  const {
+    lastRawOcrText,
+    ocrMatchedTag,
+    resetOcrStatus,
+  } = useLaserStripOcr({
+    videoRef,
+    isActive: isCameraActive && isOpen,
+    isPaused: !isCameraActive || !isOpen,
+    onTagDetected: async (tag) => {
+      setQuery(tag);
+      stopCamera();
+      void executeLookup(tag);
+    },
+  });
+
+  useEffect(() => {
+    resetOcrStatusRef.current = resetOcrStatus;
+  }, [resetOcrStatus]);
 
   // Start Camera
   const startCamera = useCallback(async () => {
@@ -133,7 +156,7 @@ export default function MasterScanModal({ isOpen, onClose }: MasterScanModalProp
       }
       setIsCameraActive(true);
 
-      // Start continuous detection interval
+      // Start continuous detection interval for Barcode / QR
       scanIntervalRef.current = setInterval(async () => {
         if (!videoRef.current) return;
         try {
@@ -145,6 +168,7 @@ export default function MasterScanModal({ isOpen, onClose }: MasterScanModalProp
             triggerOcrHaptic(50);
             setQuery(parsedTag);
             stopCamera();
+            void executeLookup(parsedTag);
           }
         } catch {
           // ignore frame scan frame errors
@@ -154,7 +178,7 @@ export default function MasterScanModal({ isOpen, onClose }: MasterScanModalProp
       setCameraError('לא ניתן לגשת למצלמה. בדוק הרשאות.');
       console.warn('[MasterScanModal] Camera init error:', err);
     }
-  }, [stopCamera]);
+  }, [stopCamera, executeLookup]);
 
   // Clean up camera on unmount or close
   useEffect(() => {
@@ -291,22 +315,81 @@ export default function MasterScanModal({ isOpen, onClose }: MasterScanModalProp
 
           {/* Camera Viewport Drawer */}
           {isCameraActive && (
-            <div className="relative rounded-2xl overflow-hidden border border-purple-500/50 bg-black aspect-video max-h-56 flex items-center justify-center shadow-lg">
+            <div className="relative rounded-2xl overflow-hidden border border-emerald-500/50 bg-black aspect-video max-h-56 flex items-center justify-center shadow-lg">
               <video
                 ref={videoRef}
                 playsInline
                 muted
+                autoPlay
+                onLoadedMetadata={() => {
+                  void videoRef.current?.play().catch(() => {});
+                }}
                 className="w-full h-full object-cover"
               />
-              <div className="absolute inset-0 border-2 border-purple-400/40 rounded-2xl pointer-events-none flex items-center justify-center">
-                <div className="w-48 h-32 border-2 border-dashed border-purple-300 rounded-xl animate-pulse flex items-center justify-center text-[10px] text-purple-200 bg-purple-950/20 font-bold">
-                  כוון למדבקת ברקוד או QR
+
+              {/* Laser-Strip ROI Target Box: middle 75% width, middle 30% height */}
+              <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                <div
+                  className={`w-[75%] h-[35%] min-h-[65px] max-h-[110px] relative rounded-2xl flex items-center justify-center transition-all duration-150 ${
+                    ocrMatchedTag
+                      ? 'border-4 border-emerald-400 bg-emerald-500/30 shadow-[0_0_40px_rgba(16,185,129,0.9)] scale-102'
+                      : 'border-2 border-emerald-400/60 bg-emerald-950/10'
+                  }`}
+                >
+                  {/* 4 Precision Corner Guides */}
+                  <div className="absolute top-0 left-0 w-4 h-4 border-t-3 border-l-3 border-emerald-400 rounded-tl-lg" />
+                  <div className="absolute top-0 right-0 w-4 h-4 border-t-3 border-r-3 border-emerald-400 rounded-tr-lg" />
+                  <div className="absolute bottom-0 left-0 w-4 h-4 border-b-3 border-l-3 border-emerald-400 rounded-bl-lg" />
+                  <div className="absolute bottom-0 right-0 w-4 h-4 border-b-3 border-r-3 border-emerald-400 rounded-br-lg" />
+
+                  {/* Continuous Pulsing Laser Line Centered in Strip */}
+                  <div className="absolute inset-x-2 h-0.5 bg-emerald-400 shadow-[0_0_12px_#10b981] animate-pulse" />
+
+                  {ocrMatchedTag && (
+                    <div className="flex flex-col items-center justify-center text-center animate-in zoom-in-95 duration-150 z-10">
+                      <CheckCircle2 className="w-7 h-7 text-emerald-400 mb-0.5 drop-shadow-md" />
+                      <span className="font-mono text-xs font-black text-white tracking-widest drop-shadow-md" dir="ltr">
+                        {ocrMatchedTag}
+                      </span>
+                      <span className="text-[10px] font-bold text-emerald-300">מחפש כלי...</span>
+                    </div>
+                  )}
                 </div>
               </div>
+
+              {/* Live On-Screen OCR Status Pill inside bottom of camera viewfinder */}
+              <div className="absolute bottom-2.5 inset-x-0 flex justify-center items-center pointer-events-none z-20 px-3">
+                <div
+                  className={`px-3 py-1 rounded-full backdrop-blur-md border text-[11px] font-bold flex items-center gap-2 shadow-lg transition-all duration-200 max-w-[92%] truncate ${
+                    ocrMatchedTag
+                      ? 'bg-emerald-950/90 border-emerald-400 text-white shadow-[0_0_20px_rgba(16,185,129,0.7)] animate-pulse'
+                      : lastRawOcrText
+                      ? 'bg-slate-950/90 border-amber-500/60 text-amber-200'
+                      : 'bg-black/80 border-white/20 text-slate-200'
+                  }`}
+                >
+                  {ocrMatchedTag ? (
+                    <span className="flex items-center gap-1.5 text-emerald-300 font-black">
+                      <span>✅ זוהה: {ocrMatchedTag} - מחפש כלי!</span>
+                    </span>
+                  ) : lastRawOcrText ? (
+                    <span className="flex items-center gap-1.5 font-mono text-[10px]">
+                      <span className="text-amber-400">👁️ נקרא:</span>
+                      <span className="text-white font-bold tracking-wider">{lastRawOcrText}</span>
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1.5 text-[10px] text-emerald-300 font-bold">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping inline-block" />
+                      <span>🔍 סורק טקסט בשטח הקו הירוק...</span>
+                    </span>
+                  )}
+                </div>
+              </div>
+
               <button
                 type="button"
                 onClick={stopCamera}
-                className="absolute top-2 left-2 px-2.5 py-1 rounded-lg bg-black/70 text-white text-[11px] font-bold border border-white/20 cursor-pointer"
+                className="absolute top-2 left-2 px-2.5 py-1 rounded-lg bg-black/70 hover:bg-black/90 text-white text-[11px] font-bold border border-white/20 cursor-pointer z-20 transition-colors"
               >
                 סגור
               </button>

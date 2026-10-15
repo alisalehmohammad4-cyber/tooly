@@ -30,6 +30,7 @@ import {
 import { useAuth } from '@/context/AuthContext';
 import { detectBarcodeOrQr, extractTagFromBarcodePayload } from '@/lib/ocr/barcodeDetector';
 import { triggerOcrHaptic, playOcrBeep } from '@/lib/ocr/tagParser';
+import { useLaserStripOcr } from '@/lib/ocr/useLaserStripOcr';
 import OcrScannerModal from '@/components/modules/OcrScannerModal';
 
 interface ManualCheckinModalProps {
@@ -88,6 +89,7 @@ export default function ManualCheckinModal({
   const streamRef = useRef<MediaStream | null>(null);
   const scanIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const isBusyRef = useRef<boolean>(false);
+  const resetOcrStatusRef = useRef<(() => void) | null>(null);
 
   // Load checked out assets on modal open
   const loadLoans = useCallback(async () => {
@@ -153,6 +155,7 @@ export default function ManualCheckinModal({
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
+    resetOcrStatusRef.current?.();
     setScannerStarted(false);
     setTorchEnabled(false);
   }, [torchEnabled]);
@@ -257,6 +260,52 @@ export default function ManualCheckinModal({
     await startCameraScanner(nextFacing);
   }, [facingMode, stopCameraScanner, startCameraScanner]);
 
+  // Direct Barcode / Tag Lookup
+  const handleBarcodeSearchDirect = useCallback(
+    async (codeToSearch: string) => {
+      const code = codeToSearch.trim();
+      if (!code) return;
+      setIsSearchingBarcode(true);
+      setScannerError(null);
+      try {
+        const asset = await getAssetDetailsByQr(code, warehouseId, orgId);
+        if (asset) {
+          setSelectedAsset(asset);
+          setManualBarcodeScanInput('');
+          await stopCameraScanner();
+        } else {
+          setScannerError(`לא נמצא כלי התואם לקוד "${code}". בדוק את המספר או השתמש בלשונית איתור ידני.`);
+        }
+      } catch (err) {
+        console.error('Error finding asset by barcode:', err);
+        setScannerError('שגיאה באיתור הכלי במערכת.');
+      } finally {
+        setIsSearchingBarcode(false);
+      }
+    },
+    [warehouseId, orgId, stopCameraScanner]
+  );
+
+  // High-Speed Laser-Strip OCR Scanner Hook (450ms Persistent Tesseract + 2.5s Cloud Fallback)
+  const {
+    lastRawOcrText,
+    ocrMatchedTag,
+    resetOcrStatus,
+  } = useLaserStripOcr({
+    videoRef,
+    isActive: isOpen && activeTab === 'scanner' && !selectedAsset && scannerStarted,
+    isPaused: Boolean(selectedAsset || !isOpen || activeTab !== 'scanner'),
+    organizationId: orgId,
+    onTagDetected: async (tag) => {
+      setManualBarcodeScanInput(tag);
+      await handleBarcodeSearchDirect(tag);
+    },
+  });
+
+  useEffect(() => {
+    resetOcrStatusRef.current = resetOcrStatus;
+  }, [resetOcrStatus]);
+
   // Background frame scan check
   const performScanCheck = useCallback(async () => {
     if (!videoRef.current || isBusyRef.current || selectedAsset || !scannerStarted) return;
@@ -270,14 +319,8 @@ export default function ManualCheckinModal({
         if (clean) {
           triggerOcrHaptic(50);
           playOcrBeep();
-          const asset = await getAssetDetailsByQr(clean, warehouseId, orgId);
-          if (asset) {
-            setSelectedAsset(asset);
-            setSubmitFeedback(null);
-            await stopCameraScanner();
-          } else {
-            setScannerError(`לא נמצא כלי התואם לברקוד "${clean}".`);
-          }
+          setManualBarcodeScanInput(clean);
+          await handleBarcodeSearchDirect(clean);
         }
       }
     } catch {
@@ -285,7 +328,7 @@ export default function ManualCheckinModal({
     } finally {
       isBusyRef.current = false;
     }
-  }, [selectedAsset, scannerStarted, warehouseId, orgId, stopCameraScanner]);
+  }, [selectedAsset, scannerStarted, handleBarcodeSearchDirect]);
 
   // Lifecycle for camera scanner
   useEffect(() => {
@@ -343,25 +386,7 @@ export default function ManualCheckinModal({
 
   // Handle Manual Barcode Lookup in Tab 1
   const handleBarcodeManualSearch = async () => {
-    const code = manualBarcodeScanInput.trim();
-    if (!code) return;
-    setIsSearchingBarcode(true);
-    setScannerError(null);
-    try {
-      const asset = await getAssetDetailsByQr(code, warehouseId, orgId);
-      if (asset) {
-        setSelectedAsset(asset);
-        setManualBarcodeScanInput('');
-        await stopCameraScanner();
-      } else {
-        setScannerError(`לא נמצא כלי התואם לקוד "${code}". בדוק את המספר או השתמש בלשונית איתור ידני.`);
-      }
-    } catch (err) {
-      console.error('Error finding asset by barcode:', err);
-      setScannerError('שגיאה באיתור הכלי במערכת.');
-    } finally {
-      setIsSearchingBarcode(false);
-    }
+    await handleBarcodeSearchDirect(manualBarcodeScanInput);
   };
 
   // Live Omnisearch Filter across Tag, Model, Serial, Worker Name & Phone
@@ -771,14 +796,62 @@ export default function ManualCheckinModal({
                       className="w-full h-full object-cover"
                     />
 
-                    {/* Viewfinder frame */}
+                    {/* Laser-Strip ROI Target Box: middle 75% width, middle 30% height */}
                     <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                      <div className="w-[68%] aspect-square max-w-[240px] relative rounded-3xl border border-white/40 bg-white/[0.02] flex items-center justify-center">
-                        <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-white/70 rounded-tl-lg" />
-                        <div className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-white/70 rounded-tr-lg" />
-                        <div className="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-white/70 rounded-bl-lg" />
-                        <div className="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-white/70 rounded-br-lg" />
-                        <div className="absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-emerald-400/70 to-transparent shadow-[0_0_8px_#34d399] animate-[bounce_2.5s_infinite]" />
+                      <div
+                        className={`w-[75%] h-[30%] min-h-[75px] max-h-[120px] relative rounded-2xl flex items-center justify-center transition-all duration-150 ${
+                          ocrMatchedTag
+                            ? 'border-4 border-emerald-400 bg-emerald-500/30 shadow-[0_0_40px_rgba(16,185,129,0.9)] scale-102'
+                            : 'border-2 border-emerald-400/60 bg-emerald-950/10'
+                        }`}
+                      >
+                        {/* 4 Precision Corner Guides */}
+                        <div className="absolute top-0 left-0 w-4 h-4 border-t-3 border-l-3 border-emerald-400 rounded-tl-lg" />
+                        <div className="absolute top-0 right-0 w-4 h-4 border-t-3 border-r-3 border-emerald-400 rounded-tr-lg" />
+                        <div className="absolute bottom-0 left-0 w-4 h-4 border-b-3 border-l-3 border-emerald-400 rounded-bl-lg" />
+                        <div className="absolute bottom-0 right-0 w-4 h-4 border-b-3 border-r-3 border-emerald-400 rounded-br-lg" />
+
+                        {/* Continuous Pulsing Laser Line Centered in Strip */}
+                        <div className="absolute inset-x-2 h-0.5 bg-emerald-400 shadow-[0_0_12px_#10b981] animate-pulse" />
+
+                        {ocrMatchedTag && (
+                          <div className="flex flex-col items-center justify-center text-center animate-in zoom-in-95 duration-150 z-10">
+                            <CheckCircle2 className="w-8 h-8 text-emerald-400 mb-0.5 drop-shadow-md" />
+                            <span className="font-mono text-sm font-black text-white tracking-widest drop-shadow-md" dir="ltr">
+                              {ocrMatchedTag}
+                            </span>
+                            <span className="text-[10px] font-bold text-emerald-300">פותח כלי...</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Live On-Screen OCR Status Pill inside bottom of camera viewfinder */}
+                    <div className="absolute bottom-14 inset-x-0 flex justify-center items-center pointer-events-none z-20 px-3">
+                      <div
+                        className={`px-3.5 py-1.5 rounded-full backdrop-blur-md border text-xs font-bold flex items-center gap-2 shadow-lg transition-all duration-200 max-w-[92%] truncate ${
+                          ocrMatchedTag
+                            ? 'bg-emerald-950/90 border-emerald-400 text-white shadow-[0_0_20px_rgba(16,185,129,0.7)] animate-pulse'
+                            : lastRawOcrText
+                            ? 'bg-slate-950/90 border-amber-500/60 text-amber-200'
+                            : 'bg-black/80 border-white/20 text-slate-200'
+                        }`}
+                      >
+                        {ocrMatchedTag ? (
+                          <span className="flex items-center gap-1.5 text-emerald-300 font-black">
+                            <span>✅ זוהה: {ocrMatchedTag} - פותח כלי!</span>
+                          </span>
+                        ) : lastRawOcrText ? (
+                          <span className="flex items-center gap-1.5 font-mono text-[11px]">
+                            <span className="text-amber-400">👁️ נקרא:</span>
+                            <span className="text-white font-bold tracking-wider">{lastRawOcrText}</span>
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1.5 text-[11px] text-emerald-300 font-bold">
+                            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block" />
+                            <span>🔍 סורק טקסט בשטח הקו הירוק...</span>
+                          </span>
+                        )}
                       </div>
                     </div>
 

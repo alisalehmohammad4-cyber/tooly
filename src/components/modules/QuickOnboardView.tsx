@@ -47,6 +47,7 @@ import { getCurrentGpsCoordinates } from '@/lib/geo';
 import { getCachedAssetByQr, cacheAsset } from '@/lib/offline/offlineDb';
 import { useWebNfc } from '@/lib/nfc/useWebNfc';
 import { useOcrScanner } from '@/lib/ocr/useOcrScanner';
+import { useLaserStripOcr } from '@/lib/ocr/useLaserStripOcr';
 import { detectBarcodeOrQr, extractTagFromBarcodePayload } from '@/lib/ocr/barcodeDetector';
 import { snapTagToAsset, triggerOcrHaptic, playOcrBeep } from '@/lib/ocr/tagParser';
 
@@ -183,6 +184,27 @@ export default function QuickOnboardView({
     useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [isPassportOpen, setIsPassportOpen] = useState<boolean>(false);
+
+  // Ref to invoke claimDetection safely from callbacks
+  const claimDetectionRef = useRef<((tag: string) => Promise<void>) | null>(null);
+
+  // High-Speed Laser-Strip OCR Scanner Hook (450ms Persistent Tesseract + 2.5s Cloud Fallback)
+  const {
+    lastRawOcrText,
+    ocrMatchedTag,
+    resetOcrStatus,
+  } = useLaserStripOcr({
+    videoRef,
+    isActive: scannerActive && !showOnboardForm,
+    isPaused: Boolean(qrCode || isModalOpen || isPassportOpen || isDebounceLockedRef.current || isPausedRef.current),
+    organizationId: currentOrganization?.id,
+    onTagDetected: async (tag) => {
+      setManualQrInput(tag);
+      if (claimDetectionRef.current) {
+        await claimDetectionRef.current(tag);
+      }
+    },
+  });
 
   // Bulk Dispatch Cart State
   const [dispatchCart, setDispatchCart] = useState<ScannedAssetDetails[]>([]);
@@ -626,6 +648,11 @@ export default function QuickOnboardView({
     [qrCode, handleScanSuccess]
   );
 
+  // Keep claimDetectionRef synchronized
+  useEffect(() => {
+    claimDetectionRef.current = claimDetection;
+  }, [claimDetection]);
+
   // Handle Barcode & Text OCR Detections directly into the scan pipeline
   const handleBarcodeDetected = useCallback(
     (detectedCode: string) => {
@@ -662,6 +689,7 @@ export default function QuickOnboardView({
           if (barcodeResult && barcodeResult.rawValue && !isDebounceLockedRef.current && !isPausedRef.current) {
             const cleanTag = extractTagFromBarcodePayload(barcodeResult.rawValue);
             if (cleanTag) {
+              setManualQrInput(cleanTag);
               await claimDetection(cleanTag);
             }
           }
@@ -844,10 +872,11 @@ export default function QuickOnboardView({
     setShowOnboardForm(false);
     setIsTargetLocked(false);
     setCandidateTag(null);
+    resetOcrStatus();
     isDebounceLockedRef.current = false;
     setScannerActive(true);
     await startCamera();
-  }, [startCamera]);
+  }, [startCamera, resetOcrStatus]);
 
   // Callback when custody action completes from modal
   const handleModalActionComplete = (message: string) => {
@@ -861,6 +890,7 @@ export default function QuickOnboardView({
     setIsModalOpen(false);
     setShowOnboardForm(false);
     setTorchEnabled(false);
+    resetOcrStatus();
     setScannerActive(true);
   };
 
@@ -1337,47 +1367,61 @@ export default function QuickOnboardView({
                   className="w-full h-full object-cover"
                 />
 
-                {/* Minimalist Viewfinder Overlay */}
+                {/* Laser-Strip ROI Target Box: middle 75% width, middle 30% height */}
                 <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
                   <div
-                    className={`w-[68%] aspect-square max-w-[240px] relative rounded-3xl flex items-center justify-center transition-all duration-200 ${
-                      isTargetLocked
-                        ? 'border-2 border-emerald-400 bg-emerald-500/20 shadow-[0_0_35px_rgba(16,185,129,0.7)] scale-[1.02]'
-                        : 'border border-white/40 bg-white/[0.02]'
+                    className={`w-[75%] h-[30%] min-h-[75px] max-h-[120px] relative rounded-2xl flex items-center justify-center transition-all duration-150 ${
+                      ocrMatchedTag || isTargetLocked || candidateTag
+                        ? 'border-4 border-emerald-400 bg-emerald-500/30 shadow-[0_0_40px_rgba(16,185,129,0.9)] scale-102'
+                        : 'border-2 border-emerald-400/60 bg-emerald-950/10'
                     }`}
                   >
-                    {/* 4 Precision Corner Brackets */}
-                    <div
-                      className={`absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 ${
-                        isTargetLocked ? 'border-emerald-400' : 'border-white/70'
-                      } rounded-tl-lg`}
-                    />
-                    <div
-                      className={`absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 ${
-                        isTargetLocked ? 'border-emerald-400' : 'border-white/70'
-                      } rounded-tr-lg`}
-                    />
-                    <div
-                      className={`absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 ${
-                        isTargetLocked ? 'border-emerald-400' : 'border-white/70'
-                      } rounded-bl-lg`}
-                    />
-                    <div
-                      className={`absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 ${
-                        isTargetLocked ? 'border-emerald-400' : 'border-white/70'
-                      } rounded-br-lg`}
-                    />
+                    {/* 4 Precision Corner Guides */}
+                    <div className="absolute top-0 left-0 w-4 h-4 border-t-3 border-l-3 border-emerald-400 rounded-tl-lg" />
+                    <div className="absolute top-0 right-0 w-4 h-4 border-t-3 border-r-3 border-emerald-400 rounded-tr-lg" />
+                    <div className="absolute bottom-0 left-0 w-4 h-4 border-b-3 border-l-3 border-emerald-400 rounded-bl-lg" />
+                    <div className="absolute bottom-0 right-0 w-4 h-4 border-b-3 border-r-3 border-emerald-400 rounded-br-lg" />
 
-                    {/* Instant feedback on detection */}
-                    {isTargetLocked ? (
-                      <div className="flex flex-col items-center justify-center text-center animate-in zoom-in-95 duration-150">
-                        <CheckCircle2 className="w-8 h-8 text-emerald-400 mb-1" />
-                        <span className="font-mono text-sm font-black text-white tracking-wider" dir="ltr">
-                          {candidateTag}
+                    {/* Continuous Pulsing Laser Line Centered in Strip */}
+                    <div className="absolute inset-x-2 h-0.5 bg-emerald-400 shadow-[0_0_12px_#10b981] animate-pulse" />
+
+                    {(ocrMatchedTag || isTargetLocked || candidateTag) && (
+                      <div className="flex flex-col items-center justify-center text-center animate-in zoom-in-95 duration-150 z-10">
+                        <CheckCircle2 className="w-8 h-8 text-emerald-400 mb-0.5 drop-shadow-md" />
+                        <span className="font-mono text-sm font-black text-white tracking-widest drop-shadow-md" dir="ltr">
+                          {ocrMatchedTag || candidateTag}
                         </span>
+                        <span className="text-[10px] font-bold text-emerald-300">פותח כלי...</span>
                       </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Live On-Screen OCR Status Pill inside bottom of camera viewfinder */}
+                <div className="absolute bottom-16 inset-x-0 flex justify-center items-center pointer-events-none z-20 px-3">
+                  <div
+                    className={`px-3.5 py-1.5 rounded-full backdrop-blur-md border text-xs font-bold flex items-center gap-2 shadow-lg transition-all duration-200 max-w-[92%] truncate ${
+                      ocrMatchedTag || candidateTag
+                        ? 'bg-emerald-950/90 border-emerald-400 text-white shadow-[0_0_20px_rgba(16,185,129,0.7)] animate-pulse'
+                        : lastRawOcrText
+                        ? 'bg-slate-950/90 border-amber-500/60 text-amber-200'
+                        : 'bg-black/80 border-white/20 text-slate-200'
+                    }`}
+                  >
+                    {ocrMatchedTag || candidateTag ? (
+                      <span className="flex items-center gap-1.5 text-emerald-300 font-black">
+                        <span>✅ זוהה: {ocrMatchedTag || candidateTag} - פותח כלי!</span>
+                      </span>
+                    ) : lastRawOcrText ? (
+                      <span className="flex items-center gap-1.5 font-mono text-[11px]">
+                        <span className="text-amber-400">👁️ נקרא:</span>
+                        <span className="text-white font-bold tracking-wider">{lastRawOcrText}</span>
+                      </span>
                     ) : (
-                      <div className="absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-emerald-400/70 to-transparent shadow-[0_0_8px_#34d399] animate-[bounce_2.5s_infinite]" />
+                      <span className="flex items-center gap-1.5 text-[11px] text-emerald-300 font-bold">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block" />
+                        <span>🔍 סורק טקסט בשטח הקו הירוק...</span>
+                      </span>
                     )}
                   </div>
                 </div>
