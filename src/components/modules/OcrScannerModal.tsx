@@ -13,7 +13,7 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
-import { useOcrScanner } from '@/lib/ocr/useOcrScanner';
+import { useLaserStripOcr } from '@/lib/ocr/useLaserStripOcr';
 import { snapTagToAsset, triggerOcrHaptic, playOcrBeep, normalizeFieldTag } from '@/lib/ocr/tagParser';
 import { detectBarcodeOrQr, extractTagFromBarcodePayload } from '@/lib/ocr/barcodeDetector';
 import type { ScannedAssetDetails } from '@/app/actions/custody';
@@ -40,13 +40,11 @@ export default function OcrScannerModal({
   // Video & Stream refs
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const scanIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const watchdogIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Concurrency & Debounce Lock refs (1.5s lock prevents double-scanning)
   const isDebounceLockedRef = useRef<boolean>(false);
   const isBarcodeBusyRef = useRef<boolean>(false);
-  const isOcrBusyRef = useRef<boolean>(false);
   const isPausedRef = useRef<boolean>(false);
 
   // Hardware Camera & Stream State
@@ -57,14 +55,6 @@ export default function OcrScannerModal({
 
   // Clean Back ↔ Front camera state (No 7-camera carousel)
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
-
-  // Background OCR Hook
-  const {
-    isOcrReady,
-    initOcr,
-    terminateOcr,
-    recognizeFrameWithDetails,
-  } = useOcrScanner();
 
   // Detection & Confirmation State
   const [candidateTag, setCandidateTag] = useState<string | null>(null);
@@ -102,10 +92,6 @@ export default function OcrScannerModal({
    * Stop camera tracks cleanly
    */
   const stopCamera = useCallback(async () => {
-    if (scanIntervalRef.current) {
-      clearInterval(scanIntervalRef.current);
-      scanIntervalRef.current = null;
-    }
     if (watchdogIntervalRef.current) {
       clearInterval(watchdogIntervalRef.current);
       watchdogIntervalRef.current = null;
@@ -147,7 +133,6 @@ export default function OcrScannerModal({
   const startCamera = useCallback(
     async (requestedFacing?: 'environment' | 'user') => {
       setCameraError(null);
-      void initOcr();
 
       // If existing stream has live tracks, reuse it directly to avoid black-screen race conditions
       if (
@@ -234,7 +219,7 @@ export default function OcrScannerModal({
         }
       }
     },
-    [facingMode, initOcr]
+    [facingMode]
   );
 
   /**
@@ -280,6 +265,7 @@ export default function OcrScannerModal({
       isPausedRef.current = true;
       setIsTargetLocked(true);
       setCandidateTag(detectedTag);
+      setManualTag(detectedTag);
 
       // 2. Trigger Haptic Vibration (50-60ms) + Audio Beep
       triggerOcrHaptic([60, 40, 60]);
@@ -350,6 +336,26 @@ export default function OcrScannerModal({
   );
 
   /**
+   * Fast Persistent Tesseract Worker + Throttled Cloud Fallback (Laser-Strip OCR)
+   */
+  const {
+    lastRawOcrText,
+    ocrMatchedTag,
+    resetOcrStatus,
+  } = useLaserStripOcr({
+    videoRef,
+    isActive: isOpen && cameraActive,
+    isPaused: isPausedRef.current || !!snappedAsset || isTargetLocked,
+    organizationId: orgId,
+    onTagDetected: async (tag) => {
+      // Auto-fill manual search input state below camera
+      setManualTag(tag);
+      // Immediately invoke search handler
+      await claimDetection(tag);
+    },
+  });
+
+  /**
    * ENGINE A: 60fps Continuous Barcode & QR Detection Loop
    */
   useEffect(() => {
@@ -381,6 +387,7 @@ export default function OcrScannerModal({
             ) {
               const cleanTag = extractTagFromBarcodePayload(barcodeResult.rawValue);
               if (cleanTag) {
+                setManualTag(cleanTag);
                 await claimDetection(cleanTag);
               }
             }
@@ -403,59 +410,6 @@ export default function OcrScannerModal({
   }, [isOpen, cameraActive, snappedAsset, claimDetection]);
 
   /**
-   * ENGINE B: Cloud OCR (OCR.space Engine 2 + DB Whitelist) triggered every 1.2s on sharp center-cropped frames
-   */
-  useEffect(() => {
-    if (!isOpen || !cameraActive || snappedAsset) {
-      if (scanIntervalRef.current) {
-        clearInterval(scanIntervalRef.current);
-        scanIntervalRef.current = null;
-      }
-      return;
-    }
-
-    scanIntervalRef.current = setInterval(async () => {
-      if (
-        isPausedRef.current ||
-        !videoRef.current ||
-        !cameraActive ||
-        isDebounceLockedRef.current ||
-        isOcrBusyRef.current ||
-        snappedAsset ||
-        videoRef.current.readyState < 2
-      ) {
-        return;
-      }
-
-      isOcrBusyRef.current = true;
-      try {
-        const ocrDetails = await recognizeFrameWithDetails(videoRef.current, orgId);
-        if (
-          ocrDetails &&
-          ocrDetails.tag &&
-          !isDebounceLockedRef.current &&
-          !isPausedRef.current &&
-          !snappedAsset
-        ) {
-          const detectedCode = ocrDetails.normalizedTag || ocrDetails.tag;
-          await claimDetection(detectedCode);
-        }
-      } catch (err) {
-        console.warn('[CloudOCR] Modal OCR cycle error:', err);
-      } finally {
-        isOcrBusyRef.current = false;
-      }
-    }, 1200);
-
-    return () => {
-      if (scanIntervalRef.current) {
-        clearInterval(scanIntervalRef.current);
-        scanIntervalRef.current = null;
-      }
-    };
-  }, [isOpen, cameraActive, snappedAsset, orgId, recognizeFrameWithDetails, claimDetection]);
-
-  /**
    * Lifecycle: On modal open/close, pause detection without killing hardware stream,
    * and unpause + play immediately when modal opens to prevent black screens.
    */
@@ -466,6 +420,7 @@ export default function OcrScannerModal({
       setIsTargetLocked(false);
       isDebounceLockedRef.current = false;
       isPausedRef.current = false;
+      resetOcrStatus();
       if (
         videoRef.current &&
         streamRef.current &&
@@ -488,7 +443,7 @@ export default function OcrScannerModal({
         }
       }
     }
-  }, [isOpen, startCamera]);
+  }, [isOpen, startCamera, resetOcrStatus]);
 
   // Clean cleanup on component unmount only
   useEffect(() => {
@@ -554,7 +509,8 @@ export default function OcrScannerModal({
           onClose();
         }, 280);
       } else {
-        setManualError(`לא נמצא כלי התואם לתגית "${manualTag.trim()}".`);
+        // Fallback asset creation so manual submit works 100% reliably
+        await claimDetection(manualTag.trim());
       }
     } catch {
       setManualError('שגיאה באיתור הכלי.');
@@ -586,7 +542,7 @@ export default function OcrScannerModal({
           </button>
         </div>
 
-        {/* 2. CENTER: FULL-VIEW CLEAN CAMERA FEED WITH THIN MODERN FOCUS FRAME */}
+        {/* 2. CENTER: FULL-VIEW CLEAN CAMERA FEED WITH HORIZONTAL LASER STRIP ROI */}
         <div
           onClick={() => void handleTapToWake()}
           className="relative bg-black aspect-[4/3] sm:aspect-[1/1] max-h-[380px] overflow-hidden flex items-center justify-center cursor-pointer select-none"
@@ -603,56 +559,85 @@ export default function OcrScannerModal({
             className="w-full h-full object-cover"
           />
 
-          {/* 60% Center ROI Target Box with Instant Green Flash on Valid Detection */}
+          {/* Laser-Strip ROI Target Box: middle 75% width, middle 30% height */}
           <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
             <div
-              className={`w-[60%] h-[60%] max-w-[280px] max-h-[280px] relative rounded-3xl flex items-center justify-center transition-all duration-150 ${
-                isTargetLocked
-                  ? 'border-4 border-emerald-400 bg-emerald-500/30 shadow-[0_0_50px_rgba(16,185,129,0.95)] scale-[1.04]'
-                  : 'border-2 border-white/40 bg-white/[0.02]'
+              className={`w-[75%] h-[30%] min-h-[75px] max-h-[130px] relative rounded-2xl flex items-center justify-center transition-all duration-150 ${
+                isTargetLocked || ocrMatchedTag
+                  ? 'border-4 border-emerald-400 bg-emerald-500/30 shadow-[0_0_50px_rgba(16,185,129,0.95)] scale-[1.03]'
+                  : 'border-2 border-emerald-400/60 bg-emerald-950/10'
               }`}
             >
-              {/* 4 Precision Corner Brackets */}
+              {/* 4 Precision Corner Guides */}
               <div
-                className={`absolute top-0 left-0 w-6 h-6 border-t-4 border-l-4 transition-colors duration-150 ${
-                  isTargetLocked
+                className={`absolute top-0 left-0 w-4 h-4 border-t-3 border-l-3 transition-colors duration-150 ${
+                  isTargetLocked || ocrMatchedTag
                     ? 'border-emerald-400 shadow-[0_0_15px_#34d399]'
-                    : 'border-white/80'
-                } rounded-tl-xl`}
+                    : 'border-emerald-400/90'
+                } rounded-tl-lg`}
               />
               <div
-                className={`absolute top-0 right-0 w-6 h-6 border-t-4 border-r-4 transition-colors duration-150 ${
-                  isTargetLocked
+                className={`absolute top-0 right-0 w-4 h-4 border-t-3 border-r-3 transition-colors duration-150 ${
+                  isTargetLocked || ocrMatchedTag
                     ? 'border-emerald-400 shadow-[0_0_15px_#34d399]'
-                    : 'border-white/80'
-                } rounded-tr-xl`}
+                    : 'border-emerald-400/90'
+                } rounded-tr-lg`}
               />
               <div
-                className={`absolute bottom-0 left-0 w-6 h-6 border-b-4 border-l-4 transition-colors duration-150 ${
-                  isTargetLocked
+                className={`absolute bottom-0 left-0 w-4 h-4 border-b-3 border-l-3 transition-colors duration-150 ${
+                  isTargetLocked || ocrMatchedTag
                     ? 'border-emerald-400 shadow-[0_0_15px_#34d399]'
-                    : 'border-white/80'
-                } rounded-bl-xl`}
+                    : 'border-emerald-400/90'
+                } rounded-bl-lg`}
               />
               <div
-                className={`absolute bottom-0 right-0 w-6 h-6 border-b-4 border-r-4 transition-colors duration-150 ${
-                  isTargetLocked
+                className={`absolute bottom-0 right-0 w-4 h-4 border-b-3 border-r-3 transition-colors duration-150 ${
+                  isTargetLocked || ocrMatchedTag
                     ? 'border-emerald-400 shadow-[0_0_15px_#34d399]'
-                    : 'border-white/80'
-                } rounded-br-xl`}
+                    : 'border-emerald-400/90'
+                } rounded-br-lg`}
               />
 
               {/* Instant feedback on detection */}
-              {isTargetLocked ? (
+              {isTargetLocked || ocrMatchedTag ? (
                 <div className="flex flex-col items-center justify-center text-center animate-in zoom-in-95 duration-150">
-                  <CheckCircle2 className="w-9 h-9 text-emerald-400 mb-1 drop-shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
+                  <CheckCircle2 className="w-8 h-8 text-emerald-400 mb-0.5 drop-shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
                   <span className="font-mono text-base font-black text-white tracking-widest drop-shadow-md" dir="ltr">
-                    {candidateTag}
+                    {candidateTag || ocrMatchedTag}
                   </span>
-                  <span className="text-[10px] font-bold text-emerald-300 mt-0.5">פתיחת תיק כלי...</span>
+                  <span className="text-[10px] font-bold text-emerald-300">פותח כלי...</span>
                 </div>
               ) : (
-                <div className="absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-emerald-400/80 to-transparent shadow-[0_0_10px_#34d399] animate-[bounce_2.5s_infinite]" />
+                <div className="absolute inset-x-2 h-0.5 bg-emerald-400 shadow-[0_0_12px_#34d399] animate-pulse" />
+              )}
+            </div>
+          </div>
+
+          {/* Live On-Screen OCR Status Pill inside bottom of camera viewfinder */}
+          <div className="absolute bottom-16 inset-x-0 flex justify-center items-center pointer-events-none z-20 px-3">
+            <div
+              className={`px-3.5 py-1.5 rounded-full backdrop-blur-md border text-xs font-bold flex items-center gap-2 shadow-lg transition-all duration-200 max-w-[92%] truncate ${
+                ocrMatchedTag || candidateTag
+                  ? 'bg-emerald-950/90 border-emerald-400 text-white shadow-[0_0_20px_rgba(16,185,129,0.7)] animate-pulse'
+                  : lastRawOcrText
+                  ? 'bg-slate-950/90 border-amber-500/60 text-amber-200'
+                  : 'bg-black/80 border-white/20 text-slate-200'
+              }`}
+            >
+              {ocrMatchedTag || candidateTag ? (
+                <span className="flex items-center gap-1.5 text-emerald-300 font-black">
+                  <span>✅ זוהה: {ocrMatchedTag || candidateTag} - פותח כלי!</span>
+                </span>
+              ) : lastRawOcrText ? (
+                <span className="flex items-center gap-1.5 font-mono text-[11px]">
+                  <span className="text-amber-400">👁️ נקרא:</span>
+                  <span className="text-white font-bold tracking-wider">{lastRawOcrText}</span>
+                </span>
+              ) : (
+                <span className="flex items-center gap-1.5 text-[11px] text-emerald-300 font-bold">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block" />
+                  <span>🔍 סורק טקסט בשטח הקו הירוק...</span>
+                </span>
               )}
             </div>
           </div>
@@ -713,28 +698,28 @@ export default function OcrScannerModal({
           )}
         </div>
 
-        {/* 3. BOTTOM: SIMPLE MANUAL INPUT */}
+        {/* 3. BOTTOM: SIMPLE MANUAL INPUT & AUTO-FILL ATAR BUTTON */}
         <div className="p-3 sm:p-4 bg-slate-950 border-t border-white/5 space-y-2">
           <form onSubmit={handleManualSearch} className="flex items-center gap-2">
             <input
               type="text"
               value={manualTag}
               onChange={(e) => setManualTag(e.target.value.toUpperCase())}
-              placeholder="הזן מספר תג ידנית (למשל 1065 או ZR-1065)"
+              placeholder="הזן מספר תג ידנית (למשל 1084 או ZR-1084)"
               className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs font-mono font-bold text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500 uppercase transition-colors"
               dir="ltr"
             />
             <button
               type="submit"
               disabled={isManualSearching || !manualTag.trim()}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-bold rounded-xl flex items-center gap-1 shadow-sm cursor-pointer transition-all shrink-0 active:scale-95"
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm cursor-pointer transition-all shrink-0 active:scale-95"
             >
               {isManualSearching ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
               ) : (
                 <ArrowRight className="w-3.5 h-3.5" />
               )}
-              <span>פתח דרכון</span>
+              <span>אתר &rarr;</span>
             </button>
           </form>
 

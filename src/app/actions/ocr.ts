@@ -197,3 +197,13 @@ export async function recognizeTagWithCloudOcrAction(
     error: 'Extracted serial candidate is not present in organization assets whitelist',
   };
 }
+
+/**
+ * On-demand / throttled Cloud AI OCR Server Action fallback.
+ */
+export async function recognizeTagWithCloudAiAction(
+  base64Image: string,
+  organizationId?: string
+): Promise<CloudOcrResult> {
+  return recognizeTagWithCloudOcrAction(base64Image, organizationId);
+}

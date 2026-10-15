@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useRef, useCallback } from 'react';
-import { captureSharpCenterCrop } from './imagePreprocessing';
+import { cropLaserStripToCanvas, captureSharpCenterCrop } from './imagePreprocessing';
 import { cleanAndCorrectTag, TAG_REGEX, normalizeFieldTag } from './tagParser';
-import { recognizeTagWithCloudOcrAction } from '@/app/actions/ocr';
+import { recognizeTagWithCloudAiAction, recognizeTagWithCloudOcrAction } from '@/app/actions/ocr';
+import { getPersistentOcrWorker } from './useLaserStripOcr';
 
 export interface OcrDetailsResult {
   tag: string | null;
@@ -102,12 +103,11 @@ export function extractToolSerialFromText(rawText: string): string | null {
 }
 
 /**
- * High-performance, zero-client-overhead OCR scanner hook.
- * Completely replaces heavy client-side Tesseract.js with Cloud OCR (OCR.space Engine 2)
- * + Database Whitelist verification. Frees up 100% of mobile CPU and RAM.
+ * High-performance OCR scanner hook using Laser-Strip Cropping (600x200),
+ * Persistent Tesseract.js Worker and Throttled Cloud AI Fallback.
  */
 export function useOcrScanner(): UseOcrScannerResult {
-  const [isOcrReady] = useState<boolean>(true);
+  const [isOcrReady, setIsOcrReady] = useState<boolean>(true);
   const [isInitializing] = useState<boolean>(false);
   const [isRecognizing, setIsRecognizing] = useState<boolean>(false);
   const [ocrProgress] = useState<number>(100);
@@ -116,16 +116,19 @@ export function useOcrScanner(): UseOcrScannerResult {
   const isBusyRef = useRef<boolean>(false);
 
   const initOcr = useCallback(async (): Promise<boolean> => {
+    void getPersistentOcrWorker().then((w) => {
+      if (w) setIsOcrReady(true);
+    });
     return true;
   }, []);
 
   const terminateOcr = useCallback(async (): Promise<void> => {
-    // Zero-overhead cloud OCR requires no teardown
+    // Persistent worker manages its own lifecycle
   }, []);
 
   /**
-   * Detailed recognition extracting sharp center 60% crop and calling Cloud OCR server action
-   * with strict database whitelist validation.
+   * Detailed recognition extracting 600x200 laser-strip crop and evaluating
+   * local persistent Tesseract worker with Cloud AI fallback.
    */
   const recognizeFrameWithDetails = useCallback(
     async (
@@ -141,18 +144,48 @@ export function useOcrScanner(): UseOcrScannerResult {
       setOcrError(null);
 
       try {
-        // Capture sharp center 60% crop of the frame
-        const canvas = captureSharpCenterCrop(videoElement, 0.60, 2);
+        // 1. Capture 600x200 laser-strip center crop with contrast boost
+        const canvas = cropLaserStripToCanvas(videoElement) || captureSharpCenterCrop(videoElement, 0.60, 2);
         if (!canvas) {
           isBusyRef.current = false;
           setIsRecognizing(false);
           return null;
         }
 
-        const base64Image = canvas.toDataURL('image/jpeg', 0.85);
+        // 2. Try fast local Tesseract worker
+        const worker = await getPersistentOcrWorker();
+        if (worker) {
+          try {
+            const { data } = await worker.recognize(canvas);
+            const raw = data?.text ? data.text.trim().replace(/[\r\n\t]+/g, ' ') : '';
+            if (raw) {
+              const match = raw
+                .replace(/[oO]/g, '0')
+                .replace(/[lI]/g, '1')
+                .match(/(?:zr[\s\-_]*)?(\d{3,5})/i);
 
-        // Execute cloud OCR with strict DB whitelist verification
-        const result = await recognizeTagWithCloudOcrAction(base64Image, organizationId);
+              if (match && match[1]) {
+                const tag = `ZR-${match[1]}`;
+                isBusyRef.current = false;
+                setIsRecognizing(false);
+                return {
+                  tag,
+                  normalizedTag: tag,
+                  rawText: raw,
+                  confidence: 99,
+                  isValid: true,
+                  isConfident: true,
+                };
+              }
+            }
+          } catch (workerErr) {
+            console.warn('[useOcrScanner] Local worker pass error:', workerErr);
+          }
+        }
+
+        // 3. Fallback: Execute cloud OCR with strict DB whitelist verification
+        const base64Image = canvas.toDataURL('image/jpeg', 0.85);
+        const result = await recognizeTagWithCloudAiAction(base64Image, organizationId);
 
         isBusyRef.current = false;
         setIsRecognizing(false);

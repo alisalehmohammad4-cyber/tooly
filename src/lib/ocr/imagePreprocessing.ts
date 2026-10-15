@@ -332,3 +332,118 @@ export function captureSharpCenterCrop(
   return canvas;
 }
 
+/**
+ * Crops ONLY the horizontal center strip around the green laser line
+ * (middle 75% width, middle 30% height of the visible viewfinder),
+ * accounting for CSS object-fit: cover on the video element, scaled to a crisp 600x200 canvas.
+ * Applies grayscale contrast boost on this 600x200 strip so text like "zr 1084" or "ZR-1084" is bold black on white.
+ */
+export function cropLaserStripToCanvas(
+  video: HTMLVideoElement,
+  targetCanvas?: HTMLCanvasElement
+): HTMLCanvasElement | null {
+  if (typeof document === 'undefined' || !video) return null;
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  if (!vw || !vh || video.readyState < 2) return null;
+
+  const canvas = targetCanvas || document.createElement('canvas');
+  canvas.width = 600;
+  canvas.height = 200;
+
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return null;
+
+  // Account for CSS object-fit: cover
+  const cw = video.clientWidth || video.parentElement?.clientWidth || 0;
+  const ch = video.clientHeight || video.parentElement?.clientHeight || 0;
+
+  let visW = vw;
+  let visH = vh;
+  let visX = 0;
+  let visY = 0;
+
+  if (cw > 0 && ch > 0) {
+    const scale = Math.max(cw / vw, ch / vh);
+    visW = cw / scale;
+    visH = ch / scale;
+    visX = (vw - visW) / 2;
+    visY = (vh - visH) / 2;
+  }
+
+  // Laser strip: middle 75% width, middle 30% height of the visible viewfinder
+  const cropW = visW * 0.75;
+  const cropH = visH * 0.30;
+  const cropX = Math.max(0, visX + (visW - cropW) / 2);
+  const cropY = Math.max(0, visY + (visH - cropH) / 2);
+
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+
+  ctx.drawImage(
+    video,
+    cropX,
+    cropY,
+    cropW,
+    cropH,
+    0,
+    0,
+    600,
+    200
+  );
+
+  // Apply Grayscale Contrast Boost so text like "zr 1084" or "ZR-1084" is bold black on white
+  try {
+    const imgData = ctx.getImageData(0, 0, 600, 200);
+    const data = imgData.data;
+    const pixelCount = 600 * 200;
+    const gray = new Uint8Array(pixelCount);
+
+    let min = 255;
+    let max = 0;
+
+    for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+      const g = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+      gray[p] = g;
+      if (g < min) min = g;
+      if (g > max) max = g;
+    }
+
+    const range = max - min;
+    let threshold = 128;
+    if (range > 20) {
+      threshold = calculateOtsuThreshold(gray);
+    }
+
+    // Determine polarity: count pixels darker than threshold
+    let darkCount = 0;
+    for (let p = 0; p < pixelCount; p++) {
+      if (gray[p] < threshold) darkCount++;
+    }
+    const isDarkBackground = darkCount > pixelCount * 0.55;
+
+    // High-contrast boost: bold black (0) text on pure white (255) background
+    for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+      const g = gray[p];
+      let isText = false;
+      if (isDarkBackground) {
+        isText = g >= threshold;
+      } else {
+        isText = g < threshold;
+      }
+
+      const val = isText ? 0 : 255;
+      data[i] = val;
+      data[i + 1] = val;
+      data[i + 2] = val;
+      data[i + 3] = 255;
+    }
+
+    ctx.putImageData(imgData, 0, 0);
+  } catch (err) {
+    console.warn('[cropLaserStripToCanvas] Contrast boost error:', err);
+  }
+
+  return canvas;
+}
+

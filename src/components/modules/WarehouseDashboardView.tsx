@@ -56,6 +56,7 @@ import ChiefNotesFeedView from '@/components/modules/ChiefNotesFeedView';
 import SignaturePad from '@/components/ui/SignaturePad';
 import { useAuth } from '@/context/AuthContext';
 import { useOcrScanner } from '@/lib/ocr/useOcrScanner';
+import { useLaserStripOcr } from '@/lib/ocr/useLaserStripOcr';
 import { snapTagToAsset, triggerOcrHaptic, playOcrBeep, normalizeFieldTag } from '@/lib/ocr/tagParser';
 import { detectBarcodeOrQr, extractTagFromBarcodePayload } from '@/lib/ocr/barcodeDetector';
 import {
@@ -219,12 +220,10 @@ export default function WarehouseDashboardView({
   const [isInlineScannerOpen, setIsInlineScannerOpen] = useState<boolean>(false);
   const inlineVideoRef = useRef<HTMLVideoElement | null>(null);
   const inlineStreamRef = useRef<MediaStream | null>(null);
-  const inlineScanIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const inlineWatchdogIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const inlineIsPausedRef = useRef<boolean>(false);
   const inlineIsDebounceLockedRef = useRef<boolean>(false);
   const inlineIsBarcodeBusyRef = useRef<boolean>(false);
-  const inlineIsOcrBusyRef = useRef<boolean>(false);
 
   const [inlineFacingMode, setInlineFacingMode] = useState<'environment' | 'user'>('environment');
   const [inlineTorchSupported, setInlineTorchSupported] = useState<boolean>(false);
@@ -233,12 +232,37 @@ export default function WarehouseDashboardView({
   const [inlineCandidateTag, setInlineCandidateTag] = useState<string | null>(null);
   const [inlineCameraError, setInlineCameraError] = useState<string | null>(null);
 
-  // Background OCR hook for inline scanner
+  // Ref to invoke handleOpenPassport safely from callbacks
+  const handleOpenPassportRef = useRef<((qrCode: string, fallbackItem?: unknown) => Promise<void>) | null>(null);
+
+  // Fast Persistent Tesseract Worker + Throttled Cloud Fallback (Laser-Strip OCR for Inline Viewfinder)
   const {
-    isOcrReady: isInlineOcrReady,
-    initOcr: initInlineOcr,
-    recognizeFrameWithDetails: recognizeInlineFrame,
-  } = useOcrScanner();
+    lastRawOcrText: inlineLastRawOcrText,
+    ocrMatchedTag: inlineOcrMatchedTag,
+    resetOcrStatus: resetInlineOcrStatus,
+  } = useLaserStripOcr({
+    videoRef: inlineVideoRef,
+    isActive: isInlineScannerOpen,
+    isPaused: isPassportOpen || inlineIsDebounceLockedRef.current,
+    organizationId: currentOrganization?.id || user?.organizationId,
+    onTagDetected: async (tag, digits) => {
+      // a) Audio beep + haptic pulse handled in hook
+      // b) Immediately set manual search input state below camera
+      setPassportLookupInput(tag);
+      setInlineCandidateTag(tag);
+      setInlineTargetLocked(true);
+
+      // c) Immediately invoke the exact same function wired to the "אתר →" button with fallback
+      if (handleOpenPassportRef.current) {
+        try {
+          await handleOpenPassportRef.current(tag);
+        } catch (err) {
+          console.warn('[InlineOCR] Search with primary tag failed, trying digits fallback:', err);
+          await handleOpenPassportRef.current(digits);
+        }
+      }
+    },
+  });
 
   const toggleInlineTorch = useCallback(async (track: MediaStreamTrack, enabled: boolean) => {
     try {
@@ -260,10 +284,6 @@ export default function WarehouseDashboardView({
   }, [inlineTorchEnabled, toggleInlineTorch]);
 
   const stopInlineCamera = useCallback(async () => {
-    if (inlineScanIntervalRef.current) {
-      clearInterval(inlineScanIntervalRef.current);
-      inlineScanIntervalRef.current = null;
-    }
     if (inlineWatchdogIntervalRef.current) {
       clearInterval(inlineWatchdogIntervalRef.current);
       inlineWatchdogIntervalRef.current = null;
@@ -286,7 +306,6 @@ export default function WarehouseDashboardView({
   const startInlineCamera = useCallback(
     async (requestedFacing?: 'environment' | 'user') => {
       setInlineCameraError(null);
-      void initInlineOcr();
 
       if (
         inlineStreamRef.current &&
@@ -364,7 +383,7 @@ export default function WarehouseDashboardView({
         }
       }
     },
-    [inlineFacingMode, initInlineOcr]
+    [inlineFacingMode]
   );
 
   const handleInlineTapToWake = useCallback(async () => {
@@ -483,6 +502,7 @@ export default function WarehouseDashboardView({
             ) {
               const cleanTag = extractTagFromBarcodePayload(barcodeResult.rawValue);
               if (cleanTag) {
+                setPassportLookupInput(cleanTag);
                 await claimInlineDetection(cleanTag);
               }
             }
@@ -503,60 +523,6 @@ export default function WarehouseDashboardView({
       cancelAnimationFrame(animId);
     };
   }, [isInlineScannerOpen, isPassportOpen, claimInlineDetection]);
-
-  /**
-   * ENGINE B: Cloud OCR (OCR.space Engine 2 + DB Whitelist) triggered every 1.2s on sharp center-cropped frames
-   */
-  useEffect(() => {
-    if (!isInlineScannerOpen || isPassportOpen) {
-      if (inlineScanIntervalRef.current) {
-        clearInterval(inlineScanIntervalRef.current);
-        inlineScanIntervalRef.current = null;
-      }
-      return;
-    }
-
-    inlineScanIntervalRef.current = setInterval(async () => {
-      if (
-        inlineIsPausedRef.current ||
-        !inlineVideoRef.current ||
-        !isInlineScannerOpen ||
-        inlineIsDebounceLockedRef.current ||
-        inlineIsOcrBusyRef.current ||
-        isPassportOpen ||
-        inlineVideoRef.current.readyState < 2
-      ) {
-        return;
-      }
-
-      inlineIsOcrBusyRef.current = true;
-      try {
-        const activeOrgId = currentOrganization?.id || user?.organizationId;
-        const ocrDetails = await recognizeInlineFrame(inlineVideoRef.current, activeOrgId);
-        if (
-          ocrDetails &&
-          ocrDetails.tag &&
-          !inlineIsDebounceLockedRef.current &&
-          !inlineIsPausedRef.current &&
-          !isPassportOpen
-        ) {
-          const detectedCode = ocrDetails.normalizedTag || ocrDetails.tag;
-          await claimInlineDetection(detectedCode);
-        }
-      } catch (err) {
-        console.warn('[CloudOCR] Inline OCR cycle error:', err);
-      } finally {
-        inlineIsOcrBusyRef.current = false;
-      }
-    }, 1200);
-
-    return () => {
-      if (inlineScanIntervalRef.current) {
-        clearInterval(inlineScanIntervalRef.current);
-        inlineScanIntervalRef.current = null;
-      }
-    };
-  }, [isInlineScannerOpen, isPassportOpen, currentOrganization, user, recognizeInlineFrame, claimInlineDetection]);
 
   // Stream Watchdog: Revives dead or ended camera stream every 1000ms
   useEffect(() => {
@@ -599,6 +565,10 @@ export default function WarehouseDashboardView({
   useEffect(() => {
     if (!isPassportOpen && isInlineScannerOpen) {
       inlineIsPausedRef.current = false;
+      inlineIsDebounceLockedRef.current = false;
+      setInlineTargetLocked(false);
+      setInlineCandidateTag(null);
+      resetInlineOcrStatus();
       if (
         inlineVideoRef.current &&
         inlineStreamRef.current &&
@@ -611,7 +581,7 @@ export default function WarehouseDashboardView({
         void startInlineCamera();
       }
     }
-  }, [isPassportOpen, isInlineScannerOpen, startInlineCamera]);
+  }, [isPassportOpen, isInlineScannerOpen, startInlineCamera, resetInlineOcrStatus]);
 
   // Pending Inter-site Transfer Requests (Chief Operations / Operations Manager Approval)
   const [pendingTransfers, setPendingTransfers] = useState<PendingTransferItem[]>([]);
@@ -1671,7 +1641,22 @@ export default function WarehouseDashboardView({
     setPassportLookupFeedback(null);
     try {
       const activeOrgId = currentOrganization?.id || user?.organizationId;
-      const asset = await getAssetDetailsByQr(clean || String(fb.qrCode || ''), undefined, activeOrgId);
+      let asset = await getAssetDetailsByQr(clean || String(fb.qrCode || ''), undefined, activeOrgId);
+
+      // Resilient fallback: Try ZR-XXXX and raw digits
+      if (!asset && clean) {
+        const norm = normalizeFieldTag(clean);
+        if (norm.success && norm.rawDigits) {
+          const zrTag = `ZR-${norm.rawDigits}`;
+          if (clean !== zrTag) {
+            asset = await getAssetDetailsByQr(zrTag, undefined, activeOrgId);
+          }
+          if (!asset && clean !== norm.rawDigits) {
+            asset = await getAssetDetailsByQr(norm.rawDigits, undefined, activeOrgId);
+          }
+        }
+      }
+
       if (asset) {
         setPassportAsset(asset);
         setIsPassportOpen(true);
@@ -1688,6 +1673,9 @@ export default function WarehouseDashboardView({
       setIsSearchingPassport(false);
     }
   };
+
+  // Keep handleOpenPassportRef in sync
+  handleOpenPassportRef.current = handleOpenPassport;
 
   // Submit Inter-Depot Asset Transfer
   const handleTransferSubmit = async (e: React.FormEvent) => {
@@ -2126,9 +2114,9 @@ export default function WarehouseDashboardView({
                 <button
                   type="submit"
                   disabled={!passportLookupInput.trim() || isSearchingPassport}
-                  className="h-9 px-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-black text-xs transition-all active:scale-95 cursor-pointer shrink-0"
+                  className="h-9 px-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-black text-xs transition-all active:scale-95 cursor-pointer shrink-0 flex items-center gap-1"
                 >
-                  {isSearchingPassport ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'פתח תיק כלי'}
+                  {isSearchingPassport ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <span>אתר &rarr;</span>}
                 </button>
               </form>
             </div>
@@ -2139,7 +2127,7 @@ export default function WarehouseDashboardView({
                 <div className="flex items-center justify-between text-xs text-slate-300 font-bold px-1">
                   <div className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                    <span>סורק שטח חי פעיל (700ms OCR & QR) &bull; לחץ על המסך לחידוש</span>
+                    <span>סורק לייזר חי (450ms Tesseract + גיבוי ענן) &bull; לחץ על המסך לחידוש</span>
                   </div>
                   <button
                     type="button"
@@ -2167,30 +2155,61 @@ export default function WarehouseDashboardView({
                     className="w-full h-full object-cover"
                   />
 
-                  {/* 60% Focus Target Box with Instant Green Flash on Valid Detection */}
+                  {/* Laser-Strip ROI Target Box: middle 75% width, middle 30% height */}
                   <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
                     <div
-                      className={`w-[60%] h-[60%] max-w-[260px] max-h-[260px] relative rounded-2xl flex items-center justify-center transition-all duration-150 ${
-                        inlineTargetLocked
-                          ? 'border-4 border-emerald-400 bg-emerald-500/30 shadow-[0_0_40px_rgba(16,185,129,0.9)] scale-105'
-                          : 'border-2 border-white/40 bg-white/[0.02]'
+                      className={`w-[75%] h-[30%] min-h-[75px] max-h-[120px] relative rounded-2xl flex items-center justify-center transition-all duration-150 ${
+                        inlineOcrMatchedTag || inlineTargetLocked
+                          ? 'border-4 border-emerald-400 bg-emerald-500/30 shadow-[0_0_40px_rgba(16,185,129,0.9)] scale-102'
+                          : 'border-2 border-emerald-400/60 bg-emerald-950/10'
                       }`}
                     >
-                      <div className="absolute top-0 left-0 w-5 h-5 border-t-4 border-l-4 border-white/80 rounded-tl-lg" />
-                      <div className="absolute top-0 right-0 w-5 h-5 border-t-4 border-r-4 border-white/80 rounded-tr-lg" />
-                      <div className="absolute bottom-0 left-0 w-5 h-5 border-b-4 border-l-4 border-white/80 rounded-bl-lg" />
-                      <div className="absolute bottom-0 right-0 w-5 h-5 border-b-4 border-r-4 border-white/80 rounded-br-lg" />
+                      {/* 4 Precision Corner Guides */}
+                      <div className="absolute top-0 left-0 w-4 h-4 border-t-3 border-l-3 border-emerald-400 rounded-tl-lg" />
+                      <div className="absolute top-0 right-0 w-4 h-4 border-t-3 border-r-3 border-emerald-400 rounded-tr-lg" />
+                      <div className="absolute bottom-0 left-0 w-4 h-4 border-b-3 border-l-3 border-emerald-400 rounded-bl-lg" />
+                      <div className="absolute bottom-0 right-0 w-4 h-4 border-b-3 border-r-3 border-emerald-400 rounded-br-lg" />
 
-                      {inlineTargetLocked ? (
-                        <div className="flex flex-col items-center justify-center text-center animate-in zoom-in-95 duration-150">
-                          <CheckCircle2 className="w-8 h-8 text-emerald-400 mb-1 drop-shadow-md" />
+                      {/* Continuous Pulsing Laser Line Centered in Strip */}
+                      <div className="absolute inset-x-2 h-0.5 bg-emerald-400 shadow-[0_0_12px_#10b981] animate-pulse" />
+
+                      {(inlineOcrMatchedTag || inlineCandidateTag) && (
+                        <div className="flex flex-col items-center justify-center text-center animate-in zoom-in-95 duration-150 z-10">
+                          <CheckCircle2 className="w-8 h-8 text-emerald-400 mb-0.5 drop-shadow-md" />
                           <span className="font-mono text-sm font-black text-white tracking-widest drop-shadow-md" dir="ltr">
-                            {inlineCandidateTag}
+                            {inlineOcrMatchedTag || inlineCandidateTag}
                           </span>
-                          <span className="text-[10px] font-bold text-emerald-300 mt-0.5">פותח תיק כלי...</span>
+                          <span className="text-[10px] font-bold text-emerald-300">פותח תיק כלי...</span>
                         </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Live On-Screen OCR Status Pill inside bottom of camera viewfinder */}
+                  <div className="absolute bottom-12 inset-x-0 flex justify-center items-center pointer-events-none z-20 px-3">
+                    <div
+                      className={`px-3.5 py-1.5 rounded-full backdrop-blur-md border text-xs font-bold flex items-center gap-2 shadow-lg transition-all duration-200 max-w-[92%] truncate ${
+                        inlineOcrMatchedTag || inlineCandidateTag
+                          ? 'bg-emerald-950/90 border-emerald-400 text-white shadow-[0_0_20px_rgba(16,185,129,0.7)] animate-pulse'
+                          : inlineLastRawOcrText
+                          ? 'bg-slate-950/90 border-amber-500/60 text-amber-200'
+                          : 'bg-black/80 border-white/20 text-slate-200'
+                      }`}
+                    >
+                      {inlineOcrMatchedTag || inlineCandidateTag ? (
+                        <span className="flex items-center gap-1.5 text-emerald-300 font-black">
+                          <span>✅ זוהה: {inlineOcrMatchedTag || inlineCandidateTag} - פותח כלי!</span>
+                        </span>
+                      ) : inlineLastRawOcrText ? (
+                        <span className="flex items-center gap-1.5 font-mono text-[11px]">
+                          <span className="text-amber-400">👁️ נקרא:</span>
+                          <span className="text-white font-bold tracking-wider">{inlineLastRawOcrText}</span>
+                        </span>
                       ) : (
-                        <div className="absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-emerald-400/80 to-transparent shadow-[0_0_8px_#34d399] animate-[bounce_2.5s_infinite]" />
+                        <span className="flex items-center gap-1.5 text-[11px] text-emerald-300 font-bold">
+                          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block" />
+                          <span>🔍 סורק טקסט בשטח הקו הירוק...</span>
+                        </span>
                       )}
                     </div>
                   </div>
