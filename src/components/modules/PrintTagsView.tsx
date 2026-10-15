@@ -96,12 +96,12 @@ export function printThermalLabelsDirectly(labelsData: Array<{
           }
         }
         .label-sticker {
-          width: 58mm !important;
-          height: 26mm !important;
-          max-height: 26mm !important;
+          width: 59mm !important;
+          height: 28.5mm !important;
+          max-height: 28.5mm !important;
           box-sizing: border-box !important;
           overflow: hidden !important;
-          padding: 1mm 1.5mm !important;
+          padding: 0.5mm 0.8mm !important;
           page-break-inside: avoid !important;
           page-break-after: always !important;
           break-inside: avoid !important;
@@ -122,25 +122,25 @@ export function printThermalLabelsDirectly(labelsData: Array<{
         const orgName = l.orgName || l.companyName || 'TOOLY';
         const warehouseName = l.warehouseName || '';
         return `
-        <div class="label-sticker" style="width: 58mm; height: 26mm; max-height: 26mm; overflow: hidden; box-sizing: border-box; padding: 1mm 1.5mm;">
+        <div class="label-sticker" style="width: 59mm; height: 28.5mm; max-height: 28.5mm; overflow: hidden; box-sizing: border-box; padding: 0.5mm 0.8mm; page-break-after: always; page-break-inside: avoid;">
           <table style="width: 100%; height: 100%; border-collapse: collapse; table-layout: fixed; margin: 0; padding: 0;">
-            <tr style="height: 24mm;">
-              <!-- Left Column: Crisp Pixelated QR Code -->
-              <td style="width: 23mm; text-align: center; vertical-align: middle; padding: 0;">
-                <img src="${qrDataUrl}" style="width: 22mm; height: 22mm; display: inline-block; object-fit: contain; image-rendering: pixelated;" />
+            <tr style="height: 27.5mm;">
+              <!-- Enlarged QR Code Column (27.5mm x 27.5mm) -->
+              <td style="width: 27.5mm; height: 27.5mm; text-align: center; vertical-align: middle; padding: 0;">
+                <img src="${qrDataUrl}" style="width: 27mm; height: 27mm; display: block; margin: 0 auto; object-fit: contain; image-rendering: pixelated;" />
               </td>
-              <!-- Right Column: Solid Ultra-Black Text -->
-              <td style="width: 33mm; vertical-align: middle; text-align: right; direction: rtl; padding-right: 2mm; overflow: hidden;">
-                <!-- Tag Identifier: Bold, Heavy, Pitch Black -->
-                <div style="font-size: 15pt; font-weight: 900; line-height: 1.1; font-family: 'Arial Black', Impact, Arial, sans-serif; color: #000000 !important; letter-spacing: 0.5px; -webkit-text-stroke: 0.4px #000000;">
+              <!-- Enlarged Ultra-Bold Text Column (30mm wide) -->
+              <td style="width: 30mm; height: 27.5mm; vertical-align: middle; text-align: right; direction: rtl; padding-right: 1.5mm; padding-left: 0.5mm; overflow: hidden; color: #000000 !important;">
+                <!-- Huge Tag ID -->
+                <div style="font-size: 18.5pt; font-weight: 900; line-height: 1.0; font-family: 'Arial Black', Impact, Arial, sans-serif; color: #000000 !important; letter-spacing: 0.5px; -webkit-text-stroke: 0.5px #000000; white-space: nowrap;">
                   ${tagNumber}
                 </div>
-                <!-- Tool Name / Description: Large & Solid -->
-                <div style="font-size: 10pt; font-weight: 800; line-height: 1.2; margin-top: 1mm; font-family: Arial, sans-serif; color: #000000 !important; -webkit-text-stroke: 0.3px #000000;">
+                <!-- Larger Tool Name -->
+                <div style="font-size: 12pt; font-weight: 900; line-height: 1.1; margin-top: 1mm; font-family: Arial, sans-serif; color: #000000 !important; -webkit-text-stroke: 0.35px #000000;">
                   ${toolName}
                 </div>
-                <!-- Full Company & Warehouse: Wrap cleanly without '...' cutting -->
-                <div style="font-size: 8pt; font-weight: 800; line-height: 1.2; margin-top: 1mm; font-family: Arial, sans-serif; color: #000000 !important;">
+                <!-- Larger Company & Warehouse -->
+                <div style="font-size: 9.5pt; font-weight: 800; line-height: 1.15; margin-top: 1mm; font-family: Arial, sans-serif; color: #000000 !important; -webkit-text-stroke: 0.2px #000000;">
                   ${orgName} | ${warehouseName}
                 </div>
               </td>
@@ -196,9 +196,9 @@ function renderLabelToCanvasDataUrl(label: {
       const qrImg = new Image();
       qrImg.crossOrigin = 'anonymous';
       qrImg.onload = () => {
-        // Column 1: QR Code on Left (22mm x 22mm @ 300 DPI = ~260px)
-        const qrSize = Math.round(22 * (300 / 25.4));
-        const padX = Math.round(2 * (300 / 25.4));
+        // Column 1: QR Code on Left (27mm x 27mm @ 300 DPI = ~319px)
+        const qrSize = Math.round(27 * (300 / 25.4));
+        const padX = Math.round(0.8 * (300 / 25.4));
         const qrY = Math.round((canvas.height - qrSize) / 2);
 
         ctx.imageSmoothingEnabled = false;
@@ -210,24 +210,24 @@ function renderLabelToCanvasDataUrl(label: {
         ctx.direction = 'rtl';
         ctx.textAlign = 'right';
 
-        // 1. Tag Title (15pt @ 300 DPI = ~62px)
+        // 1. Huge Tag ID (18.5pt @ 300 DPI = ~77px)
         ctx.fillStyle = '#000000';
-        ctx.font = '900 62px "Arial Black", Impact, Arial, sans-serif';
-        ctx.fillText(label.tagNumber, textRight, 125);
+        ctx.font = '900 76px "Arial Black", Impact, Arial, sans-serif';
+        ctx.fillText(label.tagNumber, textRight, 115);
 
-        // 2. Tool Name (10pt @ 300 DPI = ~42px)
+        // 2. Larger Tool Name (12pt @ 300 DPI = ~50px)
         ctx.fillStyle = '#000000';
-        ctx.font = '800 42px Arial, sans-serif';
+        ctx.font = '900 50px Arial, sans-serif';
         const toolTitle = label.toolName || 'כלי עבודה';
-        ctx.fillText(toolTitle, textRight, 195);
+        ctx.fillText(toolTitle, textRight, 190);
 
-        // 3. Org Name | Warehouse Name (8pt @ 300 DPI = ~33px)
+        // 3. Larger Company & Warehouse (9.5pt @ 300 DPI = ~40px)
         ctx.fillStyle = '#000000';
-        ctx.font = '800 33px Arial, sans-serif';
+        ctx.font = '800 40px Arial, sans-serif';
         const org = label.orgName || label.companyName || 'TOOLY';
         const wh = label.warehouseName || '';
         const orgLine = wh ? `${org} | ${wh}` : org;
-        ctx.fillText(orgLine, textRight, 255);
+        ctx.fillText(orgLine, textRight, 265);
 
         resolve(canvas.toDataURL('image/png'));
       };
@@ -412,7 +412,7 @@ export default function PrintTagsView() {
             batchSerials.map(async (serial) => {
               const universalQrUrl = `${origin}/?org=${encodeURIComponent(orgSlug)}&tool=${encodeURIComponent(serial)}`;
               const qrDataUrl = await QRCode.toDataURL(universalQrUrl, {
-                width: 360,
+                width: 400,
                 margin: 1,
                 errorCorrectionLevel: 'M',
                 color: {
@@ -446,7 +446,7 @@ export default function PrintTagsView() {
 
           const universalQrUrl = `${origin}/?org=${encodeURIComponent(orgSlug)}&tool=${encodeURIComponent(reprintAsset.qrCode)}`;
           const qrDataUrl = await QRCode.toDataURL(universalQrUrl, {
-            width: 360,
+            width: 400,
             margin: 1,
             errorCorrectionLevel: 'M',
             color: {
@@ -617,12 +617,12 @@ export default function PrintTagsView() {
           .label-sticker,
           .print-label-page,
           .tsc-label {
-            width: 58mm !important;
-            height: 26mm !important;
-            max-width: 58mm !important;
-            max-height: 26mm !important;
+            width: 59mm !important;
+            height: 28.5mm !important;
+            max-width: 59mm !important;
+            max-height: 28.5mm !important;
             box-sizing: border-box !important;
-            padding: 1mm 1.5mm !important;
+            padding: 0.5mm 0.8mm !important;
             overflow: hidden !important;
             page-break-inside: avoid !important;
             page-break-after: always !important;
@@ -1120,33 +1120,33 @@ export default function PrintTagsView() {
               return (
                 <div
                   key={`${tag.serial}-${idx}`}
-                  className="label-sticker print-label-page tsc-label bg-white border-2 border-black rounded-xl aspect-[2/1] w-full max-w-[340px] mx-auto shadow-sm transition-all overflow-hidden print:shadow-none print:border-none print:rounded-none print:m-0 print:w-[58mm] print:h-[26mm] print:max-h-[26mm] print:p-[1mm_1.5mm]"
-                  style={{ width: '58mm', height: '26mm', maxHeight: '26mm', overflow: 'hidden', boxSizing: 'border-box', padding: '1mm 1.5mm' }}
+                  className="label-sticker print-label-page tsc-label bg-white border-2 border-black rounded-xl aspect-[2/1] w-full max-w-[340px] mx-auto shadow-sm transition-all overflow-hidden print:shadow-none print:border-none print:rounded-none print:m-0 print:w-[59mm] print:h-[28.5mm] print:max-h-[28.5mm] print:p-[0.5mm_0.8mm]"
+                  style={{ width: '59mm', height: '28.5mm', maxHeight: '28.5mm', overflow: 'hidden', boxSizing: 'border-box', padding: '0.5mm 0.8mm' }}
                 >
                   <table style={{ width: '100%', height: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', margin: 0, padding: 0 }}>
                     <tbody>
-                      <tr style={{ height: '24mm' }}>
-                        {/* Left Column: Crisp Pixelated QR Code */}
-                        <td style={{ width: '23mm', textAlign: 'center', verticalAlign: 'middle', padding: 0 }}>
+                      <tr style={{ height: '27.5mm' }}>
+                        {/* Enlarged QR Code Column (27.5mm x 27.5mm) */}
+                        <td style={{ width: '27.5mm', height: '27.5mm', textAlign: 'center', verticalAlign: 'middle', padding: 0 }}>
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
                             src={tag.qrDataUrl}
                             alt={`QR Code for ${tag.serial}`}
-                            style={{ width: '22mm', height: '22mm', display: 'inline-block', objectFit: 'contain', imageRendering: 'pixelated' }}
+                            style={{ width: '27mm', height: '27mm', display: 'block', margin: '0 auto', objectFit: 'contain', imageRendering: 'pixelated' }}
                           />
                         </td>
-                        {/* Right Column: Solid Ultra-Black Text */}
-                        <td style={{ width: '33mm', verticalAlign: 'middle', textAlign: 'right', direction: 'rtl', paddingRight: '2mm', overflow: 'hidden' }}>
-                          {/* Tag Identifier: Bold, Heavy, Pitch Black */}
-                          <div style={{ fontSize: '15pt', fontWeight: 900, lineHeight: 1.1, fontFamily: "'Arial Black', Impact, Arial, sans-serif", color: '#000000', letterSpacing: '0.5px', WebkitTextStroke: '0.4px #000000' }}>
+                        {/* Enlarged Ultra-Bold Text Column (30mm wide) */}
+                        <td style={{ width: '30mm', height: '27.5mm', verticalAlign: 'middle', textAlign: 'right', direction: 'rtl', paddingRight: '1.5mm', paddingLeft: '0.5mm', overflow: 'hidden', color: '#000000' }}>
+                          {/* Huge Tag ID */}
+                          <div style={{ fontSize: '18.5pt', fontWeight: 900, lineHeight: 1.0, fontFamily: "'Arial Black', Impact, Arial, sans-serif", color: '#000000', letterSpacing: '0.5px', WebkitTextStroke: '0.5px #000000', whiteSpace: 'nowrap' }}>
                             {tag.serial}
                           </div>
-                          {/* Tool Name / Description: Large & Solid */}
-                          <div style={{ fontSize: '10pt', fontWeight: 800, lineHeight: 1.2, marginTop: '1mm', fontFamily: 'Arial, sans-serif', color: '#000000', WebkitTextStroke: '0.3px #000000' }}>
+                          {/* Larger Tool Name */}
+                          <div style={{ fontSize: '12pt', fontWeight: 900, lineHeight: 1.1, marginTop: '1mm', fontFamily: 'Arial, sans-serif', color: '#000000', WebkitTextStroke: '0.35px #000000' }}>
                             {currentTool}
                           </div>
-                          {/* Full Company & Warehouse: Wrap cleanly without '...' cutting */}
-                          <div style={{ fontSize: '8pt', fontWeight: 800, lineHeight: 1.2, marginTop: '1mm', fontFamily: 'Arial, sans-serif', color: '#000000' }}>
+                          {/* Larger Company & Warehouse */}
+                          <div style={{ fontSize: '9.5pt', fontWeight: 800, lineHeight: 1.15, marginTop: '1mm', fontFamily: 'Arial, sans-serif', color: '#000000', WebkitTextStroke: '0.2px #000000' }}>
                             {effectiveCompanyName} | {currentWh}
                           </div>
                         </td>
