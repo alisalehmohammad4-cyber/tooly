@@ -75,3 +75,12 @@
 .animate-new-movement {
   animation: highlightMovementFade 4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
+
+@media print {
+  * {
+    color: #000000 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
+

@@ -52,7 +52,7 @@ export function printThermalLabelsDirectly(labelsData: Array<{
 
   const htmlContent = `
     <!DOCTYPE html>
-    <html lang="he">
+    <html lang="he" dir="rtl">
     <head>
       <meta charset="utf-8" />
       <title>TSC Print - 60x30mm</title>
@@ -65,8 +65,9 @@ export function printThermalLabelsDirectly(labelsData: Array<{
           box-sizing: border-box;
           margin: 0;
           padding: 0;
-          -webkit-print-color-adjust: exact;
-          print-color-adjust: exact;
+          color: #000000 !important;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
         }
         html, body {
           margin: 0 !important;
@@ -74,86 +75,42 @@ export function printThermalLabelsDirectly(labelsData: Array<{
           width: 60mm !important;
           height: 30mm !important;
           overflow: hidden !important;
-          background: #ffffff;
+          background: #ffffff !important;
+          color: #000000 !important;
           font-family: Arial, Helvetica, sans-serif;
         }
         @media print {
+          * {
+            color: #000000 !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
           html, body {
             margin: 0 !important;
             padding: 0 !important;
             width: 60mm !important;
             height: auto !important;
             overflow: visible !important;
+            background: #ffffff !important;
+            color: #000000 !important;
           }
         }
         .label-sticker {
           width: 58mm !important;
-          height: 27mm !important;
-          max-height: 27mm !important;
+          height: 26mm !important;
+          max-height: 26mm !important;
           box-sizing: border-box !important;
-          display: flex !important;
-          flex-direction: row !important;
-          align-items: center !important;
-          justify-content: space-between !important;
-          padding: 1.5mm 2mm !important;
           overflow: hidden !important;
+          padding: 1mm 1.5mm !important;
           page-break-inside: avoid !important;
           page-break-after: always !important;
           break-inside: avoid !important;
           break-after: page !important;
-          background: #ffffff;
+          background: #ffffff !important;
         }
         .label-sticker:last-child {
           page-break-after: avoid !important;
           break-after: avoid !important;
-        }
-        .qr-col {
-          width: 22mm;
-          height: 22mm;
-          flex-shrink: 0;
-        }
-        .qr-col img {
-          width: 22mm !important;
-          height: 22mm !important;
-          display: block !important;
-          object-fit: contain;
-          image-rendering: -webkit-optimize-contrast;
-          image-rendering: crisp-edges;
-        }
-        .info-col {
-          flex: 1;
-          margin-left: 2mm;
-          display: flex;
-          flex-direction: column;
-          justify-content: center;
-          overflow: hidden;
-          text-align: right;
-          direction: rtl;
-        }
-        .tag-title {
-          font-size: 13pt;
-          font-weight: 900;
-          line-height: 1.1;
-          letter-spacing: 0.5px;
-          color: #000;
-          font-family: Arial, Helvetica, sans-serif;
-        }
-        .tool-name {
-          font-size: 8pt;
-          font-weight: 700;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          margin-top: 1mm;
-          color: #000;
-        }
-        .org-name {
-          font-size: 7pt;
-          color: #333;
-          margin-top: 0.5mm;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
         }
       </style>
     </head>
@@ -164,19 +121,31 @@ export function printThermalLabelsDirectly(labelsData: Array<{
         const toolName = l.toolName || '';
         const orgName = l.orgName || l.companyName || 'TOOLY';
         const warehouseName = l.warehouseName || '';
-        const orgDisplay = warehouseName ? `${orgName} - ${warehouseName}` : orgName;
         return `
-        <div class="label-sticker">
-          <!-- Column 1: QR Code -->
-          <div class="qr-col">
-            <img src="${qrDataUrl}" style="width: 22mm; height: 22mm; display: block;" />
-          </div>
-          <!-- Column 2: Text Info -->
-          <div class="info-col">
-            <div class="tag-title">${tagNumber}</div>
-            <div class="tool-name">${toolName}</div>
-            <div class="org-name">${orgDisplay}</div>
-          </div>
+        <div class="label-sticker" style="width: 58mm; height: 26mm; max-height: 26mm; overflow: hidden; box-sizing: border-box; padding: 1mm 1.5mm;">
+          <table style="width: 100%; height: 100%; border-collapse: collapse; table-layout: fixed; margin: 0; padding: 0;">
+            <tr style="height: 24mm;">
+              <!-- Left Column: Crisp Pixelated QR Code -->
+              <td style="width: 23mm; text-align: center; vertical-align: middle; padding: 0;">
+                <img src="${qrDataUrl}" style="width: 22mm; height: 22mm; display: inline-block; object-fit: contain; image-rendering: pixelated;" />
+              </td>
+              <!-- Right Column: Solid Ultra-Black Text -->
+              <td style="width: 33mm; vertical-align: middle; text-align: right; direction: rtl; padding-right: 2mm; overflow: hidden;">
+                <!-- Tag Identifier: Bold, Heavy, Pitch Black -->
+                <div style="font-size: 15pt; font-weight: 900; line-height: 1.1; font-family: 'Arial Black', Impact, Arial, sans-serif; color: #000000 !important; letter-spacing: 0.5px; -webkit-text-stroke: 0.4px #000000;">
+                  ${tagNumber}
+                </div>
+                <!-- Tool Name / Description: Large & Solid -->
+                <div style="font-size: 10pt; font-weight: 800; line-height: 1.2; margin-top: 1mm; font-family: Arial, sans-serif; color: #000000 !important; -webkit-text-stroke: 0.3px #000000;">
+                  ${toolName}
+                </div>
+                <!-- Full Company & Warehouse: Wrap cleanly without '...' cutting -->
+                <div style="font-size: 8pt; font-weight: 800; line-height: 1.2; margin-top: 1mm; font-family: Arial, sans-serif; color: #000000 !important;">
+                  ${orgName} | ${warehouseName}
+                </div>
+              </td>
+            </tr>
+          </table>
         </div>
         `;
       }).join('')}
@@ -241,24 +210,24 @@ function renderLabelToCanvasDataUrl(label: {
         ctx.direction = 'rtl';
         ctx.textAlign = 'right';
 
-        // 1. Tag Title (13pt @ 300 DPI = ~54px)
+        // 1. Tag Title (15pt @ 300 DPI = ~62px)
         ctx.fillStyle = '#000000';
-        ctx.font = '900 54px Arial, Helvetica, sans-serif';
-        ctx.fillText(label.tagNumber, textRight, 130);
+        ctx.font = '900 62px "Arial Black", Impact, Arial, sans-serif';
+        ctx.fillText(label.tagNumber, textRight, 125);
 
-        // 2. Tool Name (8pt @ 300 DPI = ~34px)
+        // 2. Tool Name (10pt @ 300 DPI = ~42px)
         ctx.fillStyle = '#000000';
-        ctx.font = '700 34px Arial, Helvetica, sans-serif';
+        ctx.font = '800 42px Arial, sans-serif';
         const toolTitle = label.toolName || 'כלי עבודה';
-        ctx.fillText(toolTitle.slice(0, 36), textRight, 195);
+        ctx.fillText(toolTitle, textRight, 195);
 
-        // 3. Org Name - Warehouse Name (7pt @ 300 DPI = ~29px)
-        ctx.fillStyle = '#333333';
-        ctx.font = '28px Arial, Helvetica, sans-serif';
+        // 3. Org Name | Warehouse Name (8pt @ 300 DPI = ~33px)
+        ctx.fillStyle = '#000000';
+        ctx.font = '800 33px Arial, sans-serif';
         const org = label.orgName || label.companyName || 'TOOLY';
         const wh = label.warehouseName || '';
-        const orgLine = wh ? `${org} - ${wh}` : org;
-        ctx.fillText(orgLine.slice(0, 42), textRight, 250);
+        const orgLine = wh ? `${org} | ${wh}` : org;
+        ctx.fillText(orgLine, textRight, 255);
 
         resolve(canvas.toDataURL('image/png'));
       };
@@ -618,6 +587,11 @@ export default function PrintTagsView() {
           margin: 0;
         }
         @media print {
+          * {
+            color: #000000 !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
           @page {
             size: 60mm 30mm;
             margin: 0;
@@ -630,6 +604,7 @@ export default function PrintTagsView() {
             padding: 0 !important;
             overflow: visible !important;
             background: #ffffff !important;
+            color: #000000 !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
           }
@@ -643,15 +618,11 @@ export default function PrintTagsView() {
           .print-label-page,
           .tsc-label {
             width: 58mm !important;
-            height: 27mm !important;
+            height: 26mm !important;
             max-width: 58mm !important;
-            max-height: 27mm !important;
+            max-height: 26mm !important;
             box-sizing: border-box !important;
-            display: flex !important;
-            flex-direction: row !important;
-            align-items: center !important;
-            justify-content: space-between !important;
-            padding: 1.5mm 2mm !important;
+            padding: 1mm 1.5mm !important;
             overflow: hidden !important;
             page-break-inside: avoid !important;
             page-break-after: always !important;
@@ -662,6 +633,7 @@ export default function PrintTagsView() {
             box-shadow: none !important;
             margin: 0 !important;
             background: #ffffff !important;
+            color: #000000 !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
           }
@@ -670,55 +642,6 @@ export default function PrintTagsView() {
           .tsc-label:last-child {
             page-break-after: avoid !important;
             break-after: avoid !important;
-          }
-          .qr-col {
-            width: 22mm !important;
-            height: 22mm !important;
-            flex-shrink: 0 !important;
-          }
-          .qr-col img,
-          .tsc-qr-img {
-            width: 22mm !important;
-            height: 22mm !important;
-            max-width: 22mm !important;
-            max-height: 22mm !important;
-            display: block !important;
-            object-fit: contain !important;
-            image-rendering: -webkit-optimize-contrast !important;
-            image-rendering: crisp-edges !important;
-          }
-          .info-col {
-            flex: 1 !important;
-            margin-left: 2mm !important;
-            display: flex !important;
-            flex-direction: column !important;
-            justify-content: center !important;
-            overflow: hidden !important;
-            text-align: right !important;
-            direction: rtl !important;
-          }
-          .tag-title {
-            font-size: 13pt !important;
-            font-weight: 900 !important;
-            line-height: 1.1 !important;
-            letter-spacing: 0.5px !important;
-            font-family: Arial, Helvetica, sans-serif !important;
-          }
-          .tool-name {
-            font-size: 8pt !important;
-            font-weight: 700 !important;
-            white-space: nowrap !important;
-            overflow: hidden !important;
-            text-overflow: ellipsis !important;
-            margin-top: 1mm !important;
-          }
-          .org-name {
-            font-size: 7pt !important;
-            color: #333 !important;
-            margin-top: 0.5mm !important;
-            white-space: nowrap !important;
-            overflow: hidden !important;
-            text-overflow: ellipsis !important;
           }
         }
       `}</style>
@@ -1197,31 +1120,39 @@ export default function PrintTagsView() {
               return (
                 <div
                   key={`${tag.serial}-${idx}`}
-                  className="label-sticker print-label-page tsc-label bg-white border-2 border-slate-900 rounded-xl p-2.5 sm:p-3 aspect-[2/1] w-full max-w-[340px] mx-auto flex flex-row items-center justify-between gap-2 shadow-sm transition-all overflow-hidden print:shadow-none print:border-none print:rounded-none print:m-0 print:w-[58mm] print:h-[27mm] print:max-h-[27mm] print:p-[1.5mm_2mm]"
+                  className="label-sticker print-label-page tsc-label bg-white border-2 border-black rounded-xl aspect-[2/1] w-full max-w-[340px] mx-auto shadow-sm transition-all overflow-hidden print:shadow-none print:border-none print:rounded-none print:m-0 print:w-[58mm] print:h-[26mm] print:max-h-[26mm] print:p-[1mm_1.5mm]"
+                  style={{ width: '58mm', height: '26mm', maxHeight: '26mm', overflow: 'hidden', boxSizing: 'border-box', padding: '1mm 1.5mm' }}
                 >
-                  {/* Column 1: QR Code */}
-                  <div className="qr-col shrink-0 flex items-center justify-center">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={tag.qrDataUrl}
-                      alt={`QR Code for ${tag.serial}`}
-                      style={{ width: '22mm', height: '22mm', display: 'block' }}
-                      className="tsc-qr-img object-contain"
-                    />
-                  </div>
-
-                  {/* Column 2: Text Info */}
-                  <div className="info-col flex-1 min-w-0 mr-1 sm:mr-2 text-right overflow-hidden flex flex-col justify-center" dir="rtl">
-                    <div className="tag-title font-mono font-black text-slate-950 text-sm sm:text-base leading-tight tracking-wider" dir="ltr">
-                      {tag.serial}
-                    </div>
-                    <div className="tool-name text-xs font-bold text-slate-800 truncate mt-1 leading-tight" title={currentTool}>
-                      {currentTool}
-                    </div>
-                    <div className="org-name text-[10px] text-slate-600 truncate mt-0.5 leading-tight">
-                      {effectiveCompanyName} - {currentWh}
-                    </div>
-                  </div>
+                  <table style={{ width: '100%', height: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', margin: 0, padding: 0 }}>
+                    <tbody>
+                      <tr style={{ height: '24mm' }}>
+                        {/* Left Column: Crisp Pixelated QR Code */}
+                        <td style={{ width: '23mm', textAlign: 'center', verticalAlign: 'middle', padding: 0 }}>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={tag.qrDataUrl}
+                            alt={`QR Code for ${tag.serial}`}
+                            style={{ width: '22mm', height: '22mm', display: 'inline-block', objectFit: 'contain', imageRendering: 'pixelated' }}
+                          />
+                        </td>
+                        {/* Right Column: Solid Ultra-Black Text */}
+                        <td style={{ width: '33mm', verticalAlign: 'middle', textAlign: 'right', direction: 'rtl', paddingRight: '2mm', overflow: 'hidden' }}>
+                          {/* Tag Identifier: Bold, Heavy, Pitch Black */}
+                          <div style={{ fontSize: '15pt', fontWeight: 900, lineHeight: 1.1, fontFamily: "'Arial Black', Impact, Arial, sans-serif", color: '#000000', letterSpacing: '0.5px', WebkitTextStroke: '0.4px #000000' }}>
+                            {tag.serial}
+                          </div>
+                          {/* Tool Name / Description: Large & Solid */}
+                          <div style={{ fontSize: '10pt', fontWeight: 800, lineHeight: 1.2, marginTop: '1mm', fontFamily: 'Arial, sans-serif', color: '#000000', WebkitTextStroke: '0.3px #000000' }}>
+                            {currentTool}
+                          </div>
+                          {/* Full Company & Warehouse: Wrap cleanly without '...' cutting */}
+                          <div style={{ fontSize: '8pt', fontWeight: 800, lineHeight: 1.2, marginTop: '1mm', fontFamily: 'Arial, sans-serif', color: '#000000' }}>
+                            {effectiveCompanyName} | {currentWh}
+                          </div>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
                 </div>
               );
             })}
