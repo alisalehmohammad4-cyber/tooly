@@ -1268,11 +1268,13 @@ export default function WarehouseDashboardView({
   const handleCompleteReception = async (req: PendingTransferItem) => {
     setReceivingTransferId(req.id);
     try {
-      const res = await completeTransferReceptionAction(
-        req.id,
-        req.assetId,
-        req.targetWarehouseId
-      );
+      const res = await completeTransferReceptionAction({
+        assetId: req.assetId,
+        qrCode: req.qrCode,
+        tagNumber: req.tagNumber || undefined,
+        targetWarehouseId: req.targetWarehouseId,
+        requestId: req.id,
+      });
       if (!res.success) {
         alert(`שגיאה בביצוע הפעולה: ${res.error || 'שגיאה בקליטת הציוד'}`);
         return;
@@ -1313,6 +1315,7 @@ export default function WarehouseDashboardView({
     try {
       const res = await completeTransferReceptionAction({
         assetId: item.assetId,
+        qrCode: item.qrCode,
         targetWarehouseId: item.destinationWarehouseId,
         notes: `אישור הגעה וקליטת ציוד ${item.toolName} (${item.qrCode})`,
         requestId: item.requestId,
@@ -1353,6 +1356,7 @@ export default function WarehouseDashboardView({
     try {
       const res = await cancelTransferRollbackAction({
         assetId: item.assetId,
+        qrCode: item.qrCode,
         sourceWarehouseId: item.originWarehouseId,
         notes: `ביטול שינוע והחזרת כלי ${item.toolName} (${item.qrCode}) למחסן מקור`,
         requestId: item.requestId,

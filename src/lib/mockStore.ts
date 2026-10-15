@@ -42620,6 +42620,19 @@ export function getMockAssetByQr(
   return null;
 }
 
+const clearedInTransitAssetKeys = new Set<string>();
+
+export function clearInTransitMockAsset(identifier?: string | null): void {
+  if (identifier && typeof identifier === 'string') {
+    clearedInTransitAssetKeys.add(identifier.trim().toLowerCase());
+  }
+}
+
+export function isDemonstrativeInTransitCleared(identifier?: string | null): boolean {
+  if (!identifier || typeof identifier !== 'string') return false;
+  return clearedInTransitAssetKeys.has(identifier.trim().toLowerCase());
+}
+
 /**
  * Mutates an asset in the mock store and appends an audit entry to history.
  */
@@ -42636,10 +42649,23 @@ export function mutateMockAsset(
     damageReport?: AuditHistoryRecord['damageReport'];
   }
 ): ScannedAssetDetails | null {
-  const asset = assetsStore.find((a) => a.qrCode === qrCode || a.id === qrCode);
+  const asset = assetsStore.find(
+    (a) =>
+      a.qrCode === qrCode ||
+      a.id === qrCode ||
+      a.serialNumber === qrCode ||
+      (a as unknown as Record<string, unknown>).tag_number === qrCode ||
+      (a as unknown as Record<string, unknown>).tagNumber === qrCode
+  );
   if (!asset) return null;
 
   Object.assign(asset, mutation, { version: (asset.version || 1) + 1 });
+
+  if (mutation.status === 'in_stock') {
+    clearInTransitMockAsset(asset.id);
+    clearInTransitMockAsset(asset.qrCode);
+    if (asset.serialNumber) clearInTransitMockAsset(asset.serialNumber);
+  }
 
   // Update warehouse name/code if warehouseId changed
   if (mutation.warehouseId) {

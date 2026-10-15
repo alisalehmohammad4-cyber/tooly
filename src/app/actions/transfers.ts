@@ -7,6 +7,7 @@ import {
   getMockWarehouses,
   getMockAssets,
   mutateMockAsset,
+  clearInTransitMockAsset,
 } from '@/lib/mockStore';
 
 export interface PendingTransferItem {
@@ -655,6 +656,8 @@ async function resolveVerifiedWarehouse(
 
 export interface CompleteTransferParams {
   assetId: string;
+  qrCode?: string;
+  tagNumber?: string;
   targetWarehouseId?: string;
   notes?: string;
   requestId?: string;
@@ -662,6 +665,8 @@ export interface CompleteTransferParams {
 
 export interface CancelTransferParams {
   assetId: string;
+  qrCode?: string;
+  tagNumber?: string;
   sourceWarehouseId?: string;
   notes?: string;
   requestId?: string;
@@ -670,12 +675,13 @@ export interface CancelTransferParams {
 /**
  * 5. completeTransferReceptionAction
  * Storekeeper confirms physical arrival and receives the asset:
- * - Supports both parameter formats (object { assetId, targetWarehouseId } or raw string assetId).
- * - Bulletproof Asset Lookup (by UUID or tag_number, with organization check for non-SuperAdmin).
+ * - Supports both parameter formats (object CompleteTransferParams or legacy positional args).
+ * - Bulletproof Asset Lookup (never queries UUID column with non-UUID strings to avoid Postgres 22P02).
  * - Updates asset status from 'in_transit' to 'in_stock'.
  * - Sets asset current_warehouse_id to verified target warehouse UUID.
  * - Writes a "RECEIVE_TRANSFER" entry into custody_ledger with verified warehouse_id UUID.
- * - Updates any associated transfer_requests to 'COMPLETED'.
+ * - Updates associated transfer_requests to 'COMPLETED'.
+ * - Synchronizes and cleans up both Supabase and mockStore.
  * - Revalidates /dashboard/warehouse, /history, and /catalog.
  */
 export async function completeTransferReceptionAction(
@@ -684,30 +690,38 @@ export async function completeTransferReceptionAction(
   targetWarehouseIdArg?: string,
   notesArg?: string
 ): Promise<{ success: boolean; error?: string; message?: string }> {
-  let cleanIdentifier = '';
+  const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  let rawId = '';
+  let rawQr = '';
   let targetWarehouseId: string | undefined;
   let notes: string | undefined;
   let requestId: string | undefined;
 
   if (typeof dataOrRequestId === 'object' && dataOrRequestId !== null) {
-    cleanIdentifier = (dataOrRequestId.assetId || '').trim();
+    rawId = (dataOrRequestId.assetId || '').trim();
+    rawQr = (dataOrRequestId.qrCode || dataOrRequestId.tagNumber || '').trim();
     targetWarehouseId = dataOrRequestId.targetWarehouseId;
     notes = dataOrRequestId.notes;
     requestId = dataOrRequestId.requestId;
   } else if (typeof dataOrRequestId === 'string') {
     if (assetIdArg && typeof assetIdArg === 'string' && assetIdArg.trim()) {
       requestId = dataOrRequestId.trim();
-      cleanIdentifier = assetIdArg.trim();
+      rawId = assetIdArg.trim();
       targetWarehouseId = targetWarehouseIdArg;
       notes = notesArg;
     } else {
-      cleanIdentifier = dataOrRequestId.trim();
+      rawId = dataOrRequestId.trim();
       targetWarehouseId = targetWarehouseIdArg;
       notes = notesArg;
     }
   }
 
-  if (!cleanIdentifier) {
+  // Prefer real UUID, otherwise use qrCode/tagNumber (ignore fake 'ast-...' IDs):
+  const lookupTarget = UUID_REGEX.test(rawId) ? rawId : (rawQr || rawId);
+  const cleanTag = lookupTarget.trim();
+
+  if (!cleanTag) {
     return { success: false, error: 'יש לציין מזהה כלי עבודה לקליטה' };
   }
 
@@ -721,15 +735,15 @@ export async function completeTransferReceptionAction(
 
   let finalTargetWarehouseId: string | null = null;
   let finalTargetWarehouseName = 'מחסן יעד';
+  let resolvedAsset: { id: string; qr_code?: string; tag_number?: string; organization_id?: string; current_warehouse_id?: string } | null = null;
 
   if (isSupabaseConfigured()) {
     try {
-      // Query asset by UUID or tag_number:
       let query = supabaseAdmin.from('assets').select('*');
-      if (cleanIdentifier.includes('-') && cleanIdentifier.length > 20) {
-        query = query.eq('id', cleanIdentifier);
+      if (UUID_REGEX.test(lookupTarget)) {
+        query = query.eq('id', lookupTarget);
       } else {
-        query = query.or(`tag_number.eq.${cleanIdentifier},id.eq.${cleanIdentifier}`);
+        query = query.or(`tag_number.ilike.${cleanTag},qr_code.ilike.${cleanTag},serial_number.ilike.${cleanTag}`);
       }
 
       // If caller is NOT SuperAdmin, enforce organization_id:
@@ -739,12 +753,29 @@ export async function completeTransferReceptionAction(
 
       let { data: asset, error: assetErr } = await query.maybeSingle();
 
-      // Resilient fallback: if query errored or didn't find by tag_number/id, also try qr_code or tag_number directly
-      if (!asset) {
+      // Fallback: If not found and rawQr was provided and different from lookupTarget, try rawQr
+      if (!asset && rawQr && rawQr !== cleanTag) {
+        const cleanQr = rawQr.trim();
         let fallbackQuery = supabaseAdmin
           .from('assets')
           .select('*')
-          .or(`tag_number.eq.${cleanIdentifier},qr_code.eq.${cleanIdentifier}`);
+          .or(`tag_number.ilike.${cleanQr},qr_code.ilike.${cleanQr},serial_number.ilike.${cleanQr}`);
+        if (!isPlatformSuperAdmin(sessionUser) && sessionUser?.organization_id) {
+          fallbackQuery = fallbackQuery.eq('organization_id', sessionUser.organization_id);
+        }
+        const { data: fallbackAsset } = await fallbackQuery.maybeSingle();
+        if (fallbackAsset) {
+          asset = fallbackAsset;
+        }
+      }
+
+      // Fallback: If still not found and rawId was provided and different, and not a fake 'ast-' id
+      if (!asset && rawId && rawId !== cleanTag && !rawId.startsWith('ast-')) {
+        const cleanRaw = rawId.trim();
+        let fallbackQuery = supabaseAdmin
+          .from('assets')
+          .select('*')
+          .or(`tag_number.ilike.${cleanRaw},qr_code.ilike.${cleanRaw},serial_number.ilike.${cleanRaw}`);
         if (!isPlatformSuperAdmin(sessionUser) && sessionUser?.organization_id) {
           fallbackQuery = fallbackQuery.eq('organization_id', sessionUser.organization_id);
         }
@@ -755,119 +786,129 @@ export async function completeTransferReceptionAction(
       }
 
       if (!asset) {
-        return { success: false, error: `כלי העבודה (${cleanIdentifier}) לא נמצא במערכת` };
-      }
-
-      const activeOrg = asset.organization_id;
-
-      // 1. Resolve and verify target warehouse strictly using verified UUIDs in Supabase
-      let targetWh = await resolveVerifiedWarehouse(targetWarehouseId, activeOrg);
-      if (!targetWh) {
-        targetWh = await resolveVerifiedWarehouse(asset.current_warehouse_id, activeOrg);
-      }
-      if (!targetWh) {
-        const { data: fallbackWh } = await supabaseAdmin
-          .from('warehouses')
-          .select('id, name')
-          .eq('organization_id', activeOrg)
-          .order('created_at', { ascending: true })
-          .limit(1)
-          .maybeSingle();
-        if (fallbackWh) {
-          targetWh = { id: fallbackWh.id, name: fallbackWh.name };
+        // Check if exists in mockStore before failing
+        const mockAsset = getMockAssets().find(
+          (m) =>
+            m.id === rawId ||
+            m.id === lookupTarget ||
+            m.qrCode === cleanTag ||
+            m.qrCode === rawQr ||
+            m.serialNumber === cleanTag
+        );
+        if (!mockAsset) {
+          return { success: false, error: `כלי העבודה (${cleanTag || rawId}) לא נמצא במערכת` };
         }
-      }
+      } else {
+        resolvedAsset = asset;
+        const activeOrg = asset.organization_id;
 
-      finalTargetWarehouseId = targetWh?.id || asset.current_warehouse_id;
-      finalTargetWarehouseName = targetWh?.name || 'מחסן יעד';
-
-      // Resolve source warehouse UUID (from transfer_requests or custody_ledger)
-      let sourceWh: { id: string; name: string } | null = null;
-      if (requestId) {
-        const { data: tr } = await supabaseAdmin
-          .from('transfer_requests')
-          .select('source_warehouse_id')
-          .eq('id', requestId)
-          .maybeSingle();
-        if (tr?.source_warehouse_id) {
-          sourceWh = await resolveVerifiedWarehouse(tr.source_warehouse_id, activeOrg);
+        // 1. Resolve and verify target warehouse strictly using verified UUIDs in Supabase
+        let targetWh = await resolveVerifiedWarehouse(targetWarehouseId, activeOrg);
+        if (!targetWh) {
+          targetWh = await resolveVerifiedWarehouse(asset.current_warehouse_id, activeOrg);
         }
-      }
-      if (!sourceWh) {
-        const { data: tr } = await supabaseAdmin
-          .from('transfer_requests')
-          .select('source_warehouse_id')
-          .eq('asset_id', asset.id)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (tr?.source_warehouse_id) {
-          sourceWh = await resolveVerifiedWarehouse(tr.source_warehouse_id, activeOrg);
-        }
-      }
-      if (!sourceWh) {
-        const { data: ledgerPrev } = await supabaseAdmin
-          .from('custody_ledger')
-          .select('from_warehouse_id, warehouse_id')
-          .eq('asset_id', asset.id)
-          .order('created_at', { ascending: false })
-          .limit(3);
-        if (ledgerPrev && ledgerPrev.length > 0) {
-          const prevId = ledgerPrev[0]?.from_warehouse_id || ledgerPrev[0]?.warehouse_id;
-          if (prevId) {
-            sourceWh = await resolveVerifiedWarehouse(prevId, activeOrg);
+        if (!targetWh) {
+          const { data: fallbackWh } = await supabaseAdmin
+            .from('warehouses')
+            .select('id, name')
+            .eq('organization_id', activeOrg)
+            .order('created_at', { ascending: true })
+            .limit(1)
+            .maybeSingle();
+          if (fallbackWh) {
+            targetWh = { id: fallbackWh.id, name: fallbackWh.name };
           }
         }
-      }
 
-      const sourceWarehouseUuid = sourceWh?.id || null;
+        finalTargetWarehouseId = targetWh?.id || asset.current_warehouse_id;
+        finalTargetWarehouseName = targetWh?.name || 'מחסן יעד';
 
-      // 2. Updates asset status from 'in_transit' to 'in_stock'
-      // Sets asset current_warehouse_id to verified target warehouse UUID
-      const { error: updateErr } = await supabaseAdmin
-        .from('assets')
-        .update({
-          current_warehouse_id: finalTargetWarehouseId,
-          status: 'in_stock',
-          current_assigned_worker: null,
-          updated_at: now,
-        })
-        .eq('id', asset.id);
+        // Resolve source warehouse UUID (from transfer_requests or custody_ledger)
+        let sourceWh: { id: string; name: string } | null = null;
+        if (requestId && UUID_REGEX.test(requestId)) {
+          const { data: tr } = await supabaseAdmin
+            .from('transfer_requests')
+            .select('source_warehouse_id')
+            .eq('id', requestId)
+            .maybeSingle();
+          if (tr?.source_warehouse_id) {
+            sourceWh = await resolveVerifiedWarehouse(tr.source_warehouse_id, activeOrg);
+          }
+        }
+        if (!sourceWh) {
+          const { data: tr } = await supabaseAdmin
+            .from('transfer_requests')
+            .select('source_warehouse_id')
+            .eq('asset_id', asset.id)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (tr?.source_warehouse_id) {
+            sourceWh = await resolveVerifiedWarehouse(tr.source_warehouse_id, activeOrg);
+          }
+        }
+        if (!sourceWh) {
+          const { data: ledgerPrev } = await supabaseAdmin
+            .from('custody_ledger')
+            .select('from_warehouse_id, warehouse_id')
+            .eq('asset_id', asset.id)
+            .order('created_at', { ascending: false })
+            .limit(3);
+          if (ledgerPrev && ledgerPrev.length > 0) {
+            const prevId = ledgerPrev[0]?.from_warehouse_id || ledgerPrev[0]?.warehouse_id;
+            if (prevId) {
+              sourceWh = await resolveVerifiedWarehouse(prevId, activeOrg);
+            }
+          }
+        }
 
-      if (updateErr) {
-        return { success: false, error: `שגיאה בעדכון כלי: ${updateErr.message}` };
-      }
+        const sourceWarehouseUuid = sourceWh?.id || null;
 
-      // 3. Write a "RECEIVE_TRANSFER" entry into custody_ledger
-      const { error: ledgerErr } = await supabaseAdmin.from('custody_ledger').insert({
-        asset_id: asset.id,
-        action: 'RECEIVE_TRANSFER',
-        warehouse_id: finalTargetWarehouseId,
-        target_warehouse_id: finalTargetWarehouseId,
-        from_warehouse_id: sourceWarehouseUuid,
-        to_warehouse_id: finalTargetWarehouseId,
-        target_site_name: finalTargetWarehouseName,
-        performed_by: sessionUser?.name || performerName,
-        organization_id: activeOrg,
-        notes: notes?.trim() || `אישור הגעה וקליטת ציוד במחסן היעד (${finalTargetWarehouseName})`,
-        created_at: now,
-      });
-
-      if (ledgerErr) {
-        console.error('CRITICAL: Failed to write transfer reception to custody_ledger:', ledgerErr);
-        return { success: false, error: 'שגיאה ברישום תנועת קליטת השינוע ביומן: ' + ledgerErr.message };
-      }
-
-      // 4. Update transfer_requests record if present
-      if (requestId) {
-        await supabaseAdmin
-          .from('transfer_requests')
+        // 2. Updates asset status from 'in_transit' to 'in_stock'
+        const { error: updateErr } = await supabaseAdmin
+          .from('assets')
           .update({
-            status: 'COMPLETED',
+            current_warehouse_id: finalTargetWarehouseId,
+            status: 'in_stock',
+            current_assigned_worker: null,
             updated_at: now,
           })
-          .eq('id', requestId);
-      } else {
+          .eq('id', asset.id);
+
+        if (updateErr) {
+          return { success: false, error: `שגיאה בעדכון כלי: ${updateErr.message}` };
+        }
+
+        // 3. Write a "RECEIVE_TRANSFER" entry into custody_ledger
+        const { error: ledgerErr } = await supabaseAdmin.from('custody_ledger').insert({
+          asset_id: asset.id,
+          action: 'RECEIVE_TRANSFER',
+          warehouse_id: finalTargetWarehouseId,
+          target_warehouse_id: finalTargetWarehouseId,
+          from_warehouse_id: sourceWarehouseUuid,
+          to_warehouse_id: finalTargetWarehouseId,
+          target_site_name: finalTargetWarehouseName,
+          performed_by: sessionUser?.name || performerName,
+          organization_id: activeOrg,
+          notes: notes?.trim() || `אישור הגעה וקליטת ציוד במחסן היעד (${finalTargetWarehouseName})`,
+          created_at: now,
+        });
+
+        if (ledgerErr) {
+          console.error('CRITICAL: Failed to write transfer reception to custody_ledger:', ledgerErr);
+          return { success: false, error: 'שגיאה ברישום תנועת קליטת השינוע ביומן: ' + ledgerErr.message };
+        }
+
+        // 4. Update transfer_requests record if present
+        if (requestId && UUID_REGEX.test(requestId)) {
+          await supabaseAdmin
+            .from('transfer_requests')
+            .update({
+              status: 'COMPLETED',
+              updated_at: now,
+            })
+            .eq('id', requestId);
+        }
         await supabaseAdmin
           .from('transfer_requests')
           .update({
@@ -875,7 +916,7 @@ export async function completeTransferReceptionAction(
             updated_at: now,
           })
           .eq('asset_id', asset.id)
-          .eq('status', 'APPROVED');
+          .in('status', ['PENDING', 'APPROVED', 'in_transit']);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Database error';
@@ -883,33 +924,44 @@ export async function completeTransferReceptionAction(
     }
   }
 
-  // Fallback in-memory sync
+  // 5. Clean Up Both Supabase & Mock Store on Reception
   const targetWhMeta = getMockWarehouses(true).find(
     (w) => w.id === (finalTargetWarehouseId || targetWarehouseId)
   );
-  mutateMockAsset(
-    cleanIdentifier,
-    {
-      currentWarehouseId: finalTargetWarehouseId || targetWarehouseId,
-      warehouseId: finalTargetWarehouseId || targetWarehouseId,
-      warehouseName: finalTargetWarehouseName || targetWhMeta?.name || 'מחסן יעד',
-      warehouseCode: targetWhMeta?.code || '',
-      status: 'in_stock',
-    },
-    {
-      action: 'RECEIVE_TRANSFER',
-      performedBy: performerName,
-      notes: notes || 'קליטת ציוד במחסן היעד',
-    }
+
+  const identifiersToClean = Array.from(
+    new Set([rawId, rawQr, cleanTag, lookupTarget, resolvedAsset?.id, resolvedAsset?.qr_code, resolvedAsset?.tag_number].filter(Boolean) as string[])
   );
 
-  if (requestId) {
-    const memReq = inMemoryTransferRequests.find((r) => r.id === requestId);
-    if (memReq) {
-      memReq.status = 'COMPLETED';
-      memReq.updated_at = now;
-    }
+  for (const idKey of identifiersToClean) {
+    mutateMockAsset(
+      idKey,
+      {
+        currentWarehouseId: finalTargetWarehouseId || targetWarehouseId,
+        warehouseId: finalTargetWarehouseId || targetWarehouseId,
+        warehouseName: finalTargetWarehouseName || targetWhMeta?.name || 'מחסן יעד',
+        warehouseCode: targetWhMeta?.code || '',
+        status: 'in_stock',
+      },
+      {
+        action: 'RECEIVE_TRANSFER',
+        performedBy: performerName,
+        notes: notes || 'קליטת ציוד במחסן היעד',
+      }
+    );
+    clearInTransitMockAsset(idKey);
   }
+
+  // Update in-memory transfer requests
+  inMemoryTransferRequests.forEach((req) => {
+    if (
+      (requestId && req.id === requestId) ||
+      identifiersToClean.includes(req.asset_id)
+    ) {
+      req.status = 'COMPLETED';
+      req.updated_at = now;
+    }
+  });
 
   try {
     await clearDashboardCaches();
@@ -931,12 +983,13 @@ export async function completeTransferReceptionAction(
 /**
  * 5b. cancelTransferRollbackAction
  * Storekeeper or operations manager cancels an active transfer and rolls it back:
- * - Supports both parameter formats (object { assetId, sourceWarehouseId } or raw string assetId).
- * - Bulletproof Asset Lookup (by UUID or tag_number, with organization check for non-SuperAdmin).
+ * - Supports both parameter formats (object CancelTransferParams or legacy positional args).
+ * - Bulletproof Asset Lookup (never queries UUID column with non-UUID strings to avoid Postgres 22P02).
  * - Set asset status = 'in_stock'.
  * - Restore current_warehouse_id to the source warehouse (or asset's original warehouse).
  * - If there is an active transfer_requests record for this asset, update its status to 'cancelled'.
  * - Insert audit record into custody_ledger.
+ * - Clean up both Supabase and mockStore.
  * - Revalidate /dashboard/warehouse, /history, and /catalog.
  */
 export async function cancelTransferRollbackAction(
@@ -944,23 +997,31 @@ export async function cancelTransferRollbackAction(
   sourceWarehouseIdArg?: string,
   notesArg?: string
 ): Promise<{ success: boolean; error?: string; message?: string }> {
-  let cleanIdentifier = '';
+  const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  let rawId = '';
+  let rawQr = '';
   let sourceWarehouseId: string | undefined;
   let notes: string | undefined;
   let requestId: string | undefined;
 
   if (typeof dataOrAssetId === 'object' && dataOrAssetId !== null) {
-    cleanIdentifier = (dataOrAssetId.assetId || '').trim();
+    rawId = (dataOrAssetId.assetId || '').trim();
+    rawQr = (dataOrAssetId.qrCode || dataOrAssetId.tagNumber || '').trim();
     sourceWarehouseId = dataOrAssetId.sourceWarehouseId;
     notes = dataOrAssetId.notes;
     requestId = dataOrAssetId.requestId;
   } else if (typeof dataOrAssetId === 'string') {
-    cleanIdentifier = dataOrAssetId.trim();
+    rawId = dataOrAssetId.trim();
     sourceWarehouseId = sourceWarehouseIdArg;
     notes = notesArg;
   }
 
-  if (!cleanIdentifier) {
+  // Prefer real UUID, otherwise use qrCode/tagNumber (ignore fake 'ast-...' IDs):
+  const lookupTarget = UUID_REGEX.test(rawId) ? rawId : (rawQr || rawId);
+  const cleanTag = lookupTarget.trim();
+
+  if (!cleanTag) {
     return { success: false, error: 'יש לציין מזהה כלי עבודה לביטול שינוע' };
   }
 
@@ -974,15 +1035,15 @@ export async function cancelTransferRollbackAction(
 
   let finalSourceWarehouseId: string | null = null;
   let finalSourceWarehouseName = 'מחסן מקור (בוטל)';
+  let resolvedAsset: { id: string; qr_code?: string; tag_number?: string; organization_id?: string; current_warehouse_id?: string } | null = null;
 
   if (isSupabaseConfigured()) {
     try {
-      // Query asset by UUID or tag_number:
       let query = supabaseAdmin.from('assets').select('*');
-      if (cleanIdentifier.includes('-') && cleanIdentifier.length > 20) {
-        query = query.eq('id', cleanIdentifier);
+      if (UUID_REGEX.test(lookupTarget)) {
+        query = query.eq('id', lookupTarget);
       } else {
-        query = query.or(`tag_number.eq.${cleanIdentifier},id.eq.${cleanIdentifier}`);
+        query = query.or(`tag_number.ilike.${cleanTag},qr_code.ilike.${cleanTag},serial_number.ilike.${cleanTag}`);
       }
 
       // If caller is NOT SuperAdmin, enforce organization_id:
@@ -992,12 +1053,29 @@ export async function cancelTransferRollbackAction(
 
       let { data: asset, error: assetErr } = await query.maybeSingle();
 
-      // Resilient fallback: if query errored or didn't find by tag_number/id, also try qr_code or tag_number directly
-      if (!asset) {
+      // Fallback: If not found and rawQr was provided and different from lookupTarget, try rawQr
+      if (!asset && rawQr && rawQr !== cleanTag) {
+        const cleanQr = rawQr.trim();
         let fallbackQuery = supabaseAdmin
           .from('assets')
           .select('*')
-          .or(`tag_number.eq.${cleanIdentifier},qr_code.eq.${cleanIdentifier}`);
+          .or(`tag_number.ilike.${cleanQr},qr_code.ilike.${cleanQr},serial_number.ilike.${cleanQr}`);
+        if (!isPlatformSuperAdmin(sessionUser) && sessionUser?.organization_id) {
+          fallbackQuery = fallbackQuery.eq('organization_id', sessionUser.organization_id);
+        }
+        const { data: fallbackAsset } = await fallbackQuery.maybeSingle();
+        if (fallbackAsset) {
+          asset = fallbackAsset;
+        }
+      }
+
+      // Fallback: If still not found and rawId was provided and different, and not an ast- fake id
+      if (!asset && rawId && rawId !== cleanTag && !rawId.startsWith('ast-')) {
+        const cleanRaw = rawId.trim();
+        let fallbackQuery = supabaseAdmin
+          .from('assets')
+          .select('*')
+          .or(`tag_number.ilike.${cleanRaw},qr_code.ilike.${cleanRaw},serial_number.ilike.${cleanRaw}`);
         if (!isPlatformSuperAdmin(sessionUser) && sessionUser?.organization_id) {
           fallbackQuery = fallbackQuery.eq('organization_id', sessionUser.organization_id);
         }
@@ -1008,129 +1086,149 @@ export async function cancelTransferRollbackAction(
       }
 
       if (!asset) {
-        return { success: false, error: `כלי העבודה (${cleanIdentifier}) לא נמצא במערכת` };
-      }
-
-      const activeOrg = asset.organization_id;
-
-      // Resolve source warehouse UUID:
-      // a. Check if provided sourceWarehouseId is a valid UUID or resolves to a warehouse
-      if (sourceWarehouseId) {
-        const wh = await resolveVerifiedWarehouse(sourceWarehouseId, activeOrg);
-        if (wh) {
-          finalSourceWarehouseId = wh.id;
-          finalSourceWarehouseName = wh.name;
+        const mockAsset = getMockAssets().find(
+          (m) =>
+            m.id === rawId ||
+            m.id === lookupTarget ||
+            m.qrCode === cleanTag ||
+            m.qrCode === rawQr ||
+            m.serialNumber === cleanTag
+        );
+        if (!mockAsset) {
+          return { success: false, error: `כלי העבודה (${cleanTag || rawId}) לא נמצא במערכת` };
         }
-      }
+      } else {
+        resolvedAsset = asset;
+        const activeOrg = asset.organization_id;
 
-      // b. Check active transfer_requests record for this asset if source warehouse was not resolved
-      if (!finalSourceWarehouseId && requestId) {
-        const { data: tr } = await supabaseAdmin
-          .from('transfer_requests')
-          .select('source_warehouse_id')
-          .eq('id', requestId)
-          .maybeSingle();
-        if (tr?.source_warehouse_id) {
-          const wh = await resolveVerifiedWarehouse(tr.source_warehouse_id, activeOrg);
+        // Resolve source warehouse UUID:
+        // a. Check if provided sourceWarehouseId is a valid UUID or resolves to a warehouse
+        if (sourceWarehouseId) {
+          const wh = await resolveVerifiedWarehouse(sourceWarehouseId, activeOrg);
           if (wh) {
             finalSourceWarehouseId = wh.id;
             finalSourceWarehouseName = wh.name;
           }
         }
-      }
 
-      if (!finalSourceWarehouseId) {
-        const { data: tr } = await supabaseAdmin
-          .from('transfer_requests')
-          .select('source_warehouse_id')
-          .eq('asset_id', asset.id)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (tr?.source_warehouse_id) {
-          const wh = await resolveVerifiedWarehouse(tr.source_warehouse_id, activeOrg);
-          if (wh) {
-            finalSourceWarehouseId = wh.id;
-            finalSourceWarehouseName = wh.name;
-          }
-        }
-      }
-
-      // c. Check custody_ledger history for previous warehouse
-      if (!finalSourceWarehouseId) {
-        const { data: ledgerRows } = await supabaseAdmin
-          .from('custody_ledger')
-          .select('from_warehouse_id, warehouse_id')
-          .eq('asset_id', asset.id)
-          .order('created_at', { ascending: false })
-          .limit(5);
-
-        if (ledgerRows && ledgerRows.length > 0) {
-          const prevEntry = ledgerRows.find(
-            (r) =>
-              (r.from_warehouse_id || r.warehouse_id) &&
-              (r.from_warehouse_id || r.warehouse_id) !== asset.current_warehouse_id
-          );
-          const candidateId =
-            prevEntry?.from_warehouse_id ||
-            prevEntry?.warehouse_id ||
-            ledgerRows[0]?.from_warehouse_id ||
-            ledgerRows[0]?.warehouse_id;
-          if (candidateId) {
-            const wh = await resolveVerifiedWarehouse(candidateId, activeOrg);
+        // b. Check active transfer_requests record for this asset if source warehouse was not resolved
+        if (!finalSourceWarehouseId && requestId && UUID_REGEX.test(requestId)) {
+          const { data: tr } = await supabaseAdmin
+            .from('transfer_requests')
+            .select('source_warehouse_id')
+            .eq('id', requestId)
+            .maybeSingle();
+          if (tr?.source_warehouse_id) {
+            const wh = await resolveVerifiedWarehouse(tr.source_warehouse_id, activeOrg);
             if (wh) {
               finalSourceWarehouseId = wh.id;
               finalSourceWarehouseName = wh.name;
             }
           }
         }
-      }
 
-      // d. Fallback to asset's original / current warehouse
-      if (!finalSourceWarehouseId && asset.current_warehouse_id) {
-        const wh = await resolveVerifiedWarehouse(asset.current_warehouse_id, activeOrg);
-        if (wh) {
-          finalSourceWarehouseId = wh.id;
-          finalSourceWarehouseName = wh.name;
-        } else if (isValidUuid(asset.current_warehouse_id)) {
-          finalSourceWarehouseId = asset.current_warehouse_id;
+        if (!finalSourceWarehouseId) {
+          const { data: tr } = await supabaseAdmin
+            .from('transfer_requests')
+            .select('source_warehouse_id')
+            .eq('asset_id', asset.id)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (tr?.source_warehouse_id) {
+            const wh = await resolveVerifiedWarehouse(tr.source_warehouse_id, activeOrg);
+            if (wh) {
+              finalSourceWarehouseId = wh.id;
+              finalSourceWarehouseName = wh.name;
+            }
+          }
         }
-      }
 
-      // e. Fallback to organization's first warehouse
-      if (!finalSourceWarehouseId) {
-        const { data: orgWhs } = await supabaseAdmin
-          .from('warehouses')
-          .select('id, name')
-          .eq('organization_id', activeOrg)
-          .order('created_at', { ascending: true })
-          .limit(1)
-          .maybeSingle();
-        if (orgWhs) {
-          finalSourceWarehouseId = orgWhs.id;
-          finalSourceWarehouseName = orgWhs.name;
+        // c. Check custody_ledger history for previous warehouse
+        if (!finalSourceWarehouseId) {
+          const { data: ledgerRows } = await supabaseAdmin
+            .from('custody_ledger')
+            .select('from_warehouse_id, warehouse_id')
+            .eq('asset_id', asset.id)
+            .order('created_at', { ascending: false })
+            .limit(5);
+
+          if (ledgerRows && ledgerRows.length > 0) {
+            const prevEntry = ledgerRows.find(
+              (r) =>
+                (r.from_warehouse_id || r.warehouse_id) &&
+                (r.from_warehouse_id || r.warehouse_id) !== asset.current_warehouse_id
+            );
+            const candidateId =
+              prevEntry?.from_warehouse_id ||
+              prevEntry?.warehouse_id ||
+              ledgerRows[0]?.from_warehouse_id ||
+              ledgerRows[0]?.warehouse_id;
+            if (candidateId) {
+              const wh = await resolveVerifiedWarehouse(candidateId, activeOrg);
+              if (wh) {
+                finalSourceWarehouseId = wh.id;
+                finalSourceWarehouseName = wh.name;
+              }
+            }
+          }
         }
-      }
 
-      const targetRollbackWarehouseId = finalSourceWarehouseId || asset.current_warehouse_id;
+        // d. Fallback to asset's original / current warehouse
+        if (!finalSourceWarehouseId && asset.current_warehouse_id) {
+          const wh = await resolveVerifiedWarehouse(asset.current_warehouse_id, activeOrg);
+          if (wh) {
+            finalSourceWarehouseId = wh.id;
+            finalSourceWarehouseName = wh.name;
+          } else if (isValidUuid(asset.current_warehouse_id)) {
+            finalSourceWarehouseId = asset.current_warehouse_id;
+          }
+        }
 
-      // 1. Set asset status = 'in_stock' & restore current_warehouse_id to source warehouse
-      const { error: assetUpdateErr } = await supabaseAdmin
-        .from('assets')
-        .update({
-          current_warehouse_id: targetRollbackWarehouseId,
-          status: 'in_stock',
-          current_assigned_worker: null,
-          updated_at: now,
-        })
-        .eq('id', asset.id);
+        // e. Fallback to organization's first warehouse
+        if (!finalSourceWarehouseId) {
+          const { data: orgWhs } = await supabaseAdmin
+            .from('warehouses')
+            .select('id, name')
+            .eq('organization_id', activeOrg)
+            .order('created_at', { ascending: true })
+            .limit(1)
+            .maybeSingle();
+          if (orgWhs) {
+            finalSourceWarehouseId = orgWhs.id;
+            finalSourceWarehouseName = orgWhs.name;
+          }
+        }
 
-      if (assetUpdateErr) {
-        return { success: false, error: `שגיאה בעדכון כלי: ${assetUpdateErr.message}` };
-      }
+        const targetRollbackWarehouseId = finalSourceWarehouseId || asset.current_warehouse_id;
 
-      // 2. If there is an active transfer_requests record for this asset, update its status to 'cancelled'
-      if (requestId) {
+        // 1. Set asset status = 'in_stock' & restore current_warehouse_id to source warehouse
+        const { error: assetUpdateErr } = await supabaseAdmin
+          .from('assets')
+          .update({
+            current_warehouse_id: targetRollbackWarehouseId,
+            status: 'in_stock',
+            current_assigned_worker: null,
+            updated_at: now,
+          })
+          .eq('id', asset.id);
+
+        if (assetUpdateErr) {
+          return { success: false, error: `שגיאה בעדכון כלי: ${assetUpdateErr.message}` };
+        }
+
+        // 2. If there is an active transfer_requests record for this asset, update its status to 'cancelled'
+        if (requestId && UUID_REGEX.test(requestId)) {
+          await supabaseAdmin
+            .from('transfer_requests')
+            .update({
+              status: 'cancelled',
+              rejection_reason: 'ביטול שינוע שטח והחזרה למלאי המקור',
+              updated_at: now,
+            })
+            .eq('id', requestId);
+        }
+
         await supabaseAdmin
           .from('transfer_requests')
           .update({
@@ -1138,58 +1236,60 @@ export async function cancelTransferRollbackAction(
             rejection_reason: 'ביטול שינוע שטח והחזרה למלאי המקור',
             updated_at: now,
           })
-          .eq('id', requestId);
+          .eq('asset_id', asset.id)
+          .in('status', ['PENDING', 'APPROVED', 'in_transit']);
+
+        // 3. Insert audit record into custody_ledger
+        await supabaseAdmin.from('custody_ledger').insert({
+          organization_id: asset.organization_id,
+          asset_id: asset.id,
+          action: 'CANCEL_TRANSFER',
+          from_warehouse_id: asset.current_warehouse_id,
+          to_warehouse_id: sourceWarehouseId || targetRollbackWarehouseId || asset.current_warehouse_id,
+          warehouse_id: targetRollbackWarehouseId || asset.current_warehouse_id,
+          target_site_name: 'מחסן מקור (בוטל)',
+          performed_by: performerName,
+          notes: notes?.trim() || 'ביטול שינוע שטח והחזרה למלאי המקור',
+          created_at: now,
+        });
       }
-
-      await supabaseAdmin
-        .from('transfer_requests')
-        .update({
-          status: 'cancelled',
-          rejection_reason: 'ביטול שינוע שטח והחזרה למלאי המקור',
-          updated_at: now,
-        })
-        .eq('asset_id', asset.id)
-        .in('status', ['PENDING', 'APPROVED', 'in_transit']);
-
-      // 3. Insert audit record into custody_ledger
-      await supabaseAdmin.from('custody_ledger').insert({
-        organization_id: asset.organization_id,
-        asset_id: asset.id,
-        action: 'CANCEL_TRANSFER',
-        from_warehouse_id: asset.current_warehouse_id,
-        to_warehouse_id: sourceWarehouseId || targetRollbackWarehouseId || asset.current_warehouse_id,
-        warehouse_id: targetRollbackWarehouseId || asset.current_warehouse_id,
-        target_site_name: 'מחסן מקור (בוטל)',
-        performed_by: performerName,
-        notes: notes?.trim() || 'ביטול שינוע שטח והחזרה למלאי המקור',
-        created_at: now,
-      });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Database error';
       return { success: false, error: msg };
     }
   }
 
-  // Fallback in-memory sync
-  mutateMockAsset(
-    cleanIdentifier,
-    {
-      status: 'in_stock',
-    },
-    {
-      action: 'CANCEL_TRANSFER',
-      performedBy: performerName,
-      notes: notes || 'ביטול שינוע שטח והחזרה למלאי המקור',
-    }
+  // Clean Up Both Supabase & Mock Store on Rollback
+  const identifiersToClean = Array.from(
+    new Set([rawId, rawQr, cleanTag, lookupTarget, resolvedAsset?.id, resolvedAsset?.qr_code, resolvedAsset?.tag_number].filter(Boolean) as string[])
   );
 
-  if (requestId) {
-    const memReq = inMemoryTransferRequests.find((r) => r.id === requestId);
-    if (memReq) {
-      memReq.status = 'cancelled' as unknown as 'REJECTED';
-      memReq.updated_at = now;
-    }
+  for (const idKey of identifiersToClean) {
+    mutateMockAsset(
+      idKey,
+      {
+        status: 'in_stock',
+        currentWarehouseId: finalSourceWarehouseId || sourceWarehouseId,
+        warehouseId: finalSourceWarehouseId || sourceWarehouseId,
+      },
+      {
+        action: 'CANCEL_TRANSFER',
+        performedBy: performerName,
+        notes: notes || 'ביטול שינוע שטח והחזרה למלאי המקור',
+      }
+    );
+    clearInTransitMockAsset(idKey);
   }
+
+  inMemoryTransferRequests.forEach((req) => {
+    if (
+      (requestId && req.id === requestId) ||
+      identifiersToClean.includes(req.asset_id)
+    ) {
+      req.status = 'cancelled' as unknown as 'REJECTED';
+      req.updated_at = now;
+    }
+  });
 
   // 4. Revalidate /dashboard/warehouse, /history, and /catalog
   try {

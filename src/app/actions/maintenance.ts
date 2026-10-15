@@ -8,6 +8,8 @@ import {
   getMockWarehouses,
   getMockAssets,
   mutateMockAsset,
+  isDemonstrativeInTransitCleared,
+  clearInTransitMockAsset,
 } from '@/lib/mockStore';
 
 function isValidUuid(id?: string | null): boolean {
@@ -270,20 +272,56 @@ export async function getInTransitFleetAction(
   const mockAssets = getMockAssets(orgId);
   const warehouses = getMockWarehouses(true, orgId);
 
-  const inTransitAssets = mockAssets.filter((a) => a.status === 'in_transit');
+  const inTransitAssets = mockAssets.filter(
+    (a) =>
+      a.status === 'in_transit' &&
+      !isDemonstrativeInTransitCleared(a.id) &&
+      !isDemonstrativeInTransitCleared(a.qrCode)
+  );
+
+  const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
   if (inTransitAssets.length === 0 && mockAssets.length > 0) {
-    // Return realistic demonstrative in-transit asset for chief logistics preview if none currently in transit
+    // Return realistic demonstrative in-transit asset for chief logistics preview ONLY if not cleared/rolled-back/received
     const sample = mockAssets[0];
+    if (
+      isDemonstrativeInTransitCleared(sample.qrCode) ||
+      isDemonstrativeInTransitCleared(sample.id) ||
+      isDemonstrativeInTransitCleared('zr-282') ||
+      sample.status === 'in_stock'
+    ) {
+      return [];
+    }
+
+    let realAssetId = sample.id;
+    if (isSupabaseConfigured()) {
+      try {
+        const { data: dbAsset } = await supabaseAdmin
+          .from('assets')
+          .select('id, qr_code')
+          .eq('organization_id', orgId)
+          .or(`qr_code.ilike.${sample.qrCode},tag_number.ilike.${sample.qrCode}`)
+          .limit(1)
+          .maybeSingle();
+        if (dbAsset?.id) {
+          realAssetId = dbAsset.id;
+        }
+      } catch (e) {
+        console.warn('[getInTransitFleetAction] Error resolving real UUID for asset:', e);
+      }
+    }
+
+    // Never use fake 'ast-...' as assetId if we have qrCode or real UUID:
+    const resolvedAssetId = UUID_REGEX.test(realAssetId) ? realAssetId : (sample.qrCode || 'ZR-282');
     const originWh = warehouses[0] || { id: 'wh-01', name: 'מחסן ראשי - תלפיות' };
     const destWh = warehouses[1] || { id: 'wh-02', name: 'אתר מגדלי המרכז' };
     const nowIso = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
 
     return [
       {
-        id: `trans-${sample.id}`,
-        assetId: sample.id,
-        qrCode: sample.qrCode,
+        id: `trans-${resolvedAssetId}`,
+        assetId: resolvedAssetId,
+        qrCode: sample.qrCode || 'ZR-282',
         toolName: sample.toolName,
         brand: sample.brand,
         modelNumber: sample.modelNumber,
@@ -306,10 +344,11 @@ export async function getInTransitFleetAction(
     const originWh = warehouses[idx % warehouses.length] || { id: 'wh-01', name: 'מחסן ראשי' };
     const destWh = warehouses[(idx + 1) % warehouses.length] || { id: 'wh-02', name: 'אתר עבודה' };
     const dispatchedAt = (rawA.updatedAt as string) || new Date().toISOString();
+    const resolvedId = UUID_REGEX.test(a.id) ? a.id : (a.qrCode || a.id);
 
     return {
-      id: `trans-${a.id}`,
-      assetId: a.id,
+      id: `trans-${resolvedId}`,
+      assetId: resolvedId,
       qrCode: a.qrCode,
       toolName: a.toolName,
       brand: a.brand,
