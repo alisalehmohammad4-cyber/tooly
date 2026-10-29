@@ -751,7 +751,7 @@ export async function completeTransferReceptionAction(
         query = query.eq('organization_id', sessionUser.organization_id);
       }
 
-      let { data: asset, error: assetErr } = await query.maybeSingle();
+      let { data: asset } = await query.maybeSingle();
 
       // Fallback: If not found and rawQr was provided and different from lookupTarget, try rawQr
       if (!asset && rawQr && rawQr !== cleanTag) {
@@ -1051,7 +1051,7 @@ export async function cancelTransferRollbackAction(
         query = query.eq('organization_id', sessionUser.organization_id);
       }
 
-      let { data: asset, error: assetErr } = await query.maybeSingle();
+      let { data: asset } = await query.maybeSingle();
 
       // Fallback: If not found and rawQr was provided and different from lookupTarget, try rawQr
       if (!asset && rawQr && rawQr !== cleanTag) {

@@ -51,6 +51,7 @@ export default function OcrScannerModal({
   const isDebounceLockedRef = useRef<boolean>(false);
   const isBarcodeBusyRef = useRef<boolean>(false);
   const isPausedRef = useRef<boolean>(false);
+  const [isScanPaused, setIsScanPaused] = useState<boolean>(false);
 
   // Hardware Camera & Stream State
   const [cameraActive, setCameraActive] = useState<boolean>(false);
@@ -156,6 +157,7 @@ export default function OcrScannerModal({
         }
         setCameraActive(true);
         isPausedRef.current = false;
+        setIsScanPaused(false);
         return;
       }
 
@@ -211,6 +213,7 @@ export default function OcrScannerModal({
 
       setCameraActive(true);
       isPausedRef.current = false;
+      setIsScanPaused(false);
 
       // Check torch capability on active video track
       const track = stream.getVideoTracks()[0];
@@ -232,6 +235,7 @@ export default function OcrScannerModal({
    */
   const handleTapToWake = useCallback(async () => {
     isPausedRef.current = false;
+    setIsScanPaused(false);
     setCameraError(null);
     const noStream = !streamRef.current;
     const tracksEnded = streamRef.current?.getVideoTracks().some((t) => t.readyState === 'ended');
@@ -268,6 +272,7 @@ export default function OcrScannerModal({
       // 1. Lock immediately and pause further scan cycles without killing the camera stream tracks
       isDebounceLockedRef.current = true;
       isPausedRef.current = true;
+      setIsScanPaused(true);
       setIsTargetLocked(true);
       setCandidateTag(detectedTag);
       setManualTag(detectedTag);
@@ -350,7 +355,7 @@ export default function OcrScannerModal({
   } = useLaserStripOcr({
     videoRef,
     isActive: isOpen && cameraActive,
-    isPaused: scanMode !== 'ocr' || isPausedRef.current || !!snappedAsset || isTargetLocked,
+    isPaused: scanMode !== 'ocr' || isScanPaused || !!snappedAsset || isTargetLocked,
     organizationId: orgId,
     onTagDetected: async (tag) => {
       // Auto-fill manual search input state below camera
@@ -425,6 +430,7 @@ export default function OcrScannerModal({
       setIsTargetLocked(false);
       isDebounceLockedRef.current = false;
       isPausedRef.current = false;
+      setIsScanPaused(false);
       resetOcrStatus();
       if (
         videoRef.current &&
@@ -439,6 +445,7 @@ export default function OcrScannerModal({
       }
     } else {
       isPausedRef.current = true;
+      setIsScanPaused(true);
       // Do not stopCamera() tracks permanently; pause detection and video so re-open is instantaneous
       if (videoRef.current) {
         try {

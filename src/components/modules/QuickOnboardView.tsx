@@ -126,6 +126,7 @@ export default function QuickOnboardView({
   const scanIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const watchdogIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const isPausedRef = useRef<boolean>(false);
+  const [isScanPaused, setIsScanPaused] = useState<boolean>(false);
 
   // Concurrency & Debounce Lock refs
   const isDebounceLockedRef = useRef<boolean>(false);
@@ -198,7 +199,7 @@ export default function QuickOnboardView({
   } = useLaserStripOcr({
     videoRef,
     isActive: scannerActive && !showOnboardForm,
-    isPaused: scanMode !== 'ocr' || Boolean(qrCode || isModalOpen || isPassportOpen || isDebounceLockedRef.current || isPausedRef.current),
+    isPaused: scanMode !== 'ocr' || Boolean(qrCode || isModalOpen || isPassportOpen || isTargetLocked || isScanPaused),
     organizationId: currentOrganization?.id,
     onTagDetected: async (tag) => {
       setManualQrInput(tag);
@@ -291,6 +292,7 @@ export default function QuickOnboardView({
         }
         setScannerActive(true);
         isPausedRef.current = false;
+        setIsScanPaused(false);
         return;
       }
 
@@ -346,6 +348,7 @@ export default function QuickOnboardView({
 
       setScannerActive(true);
       isPausedRef.current = false;
+      setIsScanPaused(false);
 
       // Check torch capability on active video track
       const track = stream.getVideoTracks()[0];
@@ -365,6 +368,7 @@ export default function QuickOnboardView({
   // Manual Tap-To-Wake on video viewfinder
   const handleTapToWake = useCallback(async () => {
     isPausedRef.current = false;
+    setIsScanPaused(false);
     setCameraError(null);
     const noStream = !streamRef.current;
     const tracksEnded = streamRef.current?.getVideoTracks().some((t) => t.readyState === 'ended');
@@ -536,6 +540,7 @@ export default function QuickOnboardView({
             } else {
               // Asset is checked out or needs repair — pause and alert operator
               isPausedRef.current = true;
+              setIsScanPaused(true);
               if (videoRef.current) {
                 try {
                   videoRef.current.pause();
@@ -553,6 +558,7 @@ export default function QuickOnboardView({
           // WORKER MODE -> Show WorkerToolCard directly without custody management modals
           if (role === 'worker') {
             isPausedRef.current = true;
+            setIsScanPaused(true);
             if (videoRef.current) {
               try {
                 videoRef.current.pause();
@@ -570,6 +576,7 @@ export default function QuickOnboardView({
 
           // SUPERVISOR / ADMIN MODE -> Open custody action modal
           isPausedRef.current = true;
+          setIsScanPaused(true);
           if (videoRef.current) {
             try {
               videoRef.current.pause();
@@ -588,6 +595,7 @@ export default function QuickOnboardView({
         // TOOL NOT FOUND IN WORKER MODE -> Inform worker to contact storekeeper
         if (role === 'worker') {
           isPausedRef.current = true;
+          setIsScanPaused(true);
           if (videoRef.current) {
             try {
               videoRef.current.pause();
@@ -849,6 +857,7 @@ export default function QuickOnboardView({
   useEffect(() => {
     if (!isModalOpen && !isPassportOpen && !isBulkModalOpen && !showOnboardForm && scannerActive) {
       isPausedRef.current = false;
+      setIsScanPaused(false);
       if (
         videoRef.current &&
         streamRef.current &&
@@ -877,6 +886,8 @@ export default function QuickOnboardView({
     setCandidateTag(null);
     resetOcrStatus();
     isDebounceLockedRef.current = false;
+    isPausedRef.current = false;
+    setIsScanPaused(false);
     setScannerActive(true);
     await startCamera();
   }, [startCamera, resetOcrStatus]);

@@ -21,11 +21,11 @@ export async function getPersistentOcrWorker(): Promise<Worker | null> {
 
   globalWorkerPromise = (async () => {
     try {
-      const { createWorker } = await import('tesseract.js');
+      const { createWorker, PSM } = await import('tesseract.js');
       const worker = await createWorker('eng');
       await worker.setParameters({
         tessedit_char_whitelist: 'ZRzr0123456789- ',
-        tessedit_pageseg_mode: '7' as any, // Treat image as a single text line
+        tessedit_pageseg_mode: PSM.SINGLE_LINE, // Treat image as a single text line (Mode 7)
       });
       globalWorker = worker;
       return worker;

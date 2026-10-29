@@ -244,7 +244,7 @@ export default function WarehouseDashboardView({
   } = useLaserStripOcr({
     videoRef: inlineVideoRef,
     isActive: isInlineScannerOpen,
-    isPaused: inlineScanMode !== 'ocr' || isPassportOpen || inlineIsDebounceLockedRef.current,
+    isPaused: inlineScanMode !== 'ocr' || isPassportOpen || inlineTargetLocked,
     organizationId: currentOrganization?.id || user?.organizationId,
     onTagDetected: async (tag, digits) => {
       // a) Audio beep + haptic pulse handled in hook
@@ -1676,7 +1676,9 @@ export default function WarehouseDashboardView({
   };
 
   // Keep handleOpenPassportRef in sync
-  handleOpenPassportRef.current = handleOpenPassport;
+  useEffect(() => {
+    handleOpenPassportRef.current = handleOpenPassport;
+  });
 
   // Submit Inter-Depot Asset Transfer
   const handleTransferSubmit = async (e: React.FormEvent) => {

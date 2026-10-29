@@ -315,7 +315,7 @@ export async function getAssetDetailsByQr(
       }
 
       // 1. First, attempt exact / dual-candidate match on qr_code, nfc_uid, tag_number, or serial_number
-      let exactQuery = supabase
+      const exactQuery = supabase
         .from('assets')
         .select(`
           id,
@@ -2815,7 +2815,7 @@ export async function snapOcrTagToAssetAction(
         );
       }
 
-      let query = supabase
+      const query = supabase
         .from('assets')
         .select(`
           id,
