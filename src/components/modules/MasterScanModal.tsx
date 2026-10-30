@@ -30,6 +30,7 @@ import {
 import { detectBarcodeOrQr, extractTagFromBarcodePayload } from '@/lib/ocr/barcodeDetector';
 import { playOcrBeep, triggerOcrHaptic } from '@/lib/ocr/tagParser';
 import { useLaserStripOcr } from '@/lib/ocr/useLaserStripOcr';
+import { isAssetAvailable } from '@/lib/assets/status';
 
 interface MasterScanModalProps {
   isOpen: boolean;
@@ -496,7 +497,7 @@ export default function MasterScanModal({ isOpen, onClose }: MasterScanModalProp
 
                 {/* Status Badge */}
                 <div className="shrink-0">
-                  {selectedAsset.status === 'in_stock' || selectedAsset.status === 'available' ? (
+                  {isAssetAvailable(selectedAsset.status) ? (
                     <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-xs font-bold">
                       <CheckCircle2 className="w-3.5 h-3.5" />
                       זמין במחסן
@@ -627,14 +628,14 @@ export default function MasterScanModal({ isOpen, onClose }: MasterScanModalProp
                         {/* Miniature Status Indicator */}
                         <span
                           className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
-                            asset.status === 'in_stock' || asset.status === 'available'
+                            isAssetAvailable(asset.status)
                               ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                               : asset.status === 'checked_out'
                               ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
                               : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                           }`}
                         >
-                          {asset.status === 'in_stock' || asset.status === 'available'
+                          {isAssetAvailable(asset.status)
                             ? 'זמין'
                             : asset.status === 'checked_out'
                             ? 'מושאל'

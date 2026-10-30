@@ -48,6 +48,7 @@ import { getCurrentGpsCoordinates } from '@/lib/geo';
 import { getCachedAssetByQr, cacheAsset } from '@/lib/offline/offlineDb';
 import { useWebNfc } from '@/lib/nfc/useWebNfc';
 import { useOcrScanner } from '@/lib/ocr/useOcrScanner';
+import { isAssetAvailable } from '@/lib/assets/status';
 import { useLaserStripOcr } from '@/lib/ocr/useLaserStripOcr';
 import { detectBarcodeOrQr, extractTagFromBarcodePayload } from '@/lib/ocr/barcodeDetector';
 import { snapTagToAsset, triggerOcrHaptic, playOcrBeep } from '@/lib/ocr/tagParser';
@@ -63,6 +64,7 @@ const COMMON_BRANDS = ['DeWalt', 'Milwaukee', 'Makita', 'Bosch', 'Hilti', 'Stihl
 const getStatusLabel = (status: string) => {
   switch (status) {
     case 'available':
+    case 'in_stock':
       return 'זמין במלאי';
     case 'checked_out':
       return 'בשימוש';
@@ -533,7 +535,7 @@ export default function QuickOnboardView({
         if (existing) {
           // RAPID CONTINUOUS DISPATCH MODE (Supervisor & Admin only):
           if (isRapidDispatchMode && role !== 'worker') {
-            if (existing.status === 'available') {
+            if (isAssetAvailable(existing.status)) {
               handleAddToCart(existing);
               // In rapid continuous dispatch, do not stop camera — continue scanning!
               return;
@@ -1311,7 +1313,7 @@ export default function QuickOnboardView({
                       <span>דרכון כלי</span>
                     </button>
 
-                    {scannedRegisteredAsset.status === 'available' &&
+                    {isAssetAvailable(scannedRegisteredAsset.status) &&
                       !scannedRegisteredAsset.isLocked && (
                         <button
                           type="button"

@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import type { Warehouse, WarehouseType } from '@/types/domain';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { isAssetAvailable } from '@/lib/assets/status';
 import {
   addMockWarehouse,
   updateMockWarehouse,
@@ -168,7 +169,7 @@ export async function getWarehousesAdminAction(
         (Boolean(wh.code) && (a.warehouse_code === wh.code || a.warehouseCode === wh.code))
     );
 
-    const availableCount = whAssets.filter((a) => a.status === 'available').length;
+    const availableCount = whAssets.filter((a) => isAssetAvailable(a.status)).length;
     const inUseCount = whAssets.filter((a) => a.status === 'checked_out').length;
     const maintenanceCount = whAssets.filter(
       (a) => a.status === 'maintenance' || a.status === 'needs_repair'

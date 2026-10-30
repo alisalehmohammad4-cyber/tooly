@@ -2,6 +2,7 @@
 import { revalidatePath } from 'next/cache';
 import { supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase';
 import { clearDashboardCaches } from '@/app/actions/dashboard';
+import { isAssetAvailable, CANONICAL_AVAILABLE_STATUS, AVAILABLE_STATUSES } from '@/lib/assets/status';
 import { getServerSessionOrgId, getServerSessionUser, isPlatformSuperAdmin } from '@/lib/auth/session';
 import {
   getMockWarehouses,
@@ -677,7 +678,7 @@ export interface CancelTransferParams {
  * Storekeeper confirms physical arrival and receives the asset:
  * - Supports both parameter formats (object CompleteTransferParams or legacy positional args).
  * - Bulletproof Asset Lookup (never queries UUID column with non-UUID strings to avoid Postgres 22P02).
- * - Updates asset status from 'in_transit' to 'in_stock'.
+ * - Updates asset status from 'in_transit' to 'available'.
  * - Sets asset current_warehouse_id to verified target warehouse UUID.
  * - Writes a "RECEIVE_TRANSFER" entry into custody_ledger with verified warehouse_id UUID.
  * - Updates associated transfer_requests to 'COMPLETED'.
@@ -864,12 +865,12 @@ export async function completeTransferReceptionAction(
 
         const sourceWarehouseUuid = sourceWh?.id || null;
 
-        // 2. Updates asset status from 'in_transit' to 'in_stock'
+        // 2. Updates asset status from 'in_transit' to 'available'
         const { error: updateErr } = await supabaseAdmin
           .from('assets')
           .update({
             current_warehouse_id: finalTargetWarehouseId,
-            status: 'in_stock',
+            status: CANONICAL_AVAILABLE_STATUS,
             current_assigned_worker: null,
             updated_at: now,
           })
@@ -941,7 +942,7 @@ export async function completeTransferReceptionAction(
         warehouseId: finalTargetWarehouseId || targetWarehouseId,
         warehouseName: finalTargetWarehouseName || targetWhMeta?.name || 'מחסן יעד',
         warehouseCode: targetWhMeta?.code || '',
-        status: 'in_stock',
+        status: CANONICAL_AVAILABLE_STATUS,
       },
       {
         action: 'RECEIVE_TRANSFER',
@@ -985,7 +986,7 @@ export async function completeTransferReceptionAction(
  * Storekeeper or operations manager cancels an active transfer and rolls it back:
  * - Supports both parameter formats (object CancelTransferParams or legacy positional args).
  * - Bulletproof Asset Lookup (never queries UUID column with non-UUID strings to avoid Postgres 22P02).
- * - Set asset status = 'in_stock'.
+ * - Set asset status = 'available'.
  * - Restore current_warehouse_id to the source warehouse (or asset's original warehouse).
  * - If there is an active transfer_requests record for this asset, update its status to 'cancelled'.
  * - Insert audit record into custody_ledger.
@@ -1202,12 +1203,12 @@ export async function cancelTransferRollbackAction(
 
         const targetRollbackWarehouseId = finalSourceWarehouseId || asset.current_warehouse_id;
 
-        // 1. Set asset status = 'in_stock' & restore current_warehouse_id to source warehouse
+        // 1. Set asset status = 'available' & restore current_warehouse_id to source warehouse
         const { error: assetUpdateErr } = await supabaseAdmin
           .from('assets')
           .update({
             current_warehouse_id: targetRollbackWarehouseId,
-            status: 'in_stock',
+            status: CANONICAL_AVAILABLE_STATUS,
             current_assigned_worker: null,
             updated_at: now,
           })
@@ -1268,7 +1269,7 @@ export async function cancelTransferRollbackAction(
     mutateMockAsset(
       idKey,
       {
-        status: 'in_stock',
+        status: CANONICAL_AVAILABLE_STATUS,
         currentWarehouseId: finalSourceWarehouseId || sourceWarehouseId,
         warehouseId: finalSourceWarehouseId || sourceWarehouseId,
       },
@@ -1475,7 +1476,7 @@ export async function getLocalAvailableAssetsForTransferAction(
         .from('assets')
         .select('id, name, brand, model_number, qr_code, tag_number, serial_number, current_warehouse_id, status, tool_models(name, brand, model_number), warehouses(id, name, code)')
         .eq('organization_id', orgId)
-        .eq('status', 'available')
+        .in('status', AVAILABLE_STATUSES)
         .order('name', { ascending: true })
         .limit(300);
 
@@ -1519,7 +1520,7 @@ export async function getLocalAvailableAssetsForTransferAction(
       sourceWarehouseId === 'all' ||
       a.warehouseId === sourceWarehouseId ||
       a.currentWarehouseId === sourceWarehouseId;
-    return matchesWh && a.status === 'available';
+    return matchesWh && isAssetAvailable(a.status);
   });
 
   return activeAssets.map((a) => {
@@ -1598,7 +1599,7 @@ export async function directStorekeeperTransferAction(data: {
       if (!asset) {
         return { success: false, error: 'כלי העבודה לא נמצא במערכת הארגון' };
       }
-      if (asset.status !== 'available' && asset.status !== 'in_stock') {
+      if (!isAssetAvailable(asset.status)) {
         return { success: false, error: 'לא ניתן לשנע כלי שאינו במצב זמין במחסן (Available)' };
       }
 
@@ -1630,7 +1631,7 @@ export async function directStorekeeperTransferAction(data: {
     if (!m) {
       return { success: false, error: 'כלי העבודה לא נמצא במערכת' };
     }
-    if (m.status !== 'available' && m.status !== 'in_stock') {
+    if (!isAssetAvailable(m.status)) {
       return { success: false, error: 'לא ניתן לשנע כלי שאינו במצב זמין במחסן (Available)' };
     }
     sourceWhId = m.warehouseId || m.currentWarehouseId || sourceWhId;

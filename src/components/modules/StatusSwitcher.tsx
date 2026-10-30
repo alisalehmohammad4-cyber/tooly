@@ -5,6 +5,7 @@ import { Loader2, CheckCircle2, UserCheck, AlertTriangle, Trash2, ChevronDown } 
 import { updateAssetStatusAction } from '@/app/actions/assets';
 import { useRouter } from 'next/navigation';
 import type { AssetStatus } from '@/types/domain';
+import { normalizeAssetStatus } from '@/lib/assets/status';
 
 interface StatusSwitcherProps {
   assetId: string;
@@ -80,7 +81,7 @@ export default function StatusSwitcher({
   const [isUpdating, setIsUpdating] = useState<boolean>(false);
   const [isOpen, setIsOpen] = useState<boolean>(false);
 
-  const activeOption = STATUS_OPTIONS.find((opt) => opt.value === status) || STATUS_OPTIONS[0];
+  const activeOption = STATUS_OPTIONS.find((opt) => opt.value === normalizeAssetStatus(status)) || STATUS_OPTIONS[0];
 
   const handleSelectStatus = async (newStatus: AssetStatus) => {
     if (newStatus === status || isUpdating || disabled) return;

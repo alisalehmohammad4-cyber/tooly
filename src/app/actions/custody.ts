@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { supabase, isSupabaseConfigured, supabaseAdmin } from '@/lib/supabase';
 import { clearDashboardCaches } from '@/app/actions/dashboard';
+import { isAssetAvailable, CANONICAL_AVAILABLE_STATUS } from '@/lib/assets/status';
 import {
   CheckoutSchema,
   BulkCheckoutSchema,
@@ -690,7 +691,7 @@ export async function bulkCheckoutAssetAction(
       }
 
       // Check if any asset is not available
-      const unavailable = currentAssets.filter((a) => a.status !== 'available');
+      const unavailable = currentAssets.filter((a) => !isAssetAvailable(a.status));
       if (unavailable.length > 0) {
         return {
           success: false,
@@ -1648,7 +1649,7 @@ export async function transferAssetAction(
       const targetSiteName = targetWh.name;
 
       const nextVersion = (currentAsset.version || 1) + 1;
-      const newStatus = isDirect ? 'in_stock' : 'in_transit';
+      const newStatus = isDirect ? CANONICAL_AVAILABLE_STATUS : 'in_transit';
       const now = new Date().toISOString();
 
       // Step A: Update the assets table

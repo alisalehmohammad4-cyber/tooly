@@ -42661,7 +42661,7 @@ export function mutateMockAsset(
 
   Object.assign(asset, mutation, { version: (asset.version || 1) + 1 });
 
-  if (mutation.status === 'in_stock') {
+  if (mutation.status === 'available' || mutation.status === 'in_stock') {
     clearInTransitMockAsset(asset.id);
     clearInTransitMockAsset(asset.qrCode);
     if (asset.serialNumber) clearInTransitMockAsset(asset.serialNumber);

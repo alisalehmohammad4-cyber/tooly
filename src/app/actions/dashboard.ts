@@ -6,6 +6,7 @@ import {
   getMockStorekeeperOperations,
   getMockOrganizationById,
 } from '@/lib/mockStore';
+import { isAssetAvailable } from '@/lib/assets/status';
 
 export interface FleetUtilization {
   totalAssets: number;
@@ -342,7 +343,7 @@ export async function getPlantManagerAnalytics(
       const cost = typeof row.purchase_cost === 'number' ? row.purchase_cost : 2500;
       totalFleetValue += cost;
 
-      if (row.status === 'available') inWarehouse++;
+      if (isAssetAvailable(row.status as string)) inWarehouse++;
       if (row.status === 'checked_out') inUse++;
       if (row.status === 'maintenance' || row.status === 'needs_repair') maintenance++;
 
@@ -369,9 +370,9 @@ export async function getPlantManagerAnalytics(
           const rawName = (row.name as string) || (model.name as string) || '';
           const toolName =
             !rawName ||
-            rawName.trim() === '' ||
-            rawName.trim().toUpperCase() === 'X' ||
-            rawName.trim() === '-'
+              rawName.trim() === '' ||
+              rawName.trim().toUpperCase() === 'X' ||
+              rawName.trim() === '-'
               ? 'ציוד כללי / כלי עבודה'
               : rawName.trim();
           overdueList.push({
@@ -440,7 +441,7 @@ export async function getPlantManagerAnalytics(
           (r: Record<string, unknown>) => r.status === 'checked_out'
         ).length;
         const available = matchedAssets.filter(
-          (r: Record<string, unknown>) => r.status === 'available' || r.status === 'in_stock'
+          (r: Record<string, unknown>) => isAssetAvailable(r.status as string)
         ).length;
         const maintenance = matchedAssets.filter(
           (r: Record<string, unknown>) =>
@@ -567,7 +568,7 @@ export async function getStorekeeperOperations(
     const currentWh = isAll
       ? { id: 'all', name: 'כלל המחסנים (All Depots)', code: 'ALL' }
       : (warehousesList.find((w) => w.id === selectedWhId) ||
-         warehousesList[0] || { id: selectedWhId || 'all', name: 'כלל המחסנים (All Depots)', code: 'ALL' });
+        warehousesList[0] || { id: selectedWhId || 'all', name: 'כלל המחסנים (All Depots)', code: 'ALL' });
 
     let query = supabaseAdmin
       .from('assets')
@@ -643,7 +644,7 @@ export async function getStorekeeperOperations(
     }
 
     whAssets.forEach((row: Record<string, unknown>) => {
-      if (row.status === 'available' || row.status === 'in_stock') availableCount++;
+      if (isAssetAvailable(row.status as string)) availableCount++;
       if (row.status === 'checked_out') checkedOutCount++;
       if (row.status === 'maintenance' || row.is_locked) quarantinedCount++;
 

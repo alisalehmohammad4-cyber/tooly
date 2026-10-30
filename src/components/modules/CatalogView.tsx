@@ -35,6 +35,7 @@ import ToolPassportModal from '@/components/modules/ToolPassportModal';
 import StatusSwitcher from '@/components/modules/StatusSwitcher';
 import type { ScannedAssetDetails } from '@/app/actions/custody';
 import { matchesToolSearch } from '@/lib/search/toolDictionary';
+import { isAssetAvailable } from '@/lib/assets/status';
 
 const BuildingOfficeIcon = Building2;
 
@@ -137,7 +138,7 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
   // Status counts for the pills within current warehouse selection
   const totalWarehouseToolsCount = warehouseFilteredAssets.length;
   const availableWarehouseToolsCount = useMemo(
-    () => warehouseFilteredAssets.filter((a) => a.status === 'available').length,
+    () => warehouseFilteredAssets.filter((a) => isAssetAvailable(a.status)).length,
     [warehouseFilteredAssets]
   );
   const inUseWarehouseToolsCount = useMemo(
@@ -148,7 +149,7 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
   // 2. Filter assets by status filter
   const statusFilteredAssets = useMemo(() => {
     if (statusFilter === 'available') {
-      return warehouseFilteredAssets.filter((a) => a.status === 'available');
+      return warehouseFilteredAssets.filter((a) => isAssetAvailable(a.status));
     }
     if (statusFilter === 'checked_out') {
       return warehouseFilteredAssets.filter((a) => a.status === 'checked_out');
@@ -663,7 +664,7 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
             {displayedAssets.length > 0 && (
               <div className="space-y-3">
                 {visibleAssets.map((asset) => {
-                  const isAvailable = asset.status === 'available';
+                  const isAvailable = isAssetAvailable(asset.status);
                   const isCheckedOut = asset.status === 'checked_out';
                   const isMaintenance = asset.status === 'maintenance';
                   const isInTransit = asset.status === 'in_transit';

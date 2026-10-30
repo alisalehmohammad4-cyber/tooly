@@ -58,6 +58,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useOcrScanner } from '@/lib/ocr/useOcrScanner';
 import { useLaserStripOcr } from '@/lib/ocr/useLaserStripOcr';
 import { snapTagToAsset, triggerOcrHaptic, playOcrBeep, normalizeFieldTag } from '@/lib/ocr/tagParser';
+import { isAssetAvailable } from '@/lib/assets/status';
 import { detectBarcodeOrQr, extractTagFromBarcodePayload } from '@/lib/ocr/barcodeDetector';
 import {
   getAssetDetailsByQr,
@@ -1368,7 +1369,7 @@ export default function WarehouseDashboardView({
         activeOrgId
       );
       if (asset) {
-        if (asset.status !== 'available' && asset.status !== 'in_stock') {
+        if (!isAssetAvailable(asset.status)) {
           setCheckoutFeedback({
             text: `הכלי שנמצא אינו זמין לניפוק (סטטוס נוכחי: ${asset.status})`,
             type: 'error',

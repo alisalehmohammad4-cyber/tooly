@@ -23,6 +23,7 @@ import {
   type WarehouseToolItem,
 } from '@/app/actions/warehouses';
 import { useAuth } from '@/context/AuthContext';
+import { isAssetAvailable } from '@/lib/assets/status';
 
 const PAGE_SIZE = 32;
 
@@ -93,7 +94,7 @@ export default function WarehouseToolsModal({
     let maintenance = 0;
 
     for (const t of tools) {
-      if (t.status === 'available') {
+      if (isAssetAvailable(t.status)) {
         available++;
       } else if (t.status === 'checked_out' || t.status === 'in_use') {
         checkedOut++;
@@ -116,7 +117,7 @@ export default function WarehouseToolsModal({
 
     return tools.filter((tool) => {
       // 1. Status Filter
-      if (statusFilter === 'available' && tool.status !== 'available') {
+      if (statusFilter === 'available' && !isAssetAvailable(tool.status)) {
         return false;
       }
       if (
@@ -436,7 +437,7 @@ export default function WarehouseToolsModal({
                   tool.status === 'checked_out' || tool.status === 'in_use';
                 const isMaintenance =
                   tool.status === 'maintenance' || tool.status === 'needs_repair';
-                const isAvailable = tool.status === 'available';
+                const isAvailable = isAssetAvailable(tool.status);
 
                 return (
                   <div

@@ -41,6 +41,7 @@ import {
 import { useAuth } from '@/context/AuthContext';
 import { useWebNfc } from '@/lib/nfc/useWebNfc';
 import StatusSwitcher from '@/components/modules/StatusSwitcher';
+import { isAssetAvailable } from '@/lib/assets/status';
 
 export interface ToolPassportModalProps {
   asset?: ScannedAssetDetails | null;
@@ -630,7 +631,7 @@ function ToolPassportModalContent({
               />
             ) : (
               <>
-                {currentAsset?.status === 'available' && (
+                {isAssetAvailable(currentAsset?.status) && (
                   <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
                     זמין במחסן
                   </span>

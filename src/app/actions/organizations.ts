@@ -19,6 +19,7 @@ import {
   addMockUser,
 } from '@/lib/mockStore';
 import type { Organization, AppUser, OrganizationStatus } from '@/types/domain';
+import { CANONICAL_AVAILABLE_STATUS } from '@/lib/assets/status';
 
 const INITIAL_CATEGORIES = [
   { name: 'כלי עבודה חשמליים', slug: 'power-tools', icon: 'drill' },
@@ -943,7 +944,7 @@ export async function masterLookupAssetsAction(query?: string): Promise<{
               qrCode: a.qr_code || undefined,
               brand: a.brand || undefined,
               modelNumber: a.model_number || undefined,
-              status: a.status || 'in_stock',
+              status: a.status || CANONICAL_AVAILABLE_STATUS,
               condition: a.condition || 'good',
               organizationId: orgId,
               organizationName: orgName,
@@ -993,7 +994,7 @@ export async function masterLookupAssetsAction(query?: string): Promise<{
             qrCode: m.qr_code ? String(m.qr_code) : (m.qrCode ? String(m.qrCode) : undefined),
             brand: m.brand ? String(m.brand) : undefined,
             modelNumber: m.model_number ? String(m.model_number) : (m.modelNumber ? String(m.modelNumber) : undefined),
-            status: String(m.status || 'in_stock'),
+            status: String(m.status || CANONICAL_AVAILABLE_STATUS),
             condition: String(m.condition || 'good'),
             organizationId: String(m.organization_id || m.organizationId || 'default-org'),
             organizationName: 'הבונים (Mock)',

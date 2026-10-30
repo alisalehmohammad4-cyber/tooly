@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase';
 import { getServerSessionOrgId, getServerSessionUser } from '@/lib/auth/session';
 import { clearDashboardCaches } from '@/app/actions/dashboard';
+import { isAssetAvailable } from '@/lib/assets/status';
 import {
   getMockWarehouses,
   getMockAssets,
@@ -288,7 +289,7 @@ export async function getInTransitFleetAction(
       isDemonstrativeInTransitCleared(sample.qrCode) ||
       isDemonstrativeInTransitCleared(sample.id) ||
       isDemonstrativeInTransitCleared('zr-282') ||
-      sample.status === 'in_stock'
+      isAssetAvailable(sample.status)
     ) {
       return [];
     }

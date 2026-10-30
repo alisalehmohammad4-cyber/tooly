@@ -23,6 +23,7 @@ import {
   updateCachedAsset,
   cacheAsset,
 } from '@/lib/offline/offlineDb';
+import { isAssetAvailable } from '@/lib/assets/status';
 
 interface WorkerToolCardProps {
   asset: ScannedAssetDetails;
@@ -53,7 +54,7 @@ export default function WorkerToolCard({
   const [reportSuccessMessage, setReportSuccessMessage] = useState<string | null>(null);
   const [reportError, setReportError] = useState<string | null>(null);
 
-  const isAvailable = asset.status === 'available';
+  const isAvailable = isAssetAvailable(asset.status);
   const isCheckedOut = asset.status === 'checked_out';
   const isMaintenance = asset.status === 'maintenance';
 

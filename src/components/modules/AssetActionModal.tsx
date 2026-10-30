@@ -43,6 +43,7 @@ import {
   cacheAsset,
 } from '@/lib/offline/offlineDb';
 import { useWebNfc } from '@/lib/nfc/useWebNfc';
+import { isAssetAvailable } from '@/lib/assets/status';
 
 interface AssetActionModalProps {
   asset: ScannedAssetDetails | null;
@@ -141,7 +142,7 @@ export default function AssetActionModal({
 
   if (!isOpen || !asset) return null;
 
-  const isAvailable = asset.status === 'available';
+  const isAvailable = isAssetAvailable(asset.status);
   const isCheckedOut = asset.status === 'checked_out';
   const isMaintenance = asset.status === 'maintenance';
 
