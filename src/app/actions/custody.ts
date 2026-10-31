@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { supabase, isSupabaseConfigured, supabaseAdmin } from '@/lib/supabase';
 import { clearDashboardCaches } from '@/app/actions/dashboard';
-import { isAssetAvailable, CANONICAL_AVAILABLE_STATUS } from '@/lib/assets/status';
+import { CANONICAL_AVAILABLE_STATUS, evaluateCheckoutEligibility } from '@/lib/assets/status';
 import {
   CheckoutSchema,
   BulkCheckoutSchema,
@@ -144,30 +144,6 @@ function getWarehouseMeta(warehouseId: string): { name: string; code: string } {
     return { name: wh.name, code: wh.code };
   }
   return { name: 'מחסן שטח פעיל', code: 'WH' };
-}
-
-/**
- * Checks whether an asset is restricted by administrative lock or overdue safety inspection.
- */
-function checkToolLockout(asset: ScannedAssetDetails): { allowed: boolean; error?: string } {
-  if (asset.isLocked) {
-    return {
-      allowed: false,
-      error: `הכלי נעול מנהלית: ${asset.lockReason || 'נעול להוצאה מהמחסן'}`,
-    };
-  }
-
-  if (asset.safetyInspectionDue) {
-    const dueTime = new Date(asset.safetyInspectionDue).getTime();
-    if (!isNaN(dueTime) && dueTime < Date.now()) {
-      return {
-        allowed: false,
-        error: '⚠️ הכלי נעול לשימוש! פג תוקף בדיקת בטיחות תקופתית',
-      };
-    }
-  }
-
-  return { allowed: true };
 }
 
 interface JoinedAssetData {
@@ -593,29 +569,22 @@ export async function bulkCheckoutAssetAction(
       }
     }
     if (targetAsset) {
-      const isOwner = targetAsset.organizationId === orgId;
-      if (!isOwner) {
+      const check = evaluateCheckoutEligibility(targetAsset, orgId);
+      if (!check.eligible) {
         return {
           success: false,
-          error: 'לא ניתן לנפק ציוד שאינו שייך לארגון הפעיל',
-        };
-      }
-      const lockCheck = checkToolLockout(targetAsset);
-      if (!lockCheck.allowed) {
-        return {
-          success: false,
-          error: assetIds.length === 1 ? lockCheck.error! : `${targetAsset.toolName} (${targetAsset.qrCode}): ${lockCheck.error}`,
+          error: assetIds.length === 1 ? (check.error || 'הכלי אינו זמין לניפוק') : `${targetAsset.toolName} (${targetAsset.qrCode}): ${check.error || 'לא זמין'}`,
         };
       }
     }
 
     const anyMockAsset = getMockAssets().find((a) => a.id === id);
     if (anyMockAsset) {
-      const isOwner = anyMockAsset.organizationId === orgId;
-      if (!isOwner) {
+      const check = evaluateCheckoutEligibility(anyMockAsset, orgId);
+      if (!check.eligible) {
         return {
           success: false,
-          error: 'לא ניתן לנפק ציוד שאינו שייך לארגון הפעיל',
+          error: check.error || 'הכלי אינו זמין לניפוק.',
         };
       }
     }
@@ -640,6 +609,7 @@ export async function bulkCheckoutAssetAction(
           lock_reason,
           safety_inspection_due,
           organization_id,
+          current_assigned_worker,
           current_warehouse_id,
           qr_code,
           name,
@@ -662,41 +632,38 @@ export async function bulkCheckoutAssetAction(
         };
       }
 
-      // Check tenant ownership & lockouts in DB
-      for (const item of currentAssets) {
-        const itemOrgId = item.organization_id as string;
-        const isOwner = itemOrgId === orgId;
-        if (!isOwner) {
-          return {
-            success: false,
-            error: 'לא ניתן לנפק ציוד שאינו שייך לארגון הפעיל',
-          };
-        }
+      // Check active transfers in transfer_requests (scoped to tenant & candidate assets)
+      const { data: activeTransfers, error: transferErr } = await client
+        .from('transfer_requests')
+        .select('asset_id')
+        .eq('organization_id', orgId)
+        .in('asset_id', assetIds)
+        .in('status', ['PENDING', 'APPROVED', 'in_transit'])
+        .limit(1);
 
-        if (item.is_locked) {
-          return {
-            success: false,
-            error: `הכלי נעול מנהלית: ${item.lock_reason || 'נעול להוצאה מהמחסן'}`,
-          };
-        }
-        if (item.safety_inspection_due) {
-          const dueTime = new Date(item.safety_inspection_due).getTime();
-          if (!isNaN(dueTime) && dueTime < Date.now()) {
-            return {
-              success: false,
-              error: '⚠️ הכלי נעול לשימוש! פג תוקף בדיקת בטיחות תקופתית',
-            };
-          }
-        }
-      }
-
-      // Check if any asset is not available
-      const unavailable = currentAssets.filter((a) => !isAssetAvailable(a.status));
-      if (unavailable.length > 0) {
+      if (transferErr) {
         return {
           success: false,
-          error: `${unavailable.length} כלי/כלים אינם זמינים במלאי לניפוק.`,
+          error: `שגיאה באימות סטטוס שינוע פעיל: ${transferErr.message}`,
         };
+      }
+
+      if (activeTransfers && activeTransfers.length > 0) {
+        return {
+          success: false,
+          error: 'לא ניתן לנפק: הכלי נמצא בתהליך שינוע פעיל בין אתרים.',
+        };
+      }
+
+      // Check tenant ownership, lockouts, assignments, and availability
+      for (const item of currentAssets) {
+        const check = evaluateCheckoutEligibility(item as Record<string, unknown>, orgId);
+        if (!check.eligible) {
+          return {
+            success: false,
+            error: check.error || 'הכלי אינו זמין לניפוק.',
+          };
+        }
       }
 
       // 2. Update each asset and insert audit ledger entries

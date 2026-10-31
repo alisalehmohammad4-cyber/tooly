@@ -202,35 +202,37 @@ test('Regression Scenario - in_stock asset with expired safety inspection is rej
   assert.ok(result.error?.includes('בדיקת בטיחות תקופתית'));
 });
 
-test('Regression Scenario - in_stock asset with active transit or worker assignment is rejected', () => {
-  // Case A: Flagged in transit despite in_stock status
-  const inTransitAsset = {
-    id: 'asset-transit-02',
-    status: 'in_stock',
-    inTransit: true,
-  };
-  const transitResult = evaluateCheckoutEligibility(inTransitAsset);
-  assert.equal(transitResult.eligible, false);
-  assert.equal(transitResult.code, 'IN_TRANSIT');
+test('Regression Scenario - in_stock and available assets with active transit or worker assignment are rejected', () => {
+  for (const st of ['in_stock', 'available']) {
+    // Case A: Flagged in transit despite available/in_stock status
+    const inTransitAsset = {
+      id: `asset-transit-${st}`,
+      status: st,
+      inTransit: true,
+    };
+    const transitResult = evaluateCheckoutEligibility(inTransitAsset);
+    assert.equal(transitResult.eligible, false);
+    assert.equal(transitResult.code, 'IN_TRANSIT');
 
-  // Case B: Worker assigned despite in_stock status
-  const assignedAsset = {
-    id: 'asset-assigned-01',
-    status: 'in_stock',
-    current_assigned_worker: 'מוחמד זועבי',
-  };
-  const assignedResult = evaluateCheckoutEligibility(assignedAsset);
-  assert.equal(assignedResult.eligible, false);
-  assert.equal(assignedResult.code, 'ALREADY_ASSIGNED');
+    // Case B: Worker assigned despite available/in_stock status
+    const assignedAsset = {
+      id: `asset-assigned-${st}`,
+      status: st,
+      current_assigned_worker: 'מוחמד זועבי',
+    };
+    const assignedResult = evaluateCheckoutEligibility(assignedAsset);
+    assert.equal(assignedResult.eligible, false);
+    assert.equal(assignedResult.code, 'ALREADY_ASSIGNED');
 
-  // Case C: Belongs to different organization
-  const foreignAsset = {
-    id: 'asset-foreign-01',
-    status: 'in_stock',
-    organization_id: 'org-external-001',
-  };
-  const foreignResult = evaluateCheckoutEligibility(foreignAsset, 'org-active-001');
-  assert.equal(foreignResult.eligible, false);
-  assert.equal(foreignResult.code, 'ORGANIZATION_MISMATCH');
+    // Case C: Belongs to different organization
+    const foreignAsset = {
+      id: `asset-foreign-${st}`,
+      status: st,
+      organization_id: 'org-external-001',
+    };
+    const foreignResult = evaluateCheckoutEligibility(foreignAsset, 'org-active-001');
+    assert.equal(foreignResult.eligible, false);
+    assert.equal(foreignResult.code, 'ORGANIZATION_MISMATCH');
+  }
 });
 
