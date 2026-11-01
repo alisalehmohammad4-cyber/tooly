@@ -36,6 +36,7 @@ export const BulkCheckoutSchema = z.object({
   signatureData: z.string().trim().min(1, 'Digital signature is required'),
   gps: GpsCoordinatesSchema.nullable().optional(),
   notes: z.string().trim().optional(),
+  requestId: z.string().trim().optional(),
 });
 
 export type BulkCheckoutInput = z.infer<typeof BulkCheckoutSchema>;
@@ -49,6 +50,7 @@ export const CheckoutSchema = z.object({
   signatureData: z.string().trim().optional(),
   gps: GpsCoordinatesSchema.nullable().optional(),
   notes: z.string().trim().optional(),
+  requestId: z.string().trim().optional(),
 });
 
 export type CheckoutInput = z.infer<typeof CheckoutSchema>;

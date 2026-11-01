@@ -594,250 +594,142 @@ export async function bulkCheckoutAssetAction(
 
   if (isSupabaseConfigured()) {
     try {
-      // 1. Fetch current assets to verify existence, lockout, tenant isolation and facility
       const client = supabaseAdmin || supabase;
       const sessionUser = await getServerSessionUser();
       const performedBy = sessionUser?.fullName || sessionUser?.name || 'מחסנאי ראשי';
 
-      const { data: currentAssets, error: fetchErr } = await client
-        .from('assets')
-        .select(`
-          id,
-          version,
-          status,
-          is_locked,
-          lock_reason,
-          safety_inspection_due,
-          organization_id,
-          current_assigned_worker,
-          current_warehouse_id,
-          qr_code,
-          name,
-          brand,
-          model_number,
-          condition,
-          warehouses:current_warehouse_id ( id, name, code ),
-          tool_models:tool_model_id ( id, name, brand, model_number )
-        `)
-        .in('id', assetIds);
+      // Atomic bulk checkout via PostgreSQL RPC function
+      const { data: rpcResult, error: rpcErr } = await client.rpc('execute_bulk_checkout', {
+        p_org_id: orgId,
+        p_asset_ids: assetIds,
+        p_worker_name: workerName,
+        p_worker_phone: workerPhone || null,
+        p_expected_return_date: expectedReturnDate || null,
+        p_performed_by: performedBy,
+        p_signature_data: signatureData || null,
+        p_gps_lat: gps?.lat ?? null,
+        p_gps_lng: gps?.lng ?? null,
+        p_notes: notes || null,
+        p_accessories: accessories || {},
+        p_request_id: parsed.data.requestId || null,
+      });
 
-      if (fetchErr) {
-        return { success: false, error: `Failed to retrieve assets: ${fetchErr.message}` };
-      }
-
-      if (!currentAssets || currentAssets.length !== assetIds.length) {
+      if (rpcErr) {
+        console.error('[bulkCheckoutAssetAction] Atomic checkout RPC failed:', rpcErr);
+        const cleanedMsg = rpcErr.message?.replace(/^.*?EXCEPTION:\s*/i, '') || rpcErr.message;
         return {
           success: false,
-          error: `Some tools could not be located in database. Found ${currentAssets?.length || 0} of ${assetIds.length}.`,
+          error: cleanedMsg || 'שגיאה בביצוע ניפוק אטומי במסד הנתונים',
         };
       }
 
-      // Check active transfers in transfer_requests (scoped to tenant & candidate assets)
-      const { data: activeTransfers, error: transferErr } = await client
-        .from('transfer_requests')
-        .select('asset_id')
-        .eq('organization_id', orgId)
-        .in('asset_id', assetIds)
-        .in('status', ['PENDING', 'APPROVED', 'in_transit'])
-        .limit(1);
+      const rpcData = rpcResult as {
+        success?: boolean;
+        idempotent?: boolean;
+        assets?: ScannedAssetDetails[];
+        count?: number;
+      } | null;
 
-      if (transferErr) {
+      if (!rpcData || !rpcData.success) {
         return {
           success: false,
-          error: `שגיאה באימות סטטוס שינוע פעיל: ${transferErr.message}`,
+          error: 'הניפוק נכשל: תגובת מסד הנתונים אינה תקינה',
         };
       }
 
-      if (activeTransfers && activeTransfers.length > 0) {
-        return {
-          success: false,
-          error: 'לא ניתן לנפק: הכלי נמצא בתהליך שינוע פעיל בין אתרים.',
-        };
-      }
-
-      // Check tenant ownership, lockouts, assignments, and availability
-      for (const item of currentAssets) {
-        const check = evaluateCheckoutEligibility(item as Record<string, unknown>, orgId);
-        if (!check.eligible) {
-          return {
-            success: false,
-            error: check.error || 'הכלי אינו זמין לניפוק.',
+      if (Array.isArray(rpcData.assets)) {
+        for (const ast of rpcData.assets) {
+          const itemAccessories = accessories[ast.id] || {
+            batteriesCount: 0,
+            hasCharger: false,
+            hasCase: false,
           };
-        }
-      }
-
-      // 2. Update each asset and insert audit ledger entries
-      for (const item of currentAssets) {
-        const nextVersion = (item.version || 1) + 1;
-        const itemAccessories = accessories[item.id] || {
-          batteriesCount: 0,
-          hasCharger: false,
-          hasCase: false,
-        };
-
-        const updateQuery = client
-          .from('assets')
-          .update({
+          updatedAssets.push({
+            id: ast.id,
+            qrCode: ast.qrCode || ast.qr_code || `TOOL-${ast.id.slice(0, 6).toUpperCase()}`,
+            qr_code: ast.qr_code || ast.qrCode,
             status: 'checked_out',
+            condition: ast.condition || 'good',
+            currentAssignedWorker: workerName,
             current_assigned_worker: workerName,
-            expected_return_date: expectedReturnDate,
+            currentWarehouseId: ast.currentWarehouseId || ast.current_warehouse_id || 'wh-main-01',
+            current_warehouse_id: ast.current_warehouse_id || ast.currentWarehouseId || 'wh-main-01',
+            warehouseName: ast.warehouseName || 'מחסן שטח',
+            warehouseCode: ast.warehouseCode || 'WH',
+            toolName: ast.toolName || ast.name || 'כלי שנופק',
+            brand: ast.brand || 'כלי',
+            modelNumber: ast.modelNumber || ast.model_number || null,
+            version: ast.version || 2,
+            expectedReturnDate,
             accessories: itemAccessories,
-            version: nextVersion,
-            organization_id: orgId,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', item.id);
-
-        if (orgId) {
-          updateQuery.eq('organization_id', orgId);
+          });
         }
-
-        const { data: updatedRows, error: updateErr } = await updateQuery.select();
-
-        if (updateErr) {
-          console.error("DB Update Failed:", updateErr);
-          throw new Error(`Failed to update asset ${item.id}: ${updateErr.message}`);
-        }
-
-        if (!updatedRows || updatedRows.length === 0) {
-          console.error("Zero rows updated! Potential RLS or organization_id mismatch for asset:", item.id);
-          throw new Error("העדכון נכשל: הכלי לא נמצא או שנחסם עקב הרשאות (0 שורות עודכנו).");
-        }
-
-        // Resolve valid warehouse UUID for non-null constraint
-        let targetWarehouseId = item.current_warehouse_id;
-        if (!targetWarehouseId || !isValidUuid(targetWarehouseId)) {
-          const { data: fallbackWh } = await client
-            .from('warehouses')
-            .select('id')
-            .eq('organization_id', orgId)
-            .limit(1)
-            .maybeSingle();
-          targetWarehouseId = fallbackWh?.id || null;
-        }
-
-        // Insert into custody_ledger
-        const { error: ledgerErr } = await client.from('custody_ledger').insert({
-          organization_id: orgId,
-          asset_id: item.id,
-          action: 'CHECKOUT',
-          warehouse_id: targetWarehouseId,
-          from_warehouse_id: targetWarehouseId || null,
-          to_warehouse_id: targetWarehouseId || null,
-          performed_by: performedBy,
-          worker_name: workerName,
-          target_worker: workerName,
-          worker_phone: workerPhone || null,
-          signature_svg: signatureData || null,
-          signature_data: signatureData || null,
-          is_tag_verified: true,
-          signed_at: new Date().toISOString(),
-          expected_return_date: expectedReturnDate,
-          accessories_snapshot: itemAccessories,
-          gps_lat: gps?.lat ?? null,
-          gps_lng: gps?.lng ?? null,
-          notes: notes || `ניפוק לעובד ${workerName}`,
-          created_at: new Date().toISOString(),
-        });
-
-        if (ledgerErr) {
-          console.error('LEDGER INSERT FAILED:', ledgerErr);
-          throw new Error('שגיאה ברישום ביומן התנועות: ' + ledgerErr.message);
-        }
-
-        const itemObj = item as Record<string, unknown>;
-        const whRaw = itemObj.warehouses;
-        const whObj = (Array.isArray(whRaw) ? whRaw[0] : whRaw) as Record<string, unknown> || {};
-        const tmRaw = itemObj.tool_models;
-        const tmObj = (Array.isArray(tmRaw) ? tmRaw[0] : tmRaw) as Record<string, unknown> || {};
-        const qr = (itemObj.qr_code as string) || `TOOL-${item.id.slice(0, 6).toUpperCase()}`;
-        const itemWhId = (itemObj.current_warehouse_id as string) || 'wh-main-01';
-
-        updatedAssets.push({
-          id: item.id,
-          qrCode: qr,
-          qr_code: qr,
-          status: 'checked_out',
-          condition: (itemObj.condition as 'excellent' | 'good' | 'needs_repair' | 'retired') || 'good',
-          currentAssignedWorker: workerName,
-          current_assigned_worker: workerName,
-          currentWarehouseId: itemWhId,
-          current_warehouse_id: itemWhId,
-          warehouseName: (whObj.name as string) || "מחסן ראשי",
-          warehouseCode: (whObj.code as string) || 'CDB-01',
-          toolName: (itemObj.name as string) || (tmObj.name as string) || 'כלי שנופק',
-          brand: (itemObj.brand as string) || (tmObj.brand as string) || 'כלי',
-          modelNumber: (itemObj.model_number as string) || (tmObj.model_number as string) || null,
-          version: nextVersion,
-          expectedReturnDate,
-          accessories: itemAccessories,
-        });
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Database bulk checkout error';
       return { success: false, error: msg };
     }
-  }
-
-  // 3. Fallback in-memory dataset updates
-  for (const id of assetIds) {
-    let found = false;
-    for (const key of Object.keys(FALLBACK_CUSTODY_ASSETS)) {
-      if (FALLBACK_CUSTODY_ASSETS[key].id === id) {
-        FALLBACK_CUSTODY_ASSETS[key].status = 'checked_out';
-        FALLBACK_CUSTODY_ASSETS[key].currentAssignedWorker = workerName;
-        FALLBACK_CUSTODY_ASSETS[key].expectedReturnDate = expectedReturnDate;
-        FALLBACK_CUSTODY_ASSETS[key].accessories = accessories[id] || {
-          batteriesCount: 0,
-          hasCharger: false,
-          hasCase: false,
-        };
-        FALLBACK_CUSTODY_ASSETS[key].version += 1;
-        mutateMockAsset(
-          FALLBACK_CUSTODY_ASSETS[key].qrCode,
-          {
-            status: 'checked_out',
-            currentAssignedWorker: workerName,
-            workerPhone: workerPhone || null,
-            expectedReturnDate,
-            accessories: FALLBACK_CUSTODY_ASSETS[key].accessories,
-          },
-          {
-            action: 'CHECKOUT',
-            performedBy: 'מחסנאי',
-            targetWorker: workerName,
-            workerPhone: workerPhone || null,
-            signatureData,
-            notes: notes || 'ניפוק כלי עבודה לצוות שטח',
-          }
-        );
-        updatedAssets.push({ ...FALLBACK_CUSTODY_ASSETS[key] });
-        found = true;
-        break;
+  } else {
+    // 3. Fallback in-memory dataset updates (only executed when Supabase is not configured)
+    for (const id of assetIds) {
+      let found = false;
+      for (const key of Object.keys(FALLBACK_CUSTODY_ASSETS)) {
+        if (FALLBACK_CUSTODY_ASSETS[key].id === id) {
+          FALLBACK_CUSTODY_ASSETS[key].status = 'checked_out';
+          FALLBACK_CUSTODY_ASSETS[key].currentAssignedWorker = workerName;
+          FALLBACK_CUSTODY_ASSETS[key].expectedReturnDate = expectedReturnDate;
+          FALLBACK_CUSTODY_ASSETS[key].accessories = accessories[id] || {
+            batteriesCount: 0,
+            hasCharger: false,
+            hasCase: false,
+          };
+          FALLBACK_CUSTODY_ASSETS[key].version += 1;
+          mutateMockAsset(
+            FALLBACK_CUSTODY_ASSETS[key].qrCode,
+            {
+              status: 'checked_out',
+              currentAssignedWorker: workerName,
+              workerPhone: workerPhone || null,
+              expectedReturnDate,
+              accessories: FALLBACK_CUSTODY_ASSETS[key].accessories,
+            },
+            {
+              action: 'CHECKOUT',
+              performedBy: 'מחסנאי',
+              targetWorker: workerName,
+              workerPhone: workerPhone || null,
+              signatureData,
+              notes: notes || 'ניפוק כלי עבודה לצוות שטח',
+            }
+          );
+          updatedAssets.push({ ...FALLBACK_CUSTODY_ASSETS[key] });
+          found = true;
+          break;
+        }
       }
-    }
 
-    if (!found) {
-      updatedAssets.push({
-        id,
-        qrCode: `TOOL-${id.slice(0, 6).toUpperCase()}`,
-        status: 'checked_out',
-        condition: 'good',
-        currentAssignedWorker: workerName,
-        currentWarehouseId: 'wh-main-01',
-        warehouseName: "מחסן מרכזי - אגף א'",
-        warehouseCode: 'CDB-01',
-        toolName: 'כלי שנופק',
-        brand: 'כלי',
-        modelNumber: null,
-        version: 2,
-        expectedReturnDate,
-        accessories: accessories[id] || {
-          batteriesCount: 0,
-          hasCharger: false,
-          hasCase: false,
-        },
-      });
+      if (!found) {
+        updatedAssets.push({
+          id,
+          qrCode: `TOOL-${id.slice(0, 6).toUpperCase()}`,
+          status: 'checked_out',
+          condition: 'good',
+          currentAssignedWorker: workerName,
+          currentWarehouseId: 'wh-main-01',
+          warehouseName: "מחסן מרכזי - אגף א'",
+          warehouseCode: 'CDB-01',
+          toolName: 'כלי שנופק',
+          brand: 'כלי',
+          modelNumber: null,
+          version: 2,
+          expectedReturnDate,
+          accessories: accessories[id] || {
+            batteriesCount: 0,
+            hasCharger: false,
+            hasCase: false,
+          },
+        });
+      }
     }
   }
 
