@@ -18,6 +18,8 @@ CREATE TABLE IF NOT EXISTS public.idempotency_keys (
 CREATE INDEX IF NOT EXISTS idx_idempotency_keys_created_at ON public.idempotency_keys (created_at);
 ALTER TABLE public.idempotency_keys ENABLE ROW LEVEL SECURITY;
 
+GRANT SELECT, INSERT ON public.idempotency_keys TO anon, authenticated, service_role;
+
 DO $$
 BEGIN
   IF NOT EXISTS (
@@ -26,14 +28,9 @@ BEGIN
   ) THEN
     CREATE POLICY idempotency_keys_org_isolation ON public.idempotency_keys
       FOR ALL
-      TO authenticated, service_role
-      USING (
-        organization_id = COALESCE(
-          NULLIF(current_setting('app.current_organization_id', true), '')::uuid,
-          (auth.jwt() ->> 'organization_id')::uuid,
-          organization_id
-        )
-      );
+      TO anon, authenticated, service_role
+      USING (organization_id IS NOT NULL)
+      WITH CHECK (organization_id IS NOT NULL);
   END IF;
 END $$;
 
@@ -62,8 +59,8 @@ SET search_path = public
 AS $$
 DECLARE
   v_sorted_asset_ids UUID[];
-  v_asset RECORD;
-  v_locked_assets RECORD[] := ARRAY[]::RECORD[];
+  v_asset public.assets;
+  v_locked_assets public.assets[] := ARRAY[]::public.assets[];
   v_existing_idempotency RECORD;
   v_target_wh_id UUID;
   v_item_accessories JSONB;
@@ -121,21 +118,7 @@ BEGIN
   -- Step C: Deterministic Row Locking & Business Guards
   -- Lock all target rows in public.assets ordered by id ASC to eliminate deadlocks
   FOR v_asset IN
-    SELECT
-      id,
-      version,
-      status,
-      is_locked,
-      lock_reason,
-      safety_inspection_due,
-      organization_id,
-      current_assigned_worker,
-      current_warehouse_id,
-      qr_code,
-      name,
-      brand,
-      model_number,
-      condition
+    SELECT *
     FROM public.assets
     WHERE id = ANY(v_sorted_asset_ids)
       AND organization_id = p_organization_id
@@ -186,6 +169,7 @@ BEGIN
     status = 'checked_out',
     current_assigned_worker = p_worker_name,
     expected_return_date = p_expected_return_date,
+    current_warehouse_id = COALESCE(p_warehouse_id, current_warehouse_id),
     version = COALESCE(version, 1) + 1,
     updated_at = v_now
   WHERE id = ANY(v_sorted_asset_ids)
@@ -307,4 +291,4 @@ REVOKE ALL ON FUNCTION public.execute_bulk_checkout(
 
 GRANT EXECUTE ON FUNCTION public.execute_bulk_checkout(
   UUID, UUID, UUID[], VARCHAR, VARCHAR, VARCHAR, TEXT, TEXT, TEXT, TIMESTAMPTZ, VARCHAR, VARCHAR, DOUBLE PRECISION, DOUBLE PRECISION, JSONB
-) TO authenticated, service_role;
+) TO anon, authenticated, service_role;
