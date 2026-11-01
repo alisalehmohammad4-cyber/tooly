@@ -5,6 +5,7 @@ import { supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase';
 import { getServerSessionOrgId, getServerSessionUser } from '@/lib/auth/session';
 import { clearDashboardCaches } from '@/app/actions/dashboard';
 import { isAssetAvailable } from '@/lib/assets/status';
+import { TRANSFER_REQUEST_DB_STATUS } from '@/lib/transfers/status';
 import {
   getMockWarehouses,
   getMockAssets,
@@ -179,7 +180,7 @@ export async function getInTransitFleetAction(
             target_warehouse:target_warehouse_id ( name, code )
           `)
           .in('asset_id', assetIds)
-          .eq('status', 'APPROVED')
+          .in('status', [TRANSFER_REQUEST_DB_STATUS.APPROVED, TRANSFER_REQUEST_DB_STATUS.IN_TRANSIT])
           .order('updated_at', { ascending: false });
 
         type TransferReqRecord = {

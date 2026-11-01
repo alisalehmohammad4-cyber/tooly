@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { supabase, isSupabaseConfigured, supabaseAdmin } from '@/lib/supabase';
 import { clearDashboardCaches } from '@/app/actions/dashboard';
 import { CANONICAL_AVAILABLE_STATUS, evaluateCheckoutEligibility } from '@/lib/assets/status';
+import { ACTIVE_TRANSFER_REQUEST_STATUSES } from '@/lib/transfers/status';
 import {
   CheckoutSchema,
   BulkCheckoutSchema,

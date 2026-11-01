@@ -3,6 +3,11 @@ import { revalidatePath } from 'next/cache';
 import { supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase';
 import { clearDashboardCaches } from '@/app/actions/dashboard';
 import { isAssetAvailable, CANONICAL_AVAILABLE_STATUS, AVAILABLE_STATUSES } from '@/lib/assets/status';
+import {
+  TRANSFER_REQUEST_DB_STATUS,
+  ACTIVE_TRANSFER_REQUEST_STATUSES,
+  type TransferRequestDbStatus,
+} from '@/lib/transfers/status';
 import { getServerSessionOrgId, getServerSessionUser, isPlatformSuperAdmin } from '@/lib/auth/session';
 import {
   getMockWarehouses,
@@ -26,7 +31,7 @@ export interface PendingTransferItem {
   targetWarehouseName: string;
   requestedBy: string;
   reason?: string | null;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'COMPLETED';
+  status: TransferRequestDbStatus;
   rejectionReason?: string | null;
   createdAt: string;
 }
@@ -54,7 +59,7 @@ interface TransferRecord {
   requested_by: string;
   requested_by_user_id?: string | null;
   reason?: string | null;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'COMPLETED';
+  status: TransferRequestDbStatus;
   rejection_reason?: string | null;
   decided_by?: string | null;
   decided_at?: string | null;
@@ -917,7 +922,7 @@ export async function completeTransferReceptionAction(
             updated_at: now,
           })
           .eq('asset_id', asset.id)
-          .in('status', ['PENDING', 'APPROVED', 'in_transit']);
+          .in('status', [...ACTIVE_TRANSFER_REQUEST_STATUSES]);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Database error';
@@ -988,7 +993,7 @@ export async function completeTransferReceptionAction(
  * - Bulletproof Asset Lookup (never queries UUID column with non-UUID strings to avoid Postgres 22P02).
  * - Set asset status = 'available'.
  * - Restore current_warehouse_id to the source warehouse (or asset's original warehouse).
- * - If there is an active transfer_requests record for this asset, update its status to 'cancelled'.
+ * - If there is an active transfer_requests record for this asset, update its status to 'REJECTED'.
  * - Insert audit record into custody_ledger.
  * - Clean up both Supabase and mockStore.
  * - Revalidate /dashboard/warehouse, /history, and /catalog.
@@ -1218,12 +1223,12 @@ export async function cancelTransferRollbackAction(
           return { success: false, error: `שגיאה בעדכון כלי: ${assetUpdateErr.message}` };
         }
 
-        // 2. If there is an active transfer_requests record for this asset, update its status to 'cancelled'
+        // 2. If there is an active transfer_requests record for this asset, update its status to 'REJECTED'
         if (requestId && UUID_REGEX.test(requestId)) {
           await supabaseAdmin
             .from('transfer_requests')
             .update({
-              status: 'cancelled',
+              status: TRANSFER_REQUEST_DB_STATUS.REJECTED,
               rejection_reason: 'ביטול שינוע שטח והחזרה למלאי המקור',
               updated_at: now,
             })
@@ -1233,12 +1238,12 @@ export async function cancelTransferRollbackAction(
         await supabaseAdmin
           .from('transfer_requests')
           .update({
-            status: 'cancelled',
+            status: TRANSFER_REQUEST_DB_STATUS.REJECTED,
             rejection_reason: 'ביטול שינוע שטח והחזרה למלאי המקור',
             updated_at: now,
           })
           .eq('asset_id', asset.id)
-          .in('status', ['PENDING', 'APPROVED', 'in_transit']);
+          .in('status', [...ACTIVE_TRANSFER_REQUEST_STATUSES]);
 
         // 3. Insert audit record into custody_ledger
         await supabaseAdmin.from('custody_ledger').insert({
@@ -1287,7 +1292,7 @@ export async function cancelTransferRollbackAction(
       (requestId && req.id === requestId) ||
       identifiersToClean.includes(req.asset_id)
     ) {
-      req.status = 'cancelled' as unknown as 'REJECTED';
+      req.status = TRANSFER_REQUEST_DB_STATUS.REJECTED;
       req.updated_at = now;
     }
   });
@@ -1330,7 +1335,7 @@ export async function getIncomingInTransitTransfersAction(
         .from('transfer_requests')
         .select('*')
         .eq('organization_id', orgId)
-        .eq('status', 'APPROVED')
+        .in('status', [TRANSFER_REQUEST_DB_STATUS.APPROVED, TRANSFER_REQUEST_DB_STATUS.IN_TRANSIT])
         .order('updated_at', { ascending: false });
 
       if (targetWarehouseId && targetWarehouseId !== 'all') {
@@ -1349,7 +1354,7 @@ export async function getIncomingInTransitTransfersAction(
   const memRequests = inMemoryTransferRequests.filter(
     (r) =>
       r.organization_id === orgId &&
-      r.status === 'APPROVED' &&
+      (r.status === TRANSFER_REQUEST_DB_STATUS.APPROVED || r.status === TRANSFER_REQUEST_DB_STATUS.IN_TRANSIT) &&
       (!targetWarehouseId || targetWarehouseId === 'all' || r.target_warehouse_id === targetWarehouseId)
   );
 
