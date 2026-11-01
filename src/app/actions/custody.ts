@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { supabase, isSupabaseConfigured, supabaseAdmin } from '@/lib/supabase';
 import { clearDashboardCaches } from '@/app/actions/dashboard';
 import { CANONICAL_AVAILABLE_STATUS, evaluateCheckoutEligibility } from '@/lib/assets/status';
+import { ACTIVE_TRANSFER_REQUEST_STATUSES } from '@/lib/transfers/status';
 import {
   CheckoutSchema,
   BulkCheckoutSchema,
@@ -638,7 +639,7 @@ export async function bulkCheckoutAssetAction(
         .select('asset_id')
         .eq('organization_id', orgId)
         .in('asset_id', assetIds)
-        .in('status', ['PENDING', 'APPROVED', 'in_transit'])
+        .in('status', [...ACTIVE_TRANSFER_REQUEST_STATUSES])
         .limit(1);
 
       if (transferErr) {
