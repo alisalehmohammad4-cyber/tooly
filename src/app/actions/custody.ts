@@ -4,7 +4,10 @@ import { revalidatePath } from 'next/cache';
 import { supabase, isSupabaseConfigured, supabaseAdmin } from '@/lib/supabase';
 import { clearDashboardCaches } from '@/app/actions/dashboard';
 import { CANONICAL_AVAILABLE_STATUS, evaluateCheckoutEligibility } from '@/lib/assets/status';
-import { ACTIVE_TRANSFER_REQUEST_STATUSES } from '@/lib/transfers/status';
+import {
+  computeCheckoutPayloadHash as computeCheckoutPayloadHashSync,
+  type CheckoutPayloadHashParams,
+} from '@/lib/assets/idempotency';
 import {
   CheckoutSchema,
   BulkCheckoutSchema,
@@ -19,6 +22,12 @@ import {
 import type { AssetReservation, AssetStatus } from '@/types/domain';
 import { appendAuditHistoryEntry, getAssetTimelineAction, getAssetPassportAction } from '@/app/actions/history';
 export { getAssetTimelineAction, getAssetPassportAction };
+
+export async function computeCheckoutPayloadHash(
+  params: CheckoutPayloadHashParams
+): Promise<string> {
+  return computeCheckoutPayloadHashSync(params);
+}
 import {
   matchesCodeSuffix,
   pickBestAssetMatch,
@@ -550,6 +559,10 @@ export async function bulkCheckoutAssetAction(
     signatureData,
     gps,
     notes,
+    requestId,
+    idempotencyKey,
+    warehouseId,
+    signatureSvg,
   } = parsed.data;
 
   const orgId = await resolveActiveOrganizationId();
@@ -599,28 +612,68 @@ export async function bulkCheckoutAssetAction(
       const sessionUser = await getServerSessionUser();
       const performedBy = sessionUser?.fullName || sessionUser?.name || 'מחסנאי ראשי';
 
+      const effectiveIdempotencyKey =
+        idempotencyKey ||
+        requestId ||
+        crypto.randomUUID();
+
+      const payloadHash = computeCheckoutPayloadHashSync({
+        assetIds,
+        organizationId: orgId,
+        warehouseId: warehouseId || null,
+        workerName,
+        workerPhone: workerPhone || null,
+        expectedReturnDate,
+      });
+
       // Atomic bulk checkout via PostgreSQL RPC function
       const { data: rpcResult, error: rpcErr } = await client.rpc('execute_bulk_checkout', {
-        p_org_id: orgId,
+        p_organization_id: orgId,
+        p_warehouse_id: warehouseId || null,
         p_asset_ids: assetIds,
         p_worker_name: workerName,
         p_worker_phone: workerPhone || null,
         p_expected_return_date: expectedReturnDate || null,
         p_performed_by: performedBy,
         p_signature_data: signatureData || null,
+        p_signature_svg: signatureSvg || null,
         p_gps_lat: gps?.lat ?? null,
         p_gps_lng: gps?.lng ?? null,
         p_notes: notes || null,
         p_accessories: accessories || {},
-        p_request_id: parsed.data.requestId || null,
+        p_idempotency_key: effectiveIdempotencyKey,
+        p_payload_hash: payloadHash,
       });
 
       if (rpcErr) {
         console.error('[bulkCheckoutAssetAction] Atomic checkout RPC failed:', rpcErr);
-        const cleanedMsg = rpcErr.message?.replace(/^.*?EXCEPTION:\s*/i, '') || rpcErr.message;
+        const rawMsg = rpcErr.message || '';
+        let userMessage = 'שגיאה בביצוע ניפוק אטומי במסד הנתונים';
+
+        if (/IDEMPOTENCY_PAYLOAD_MISMATCH/i.test(rawMsg)) {
+          userMessage = 'מזהה בקשה כבר היה בשימוש עם פרמטרים שונים (Idempotency payload mismatch)';
+        } else if (/ASSET_NOT_FOUND_OR_TENANT_MISMATCH/i.test(rawMsg)) {
+          userMessage = 'חלק מהכלים לא נמצאו במסד הנתונים או שאינם שייכים לארגון';
+        } else if (/ASSET_LOCKED/i.test(rawMsg)) {
+          userMessage = 'לא ניתן לנפק: הכלי נעול מנהלית';
+        } else if (/SAFETY_EXPIRED/i.test(rawMsg)) {
+          userMessage = 'לא ניתן לנפק: פג תוקף בדיקת בטיחות תקופתית';
+        } else if (/ASSET_NOT_AVAILABLE/i.test(rawMsg)) {
+          userMessage = 'לא ניתן לנפק: הכלי אינו זמין במלאי לניפוק';
+        } else if (/ASSET_ALREADY_ASSIGNED/i.test(rawMsg)) {
+          userMessage = 'לא ניתן לנפק: הכלי כבר משויך לעובד';
+        } else if (/ASSET_IN_ACTIVE_TRANSFER/i.test(rawMsg)) {
+          userMessage = 'לא ניתן לנפק: הכלי נמצא בתהליך שינוע פעיל בין אתרים.';
+        } else if (/WORKER_REQUIRED/i.test(rawMsg)) {
+          userMessage = 'שם עובד נדרש לביצוע ניפוק';
+        } else if (/NO_ASSETS/i.test(rawMsg)) {
+          userMessage = 'רשימת הכלים לניפוק אינה יכולה להיות ריקה';
+        } else {
+          userMessage = rawMsg.replace(/^.*?EXCEPTION:\s*/i, '') || userMessage;
+        }
         return {
           success: false,
-          error: cleanedMsg || 'שגיאה בביצוע ניפוק אטומי במסד הנתונים',
+          error: userMessage,
         };
       }
 
@@ -800,6 +853,10 @@ export async function checkoutAssetAction(
     signatureData,
     gps,
     notes,
+    requestId,
+    idempotencyKey,
+    warehouseId,
+    signatureSvg,
   } = parsed.data;
 
   const defaultReturnDate =
@@ -818,6 +875,10 @@ export async function checkoutAssetAction(
     signatureData: dummySignature,
     gps,
     notes,
+    requestId,
+    idempotencyKey,
+    warehouseId,
+    signatureSvg,
   });
 
   if (!bulkResult.success) {
