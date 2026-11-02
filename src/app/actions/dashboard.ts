@@ -167,6 +167,12 @@ const storekeeperOpsCache = new Map<string, CacheEntry<StorekeeperOperationsPayl
 export async function clearDashboardCaches(): Promise<void> {
   storekeeperOpsCache.clear();
   analyticsCache.clear();
+  try {
+    const { invalidateWarehouseCache } = await import('@/app/actions/warehouses');
+    await invalidateWarehouseCache();
+  } catch {
+    // Ignore potential circular reference in build scripts
+  }
 }
 
 import { getServerSessionOrgId } from '@/lib/auth/session';
@@ -528,7 +534,8 @@ export async function getPlantManagerAnalytics(
  */
 export async function getStorekeeperOperations(
   warehouseId?: string,
-  organizationId?: string
+  organizationId?: string,
+  forceRefresh?: boolean
 ): Promise<StorekeeperOperationsPayload> {
   const orgId = await resolveActiveOrganizationId(organizationId);
   if (!orgId) {
@@ -537,9 +544,13 @@ export async function getStorekeeperOperations(
 
   const isAll = !warehouseId || warehouseId === 'all' || warehouseId === 'ALL';
   const cacheKey = `storekeeper_ops_${orgId}_${warehouseId || 'all'}`;
-  const cached = storekeeperOpsCache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached.data;
+  if (forceRefresh) {
+    storekeeperOpsCache.delete(cacheKey);
+  } else {
+    const cached = storekeeperOpsCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.data;
+    }
   }
 
   if (!isSupabaseConfigured()) {

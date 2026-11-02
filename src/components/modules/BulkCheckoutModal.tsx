@@ -267,6 +267,7 @@ export default function BulkCheckoutModal({
 
       if (!res.success) {
         setFormError(res.error);
+        alert(res.error || 'הניפוק נכשל');
         return;
       }
 

@@ -1429,27 +1429,34 @@ export default function WarehouseDashboardView({
       }
 
       // Optimistically update local data state immediately:
-      setData((prev) => {
-        const newLoan: StorekeeperActiveLoan = {
-          assetId: checkoutAsset.id,
-          toolName: checkoutAsset.toolName,
-          brand: checkoutAsset.brand,
-          modelNumber: checkoutAsset.modelNumber || null,
-          qrCode: checkoutAsset.qrCode || '',
-          workerName: checkoutWorkerName.trim(),
-          workerPhone: checkoutWorkerPhone.trim() || null,
-          expectedReturnDate: checkoutReturnDate || null,
-          checkedOutAt: new Date().toISOString(),
-          checkoutNote: checkoutNotes.trim() || null,
-          daysActive: 0,
-        };
-        return {
-          ...prev,
-          availableCount: Math.max(0, (prev.availableCount || 1) - 1),
-          checkedOutCount: (prev.checkedOutCount || 0) + 1,
-          activeLoans: prev.activeLoans ? [newLoan, ...prev.activeLoans] : [newLoan],
-        };
-      });
+      const newLoan: StorekeeperActiveLoan = {
+        assetId: checkoutAsset.id,
+        toolName: checkoutAsset.toolName,
+        brand: checkoutAsset.brand,
+        modelNumber: checkoutAsset.modelNumber || null,
+        qrCode: checkoutAsset.qrCode || '',
+        workerName: checkoutWorkerName.trim(),
+        workerPhone: checkoutWorkerPhone.trim() || null,
+        expectedReturnDate: checkoutReturnDate || null,
+        checkedOutAt: new Date().toISOString(),
+        checkoutNote: checkoutNotes.trim() || null,
+        daysActive: 0,
+      };
+      setData((prev) => ({
+        ...prev,
+        availableCount: Math.max(0, (prev.availableCount || 1) - 1),
+        checkedOutCount: (prev.checkedOutCount || 0) + 1,
+        activeLoans: prev.activeLoans
+          ? [newLoan, ...prev.activeLoans.filter((l) => l.assetId !== checkoutAsset.id)]
+          : [newLoan],
+        returnsDueToday: (prev.returnsDueToday || []).filter((r) => r.assetId !== checkoutAsset.id),
+        overdueAssets: (prev.overdueAssets || []).filter((o) => o.assetId !== checkoutAsset.id),
+      }));
+
+      // Optimistically remove from available transfer/inbox selection lists
+      setAvailableAssets((prev) => prev.filter((a) => a.id !== checkoutAsset.id));
+      setAvailableAssetsForInbox((prev) => prev.filter((a) => a.id !== checkoutAsset.id));
+      setLocalAvailableAssets((prev) => prev.filter((a) => a.id !== checkoutAsset.id));
 
       // Force Next.js to re-fetch Server Components and update all tables/metrics:
       router.refresh();
@@ -1461,7 +1468,8 @@ export default function WarehouseDashboardView({
       setCheckoutNotes('');
       setCheckoutFeedback(null);
 
-      await handleWarehouseChange(selectedWarehouseId);
+      // Re-fetch fresh operations data from server with forceRefresh: true to bypass 30s cache
+      await handleWarehouseChange(selectedWarehouseId, true);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'שגיאת תקשורת עם השרת';
       alert(`שגיאה בביצוע הפעולה: ${msg}`);
@@ -1549,6 +1557,11 @@ export default function WarehouseDashboardView({
           text: result.message || 'הציוד נופק בהצלחה לאתר עם אישור תיוג וחתימה!',
           type: 'success',
         });
+        // Optimistically remove from available transfer/inbox selection lists
+        setAvailableAssets((prev) => prev.filter((a) => a.id !== dispatchAsset.id));
+        setAvailableAssetsForInbox((prev) => prev.filter((a) => a.id !== dispatchAsset.id));
+        setLocalAvailableAssets((prev) => prev.filter((a) => a.id !== dispatchAsset.id));
+
         const activeOrgId = currentOrganization?.id || user?.organizationId;
         const fresh = await getStorekeeperOperations(selectedWarehouseId, activeOrgId);
         setData(fresh);
@@ -1566,20 +1579,22 @@ export default function WarehouseDashboardView({
         alert(`שגיאה בביצוע הפעולה: ${result.error || 'נסה שוב'}`);
         setDispatchFeedback({ text: result.error || 'שגיאה בניפוק הציוד', type: 'error' });
       }
-    } catch {
-      setDispatchFeedback({ text: 'אירעה שגיאה בלתי צפויה', type: 'error' });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'אירעה שגיאה בלתי צפויה';
+      alert(`שגיאה בביצוע הפעולה: ${msg}`);
+      setDispatchFeedback({ text: msg, type: 'error' });
     } finally {
       setIsSubmittingDispatch(false);
     }
   };
 
   // Switch active warehouse
-  const handleWarehouseChange = React.useCallback(async (newId: string) => {
+  const handleWarehouseChange = React.useCallback(async (newId: string, forceRefresh?: boolean) => {
     setSelectedWarehouseId(newId);
     setIsLoadingWarehouse(true);
     try {
       const activeOrgId = currentOrganization?.id || user?.organizationId;
-      const updated = await getStorekeeperOperations(newId, activeOrgId);
+      const updated = await getStorekeeperOperations(newId, activeOrgId, forceRefresh);
       setData(updated);
       if (typeof window !== 'undefined') {
         const url = new URL(window.location.href);

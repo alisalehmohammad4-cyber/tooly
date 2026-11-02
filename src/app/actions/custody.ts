@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { supabase, isSupabaseConfigured, supabaseAdmin } from '@/lib/supabase';
 import { clearDashboardCaches } from '@/app/actions/dashboard';
 import { CANONICAL_AVAILABLE_STATUS, evaluateCheckoutEligibility } from '@/lib/assets/status';
+import { ACTIVE_TRANSFER_REQUEST_STATUSES } from '@/lib/transfers/status';
 import {
   computeCheckoutPayloadHash as computeCheckoutPayloadHashSync,
   type CheckoutPayloadHashParams,
@@ -414,8 +415,12 @@ export async function getAssetDetailsByQr(
           return enrichLastCheckoutNote(mapJoinedRowToScannedAsset(best), orgId);
         }
       }
+      // Authoritative tenant search: if Supabase is configured and the asset was not found,
+      // return null instead of silently falling back to static mockStore data.
+      return null;
     } catch (err) {
-      console.warn('Supabase query error in getAssetDetailsByQr, falling back to mock:', err);
+      console.error('[getAssetDetailsByQr] Supabase query error:', err);
+      return null;
     }
   }
 
@@ -573,33 +578,35 @@ export async function bulkCheckoutAssetAction(
     };
   }
 
-  // 1. Pre-validation: Enforce Administrative Lockout & Periodic Safety Inspection Due & Tenant Ownership
-  for (const id of assetIds) {
-    let targetAsset: ScannedAssetDetails | null = null;
-    for (const key of Object.keys(FALLBACK_CUSTODY_ASSETS)) {
-      if (FALLBACK_CUSTODY_ASSETS[key].id === id) {
-        targetAsset = FALLBACK_CUSTODY_ASSETS[key];
-        break;
+  // 1. Pre-validation for local/mock development environments only
+  if (!isSupabaseConfigured()) {
+    for (const id of assetIds) {
+      let targetAsset: ScannedAssetDetails | null = null;
+      for (const key of Object.keys(FALLBACK_CUSTODY_ASSETS)) {
+        if (FALLBACK_CUSTODY_ASSETS[key].id === id) {
+          targetAsset = FALLBACK_CUSTODY_ASSETS[key];
+          break;
+        }
       }
-    }
-    if (targetAsset) {
-      const check = evaluateCheckoutEligibility(targetAsset, orgId);
-      if (!check.eligible) {
-        return {
-          success: false,
-          error: assetIds.length === 1 ? (check.error || 'הכלי אינו זמין לניפוק') : `${targetAsset.toolName} (${targetAsset.qrCode}): ${check.error || 'לא זמין'}`,
-        };
+      if (targetAsset) {
+        const check = evaluateCheckoutEligibility(targetAsset, orgId);
+        if (!check.eligible) {
+          return {
+            success: false,
+            error: assetIds.length === 1 ? (check.error || 'הכלי אינו זמין לניפוק') : `${targetAsset.toolName} (${targetAsset.qrCode}): ${check.error || 'לא זמין'}`,
+          };
+        }
       }
-    }
 
-    const anyMockAsset = getMockAssets().find((a) => a.id === id);
-    if (anyMockAsset) {
-      const check = evaluateCheckoutEligibility(anyMockAsset, orgId);
-      if (!check.eligible) {
-        return {
-          success: false,
-          error: check.error || 'הכלי אינו זמין לניפוק.',
-        };
+      const anyMockAsset = getMockAssets().find((a) => a.id === id);
+      if (anyMockAsset) {
+        const check = evaluateCheckoutEligibility(anyMockAsset, orgId);
+        if (!check.eligible) {
+          return {
+            success: false,
+            error: check.error || 'הכלי אינו זמין לניפוק.',
+          };
+        }
       }
     }
   }
@@ -645,8 +652,193 @@ export async function bulkCheckoutAssetAction(
         p_payload_hash: payloadHash,
       });
 
-      if (rpcErr) {
-        console.error('[bulkCheckoutAssetAction] Atomic checkout RPC failed:', rpcErr);
+      const isMissingRpc =
+        Boolean(rpcErr) &&
+        (rpcErr?.code === '42883' ||
+          /function .*?does not exist|could not find the function/i.test(rpcErr?.message || ''));
+
+      if (isMissingRpc) {
+        console.warn(
+          '[bulkCheckoutAssetAction] RPC execute_bulk_checkout not installed in database (code 42883). Gracefully executing direct Supabase operations.'
+        );
+
+        // 1. Fetch current assets to verify existence, lockout, tenant isolation and facility
+        const { data: currentAssets, error: fetchErr } = await client
+          .from('assets')
+          .select(`
+            id,
+            version,
+            status,
+            is_locked,
+            lock_reason,
+            safety_inspection_due,
+            organization_id,
+            current_assigned_worker,
+            current_warehouse_id,
+            qr_code,
+            name,
+            brand,
+            model_number,
+            condition,
+            warehouses:current_warehouse_id ( id, name, code ),
+            tool_models:tool_model_id ( id, name, brand, model_number )
+          `)
+          .in('id', assetIds)
+          .eq('organization_id', orgId);
+
+        if (fetchErr) {
+          console.error('[CHECKOUT FAILED]: Failed to fetch assets for direct checkout:', fetchErr);
+          return { success: false, error: 'שגיאת מסד נתונים: ' + (fetchErr.message || JSON.stringify(fetchErr)) };
+        }
+
+        if (!currentAssets || currentAssets.length !== assetIds.length) {
+          console.error('[CHECKOUT FAILED]: Some assets missing or tenant mismatch. Found', currentAssets?.length, 'of', assetIds.length);
+          return {
+            success: false,
+            error: 'שגיאת מסד נתונים: חלק מהכלים לא נמצאו במסד הנתונים או שאינם שייכים לארגון',
+          };
+        }
+
+        // 2. Check active transfers in transfer_requests (scoped to tenant & candidate assets)
+        const { data: activeTransfers, error: transferErr } = await client
+          .from('transfer_requests')
+          .select('asset_id')
+          .eq('organization_id', orgId)
+          .in('asset_id', assetIds)
+          .in('status', [...ACTIVE_TRANSFER_REQUEST_STATUSES])
+          .limit(1);
+
+        if (transferErr) {
+          console.error('[CHECKOUT FAILED]: Failed to verify active transfers:', transferErr);
+          return {
+            success: false,
+            error: 'שגיאת מסד נתונים באימות סטטוס שינוע: ' + (transferErr.message || JSON.stringify(transferErr)),
+          };
+        }
+
+        if (activeTransfers && activeTransfers.length > 0) {
+          console.error('[CHECKOUT FAILED]: Asset in active transfer:', activeTransfers);
+          return {
+            success: false,
+            error: 'לא ניתן לנפק: הכלי נמצא בתהליך שינוע פעיל בין אתרים.',
+          };
+        }
+
+        // 3. Check tenant ownership, lockouts, assignments, and availability
+        for (const item of currentAssets) {
+          const check = evaluateCheckoutEligibility(item as Record<string, unknown>, orgId);
+          if (!check.eligible) {
+            console.error('[CHECKOUT FAILED]: Eligibility check failed:', check.error);
+            return {
+              success: false,
+              error: check.error || 'הכלי אינו זמין לניפוק.',
+            };
+          }
+        }
+
+        // 4. Update each asset and insert audit ledger entries
+        for (const item of currentAssets) {
+          const nextVersion = (item.version || 1) + 1;
+          const itemAccessories = accessories[item.id] || {
+            batteriesCount: 0,
+            hasCharger: false,
+            hasCase: false,
+          };
+
+          const updateQuery = client
+            .from('assets')
+            .update({
+              status: 'checked_out',
+              current_assigned_worker: workerName,
+              expected_return_date: expectedReturnDate || null,
+              current_warehouse_id: warehouseId || item.current_warehouse_id,
+              accessories: itemAccessories,
+              version: nextVersion,
+              organization_id: orgId,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', item.id)
+            .eq('organization_id', orgId);
+
+          const { data: updatedRows, error: updateErr } = await updateQuery.select();
+
+          if (updateErr) {
+            console.error('[CHECKOUT FAILED]: Asset update failed in direct fallback:', updateErr);
+            return { success: false, error: 'שגיאת מסד נתונים בעדכון כלי: ' + (updateErr.message || JSON.stringify(updateErr)) };
+          }
+
+          if (!updatedRows || updatedRows.length === 0) {
+            console.error('[CHECKOUT FAILED]: Zero rows updated for asset:', item.id);
+            return { success: false, error: 'שגיאת מסד נתונים: העדכון נכשל (0 שורות עודכנו עקב הרשאות או מזהה לא תואם)' };
+          }
+
+          let targetWarehouseId = warehouseId || item.current_warehouse_id;
+          if (!targetWarehouseId || !isValidUuid(targetWarehouseId)) {
+            const { data: fallbackWh } = await client
+              .from('warehouses')
+              .select('id')
+              .eq('organization_id', orgId)
+              .limit(1)
+              .maybeSingle();
+            targetWarehouseId = fallbackWh?.id || null;
+          }
+
+          const { error: ledgerErr } = await client.from('custody_ledger').insert({
+            organization_id: orgId,
+            asset_id: item.id,
+            action: 'CHECKOUT',
+            warehouse_id: targetWarehouseId,
+            from_warehouse_id: targetWarehouseId || null,
+            to_warehouse_id: targetWarehouseId || null,
+            performed_by: performedBy,
+            worker_name: workerName,
+            target_worker: workerName,
+            worker_phone: workerPhone || null,
+            signature_svg: signatureSvg || null,
+            signature_data: signatureData || null,
+            is_tag_verified: true,
+            signed_at: new Date().toISOString(),
+            expected_return_date: expectedReturnDate || null,
+            accessories_snapshot: itemAccessories,
+            gps_lat: gps?.lat ?? null,
+            gps_lng: gps?.lng ?? null,
+            notes: notes || `ניפוק לעובד ${workerName}`,
+            created_at: new Date().toISOString(),
+          });
+
+          if (ledgerErr) {
+            console.error('[CHECKOUT FAILED]: Ledger insert failed in direct fallback:', ledgerErr);
+            return { success: false, error: 'שגיאת מסד נתונים ברישום ביומן: ' + (ledgerErr.message || JSON.stringify(ledgerErr)) };
+          }
+
+          const itemObj = item as Record<string, unknown>;
+          const whRaw = itemObj.warehouses;
+          const whObj = (Array.isArray(whRaw) ? whRaw[0] : whRaw) as Record<string, unknown> || {};
+          const tmRaw = itemObj.tool_models;
+          const tmObj = (Array.isArray(tmRaw) ? tmRaw[0] : tmRaw) as Record<string, unknown> || {};
+
+          updatedAssets.push({
+            id: item.id,
+            qrCode: (itemObj.qr_code as string) || `TOOL-${item.id.slice(0, 6).toUpperCase()}`,
+            qr_code: (itemObj.qr_code as string) || `TOOL-${item.id.slice(0, 6).toUpperCase()}`,
+            status: 'checked_out',
+            condition: (itemObj.condition as ScannedAssetDetails['condition']) || 'good',
+            currentAssignedWorker: workerName,
+            current_assigned_worker: workerName,
+            currentWarehouseId: targetWarehouseId || 'wh-main-01',
+            current_warehouse_id: targetWarehouseId || 'wh-main-01',
+            warehouseName: (whObj.name as string) || "מחסן מרכזי - אגף א'",
+            warehouseCode: (whObj.code as string) || 'CDB-01',
+            toolName: (itemObj.name as string) || (tmObj.name as string) || 'כלי שנופק',
+            brand: (itemObj.brand as string) || (tmObj.brand as string) || 'כלי',
+            modelNumber: (itemObj.model_number as string) || (tmObj.model_number as string) || null,
+            version: nextVersion,
+            expectedReturnDate,
+            accessories: itemAccessories,
+          });
+        }
+      } else if (rpcErr) {
+        console.error('[CHECKOUT FAILED]: Atomic checkout RPC failed:', rpcErr);
         const rawMsg = rpcErr.message || '';
         let userMessage = 'שגיאה בביצוע ניפוק אטומי במסד הנתונים';
 
@@ -668,60 +860,64 @@ export async function bulkCheckoutAssetAction(
           userMessage = 'שם עובד נדרש לביצוע ניפוק';
         } else if (/NO_ASSETS/i.test(rawMsg)) {
           userMessage = 'רשימת הכלים לניפוק אינה יכולה להיות ריקה';
+        } else if (/permission denied/i.test(rawMsg)) {
+          userMessage = `אין הרשאת הפעלה (${rawMsg})`;
         } else {
           userMessage = rawMsg.replace(/^.*?EXCEPTION:\s*/i, '') || userMessage;
         }
         return {
           success: false,
-          error: userMessage,
+          error: 'שגיאת מסד נתונים: ' + userMessage,
         };
-      }
+      } else {
+        const rpcData = rpcResult as {
+          success?: boolean;
+          idempotent?: boolean;
+          assets?: ScannedAssetDetails[];
+          count?: number;
+        } | null;
 
-      const rpcData = rpcResult as {
-        success?: boolean;
-        idempotent?: boolean;
-        assets?: ScannedAssetDetails[];
-        count?: number;
-      } | null;
-
-      if (!rpcData || !rpcData.success) {
-        return {
-          success: false,
-          error: 'הניפוק נכשל: תגובת מסד הנתונים אינה תקינה',
-        };
-      }
-
-      if (Array.isArray(rpcData.assets)) {
-        for (const ast of rpcData.assets) {
-          const itemAccessories = accessories[ast.id] || {
-            batteriesCount: 0,
-            hasCharger: false,
-            hasCase: false,
+        if (!rpcData || !rpcData.success) {
+          console.error('[CHECKOUT FAILED]: RPC returned invalid or unsuccessful data:', rpcData);
+          return {
+            success: false,
+            error: 'שגיאת מסד נתונים: הניפוק נכשל (תגובת מסד הנתונים אינה תקינה)',
           };
-          updatedAssets.push({
-            id: ast.id,
-            qrCode: ast.qrCode || ast.qr_code || `TOOL-${ast.id.slice(0, 6).toUpperCase()}`,
-            qr_code: ast.qr_code || ast.qrCode,
-            status: 'checked_out',
-            condition: ast.condition || 'good',
-            currentAssignedWorker: workerName,
-            current_assigned_worker: workerName,
-            currentWarehouseId: ast.currentWarehouseId || ast.current_warehouse_id || 'wh-main-01',
-            current_warehouse_id: ast.current_warehouse_id || ast.currentWarehouseId || 'wh-main-01',
-            warehouseName: ast.warehouseName || 'מחסן שטח',
-            warehouseCode: ast.warehouseCode || 'WH',
-            toolName: ast.toolName || ast.name || 'כלי שנופק',
-            brand: ast.brand || 'כלי',
-            modelNumber: ast.modelNumber || ast.model_number || null,
-            version: ast.version || 2,
-            expectedReturnDate,
-            accessories: itemAccessories,
-          });
+        }
+
+        if (Array.isArray(rpcData.assets)) {
+          for (const ast of rpcData.assets) {
+            const itemAccessories = accessories[ast.id] || {
+              batteriesCount: 0,
+              hasCharger: false,
+              hasCase: false,
+            };
+            updatedAssets.push({
+              id: ast.id,
+              qrCode: ast.qrCode || ast.qr_code || `TOOL-${ast.id.slice(0, 6).toUpperCase()}`,
+              qr_code: ast.qr_code || ast.qrCode,
+              status: 'checked_out',
+              condition: ast.condition || 'good',
+              currentAssignedWorker: workerName,
+              current_assigned_worker: workerName,
+              currentWarehouseId: ast.currentWarehouseId || ast.current_warehouse_id || 'wh-main-01',
+              current_warehouse_id: ast.current_warehouse_id || ast.currentWarehouseId || 'wh-main-01',
+              warehouseName: ast.warehouseName || 'מחסן שטח',
+              warehouseCode: ast.warehouseCode || 'WH',
+              toolName: ast.toolName || ast.name || 'כלי שנופק',
+              brand: ast.brand || 'כלי',
+              modelNumber: ast.modelNumber || ast.model_number || null,
+              version: ast.version || 2,
+              expectedReturnDate,
+              accessories: itemAccessories,
+            });
+          }
         }
       }
     } catch (err: unknown) {
+      console.error('[CHECKOUT FAILED]: Database bulk checkout exception:', err);
       const msg = err instanceof Error ? err.message : 'Database bulk checkout error';
-      return { success: false, error: msg };
+      return { success: false, error: 'שגיאת מסד נתונים: ' + msg };
     }
   } else {
     // 3. Fallback in-memory dataset updates (only executed when Supabase is not configured)
@@ -1018,8 +1214,8 @@ export async function checkinAssetAction(
       });
 
       if (ledgerErr) {
-        console.error('LEDGER INSERT FAILED:', ledgerErr);
-        return { success: false, error: 'שגיאה ברישום ביומן התנועות: ' + ledgerErr.message };
+        console.error('[CHECKOUT FAILED]: LEDGER INSERT FAILED in dispatch:', ledgerErr);
+        return { success: false, error: 'שגיאת מסד נתונים ברישום ביומן התנועות: ' + ledgerErr.message };
       }
 
       const assetObj = currentAsset as Record<string, unknown>;
@@ -2488,7 +2684,9 @@ export async function dispatchAssetWithSignatureAction(data: {
       modelNumber = (dbAsset.model_number as string) || (tm.model_number as string) || null;
       condition = (dbAsset.condition as 'excellent' | 'good' | 'needs_repair' | 'retired') || 'good';
     } catch (err) {
-      console.warn('[dispatchAssetWithSignatureAction] Asset check warning:', err);
+      console.error('[CHECKOUT FAILED]: Asset check error in dispatch:', err);
+      const msg = err instanceof Error ? err.message : 'Asset check error';
+      return { success: false, error: 'שגיאת מסד נתונים: ' + msg };
     }
   } else {
     const mockAsset = getMockAssets().find(
@@ -2516,19 +2714,19 @@ export async function dispatchAssetWithSignatureAction(data: {
         .eq('organization_id', orgId)
         .maybeSingle();
 
-      if (whErr || !dbWh) {
-        const mockWh = getMockWarehouses(true, orgId).find((w) => w.id === targetWarehouseId);
-        if (!mockWh) {
-          return { success: false, error: 'אתר היעד אינו שייך לארגון הפעיל' };
-        }
-        targetWarehouseName = mockWh.name;
-        targetWarehouseCode = mockWh.code;
-      } else {
-        targetWarehouseName = dbWh.name;
-        targetWarehouseCode = dbWh.code || 'FAC';
+      if (whErr) {
+        console.error('[CHECKOUT FAILED]: Target warehouse query failed:', whErr);
+        return { success: false, error: 'שגיאת מסד נתונים: ' + whErr.message };
       }
-    } catch {
-      // Fallback
+      if (!dbWh) {
+        return { success: false, error: 'אתר היעד אינו שייך לארגון הפעיל' };
+      }
+      targetWarehouseName = dbWh.name;
+      targetWarehouseCode = dbWh.code || 'FAC';
+    } catch (err) {
+      console.error('[CHECKOUT FAILED]: Target warehouse lookup exception:', err);
+      const msg = err instanceof Error ? err.message : 'Database error';
+      return { success: false, error: 'שגיאת מסד נתונים: ' + msg };
     }
   } else {
     const mockWh = getMockWarehouses(true, orgId).find((w) => w.id === targetWarehouseId);
@@ -2559,12 +2757,13 @@ export async function dispatchAssetWithSignatureAction(data: {
       const { data: updatedRows, error: updateErr } = await updateQuery.select();
 
       if (updateErr) {
-        return { success: false, error: `שגיאה בעדכון סטטוס כלי: ${updateErr.message}` };
+        console.error('[CHECKOUT FAILED]: Asset update failed in dispatch:', updateErr);
+        return { success: false, error: `שגיאת מסד נתונים בעדכון סטטוס כלי: ${updateErr.message}` };
       }
 
       if (!updatedRows || updatedRows.length === 0) {
-        console.error("Zero rows updated for asset in dispatch:", assetId);
-        return { success: false, error: "העדכון נכשל: הכלי לא נמצא או שנחסם עקב הרשאות (0 שורות עודכנו)." };
+        console.error("[CHECKOUT FAILED]: Zero rows updated for asset in dispatch:", assetId);
+        return { success: false, error: "שגיאת מסד נתונים: העדכון נכשל (0 שורות עודכנו עקב הרשאות או מזהה לא תואם)." };
       }
 
       // 4. Insert custody_ledger entry
@@ -2597,32 +2796,35 @@ export async function dispatchAssetWithSignatureAction(data: {
         return { success: false, error: 'שגיאה ברישום ביומן התנועות: ' + ledgerErr.message };
       }
     } catch (err: unknown) {
+      console.error('[CHECKOUT FAILED]: Database exception in dispatch:', err);
       const msg = err instanceof Error ? err.message : 'Database exception';
-      return { success: false, error: msg };
+      return { success: false, error: 'שגיאת מסד נתונים: ' + msg };
     }
   }
 
-  // 5. Update fallback in-memory asset & mockStore
-  mutateMockAsset(
-    assetId,
-    {
-      status: 'checked_out',
-      currentAssignedWorker: workerName.trim(),
-      workerPhone: workerPhone?.trim() || null,
-      currentWarehouseId: targetWarehouseId,
-      warehouseId: targetWarehouseId,
-      warehouseName: targetWarehouseName,
-      warehouseCode: targetWarehouseCode,
-    },
-    {
-      action: 'CHECKOUT',
-      performedBy,
-      targetWorker: workerName.trim(),
-      workerPhone: workerPhone?.trim() || null,
-      signatureData,
-      notes: `הוצאה לאתר ${targetWarehouseName} (תג QR פיזי מאומת)`,
-    }
-  );
+  // 5. Update fallback in-memory asset & mockStore (mock mode only)
+  if (!isSupabaseConfigured()) {
+    mutateMockAsset(
+      assetId,
+      {
+        status: 'checked_out',
+        currentAssignedWorker: workerName.trim(),
+        workerPhone: workerPhone?.trim() || null,
+        currentWarehouseId: targetWarehouseId,
+        warehouseId: targetWarehouseId,
+        warehouseName: targetWarehouseName,
+        warehouseCode: targetWarehouseCode,
+      },
+      {
+        action: 'CHECKOUT',
+        performedBy,
+        targetWorker: workerName.trim(),
+        workerPhone: workerPhone?.trim() || null,
+        signatureData,
+        notes: `הוצאה לאתר ${targetWarehouseName} (תג QR פיזי מאומת)`,
+      }
+    );
+  }
 
   // 6. Append audit history record
   appendAuditHistoryEntry({
