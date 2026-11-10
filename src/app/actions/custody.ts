@@ -1113,11 +1113,11 @@ export async function checkinAssetAction(
     };
   }
 
-  const { assetId, condition, damageReport, gps, notes } = parsed.data;
+  const { assetId, condition, damageReport, gps, notes, warehouseId } = parsed.data;
   
-  // If damage is reported, enforce maintenance status
+  // If damage is reported or condition is damaged/repair, enforce maintenance status
   const isDamaged = damageReport?.isDamaged || condition === 'needs_repair' || condition === 'retired';
-  const newStatus: ScannedAssetDetails['status'] = isDamaged ? 'maintenance' : 'available';
+  const newStatus: ScannedAssetDetails['status'] = isDamaged ? 'maintenance' : CANONICAL_AVAILABLE_STATUS;
 
   const orgId = await resolveActiveOrganizationId();
   if (!orgId || orgId === 'platform-master-superadmin') {
@@ -1129,21 +1129,24 @@ export async function checkinAssetAction(
       const client = supabaseAdmin || supabase;
       const { data: currentAsset, error: fetchErr } = await client
         .from('assets')
-        .select('id, version, organization_id, qr_code, name, brand, model_number, condition, current_warehouse_id, warehouses(name, code)')
+        .select('id, version, status, organization_id, qr_code, name, brand, model_number, condition, current_warehouse_id, warehouses(name, code)')
         .eq('id', assetId)
         .maybeSingle();
 
       if (fetchErr) {
-        return { success: false, error: fetchErr.message };
+        console.error('[CHECKIN FAILED]: Asset fetch query error:', fetchErr);
+        return { success: false, error: 'שגיאת מסד נתונים: ' + fetchErr.message };
       }
       if (!currentAsset) {
-        return { success: false, error: 'Asset not found in database.' };
+        console.error('[CHECKIN FAILED]: Asset not found in database:', assetId);
+        return { success: false, error: 'הכלי לא נמצא במאגר הנתונים' };
       }
 
       const itemOrg = currentAsset.organization_id as string;
       const isOwner = itemOrg === orgId;
 
       if (!isOwner) {
+        console.error('[CHECKIN FAILED]: Organization mismatch for asset:', { itemOrg, orgId, assetId });
         return {
           success: false,
           error: 'לא ניתן לקלוט ציוד שאינו שייך לארגון הפעיל',
@@ -1151,40 +1154,42 @@ export async function checkinAssetAction(
       }
 
       const nextVersion = (currentAsset.version || 1) + 1;
+      const updatePayload: Record<string, unknown> = {
+        status: newStatus,
+        current_assigned_worker: null,
+        expected_return_date: null,
+        condition,
+        version: nextVersion,
+        organization_id: orgId,
+        updated_at: new Date().toISOString(),
+      };
 
-      const updateQuery = client
-        .from('assets')
-        .update({
-          status: newStatus,
-          current_assigned_worker: null,
-          condition,
-          version: nextVersion,
-          organization_id: orgId,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', assetId);
-
-      if (orgId) {
-        updateQuery.eq('organization_id', orgId);
+      if (warehouseId && isValidUuid(warehouseId)) {
+        updatePayload.current_warehouse_id = warehouseId;
       }
 
-      const { data: updatedRows, error: updateErr } = await updateQuery.select();
+      const { data: updatedRows, error: updateErr } = await client
+        .from('assets')
+        .update(updatePayload)
+        .eq('id', assetId)
+        .eq('organization_id', orgId)
+        .select();
 
       if (updateErr) {
-        console.error("DB Update Failed:", updateErr);
-        return { success: false, error: `Failed to check in asset: ${updateErr.message}` };
+        console.error('[CHECKIN FAILED]: Asset update failed in checkin:', updateErr);
+        return { success: false, error: `שגיאת מסד נתונים בעדכון סטטוס כלי: ${updateErr.message}` };
       }
 
       if (!updatedRows || updatedRows.length === 0) {
-        console.error("Zero rows updated! Potential RLS or organization_id mismatch for asset:", assetId);
-        return { success: false, error: "העדכון נכשל: הכלי לא נמצא או שנחסם עקב הרשאות (0 שורות עודכנו)." };
+        console.error('[CHECKIN FAILED]: Zero rows updated for asset in checkin:', assetId);
+        return { success: false, error: "שגיאת מסד נתונים: העדכון נכשל (0 שורות עודכנו עקב הרשאות או מזהה לא תואם)." };
       }
 
       const sessionUser = await getServerSessionUser();
       const performedBy = sessionUser?.fullName || sessionUser?.name || 'מחסנאי שטח';
 
       // Resolve valid warehouse UUID for non-null constraint
-      let targetWarehouseId = currentAsset.current_warehouse_id;
+      let targetWarehouseId = (warehouseId && isValidUuid(warehouseId)) ? warehouseId : currentAsset.current_warehouse_id;
       if (!targetWarehouseId || !isValidUuid(targetWarehouseId)) {
         const { data: fallbackWh } = await client
           .from('warehouses')
@@ -1195,8 +1200,10 @@ export async function checkinAssetAction(
         targetWarehouseId = fallbackWh?.id || null;
       }
 
-      // Record audit in custody_ledger
-      const actionType = isDamaged ? 'MAINTENANCE' : 'CHECKIN';
+      // Record audit in custody_ledger with canonical action 'CHECKIN'
+      const actionType = 'CHECKIN';
+      const noteText = notes || (isDamaged ? `החזרת כלי (תקלה - מצב: ${condition})` : `החזרת כלי למחסן (מצב: ${condition})`);
+
       const { error: ledgerErr } = await client.from('custody_ledger').insert({
         asset_id: assetId,
         action: actionType,
@@ -1206,7 +1213,7 @@ export async function checkinAssetAction(
         performed_by: performedBy,
         organization_id: orgId,
         condition_at_return: condition,
-        notes: notes || (isDamaged ? `החזרת כלי (תקלה - מצב: ${condition})` : `החזרת כלי למחסן (מצב: ${condition})`),
+        notes: noteText,
         damage_report: damageReport || null,
         gps_lat: gps?.lat ?? null,
         gps_lng: gps?.lng ?? null,
@@ -1214,7 +1221,7 @@ export async function checkinAssetAction(
       });
 
       if (ledgerErr) {
-        console.error('[CHECKOUT FAILED]: LEDGER INSERT FAILED in dispatch:', ledgerErr);
+        console.error('[CHECKIN FAILED]: Custody ledger insert failed in checkin:', ledgerErr);
         return { success: false, error: 'שגיאת מסד נתונים ברישום ביומן התנועות: ' + ledgerErr.message };
       }
 
@@ -1261,123 +1268,128 @@ export async function checkinAssetAction(
         asset: returnedAsset,
       };
     } catch (err: unknown) {
+      console.error('[CHECKIN FAILED]: Exception in checkin:', err);
       const msg = err instanceof Error ? err.message : 'Database error';
-      return { success: false, error: msg };
+      return { success: false, error: 'שגיאת מסד נתונים: ' + msg };
     }
   }
 
-  // Update fallback in-memory asset if present
-  for (const key of Object.keys(FALLBACK_CUSTODY_ASSETS)) {
-    if (FALLBACK_CUSTODY_ASSETS[key].id === assetId) {
-      FALLBACK_CUSTODY_ASSETS[key].status = newStatus;
-      FALLBACK_CUSTODY_ASSETS[key].currentAssignedWorker = null;
-      FALLBACK_CUSTODY_ASSETS[key].version += 1;
-      mutateMockAsset(
-        FALLBACK_CUSTODY_ASSETS[key].qrCode,
-        {
-          status: newStatus,
-          currentAssignedWorker: null,
-          workerPhone: null,
-          condition,
-          expectedReturnDate: null,
-        },
-        {
+  // Development & offline mock fallback ONLY when Supabase is not configured
+  if (!isSupabaseConfigured()) {
+    for (const key of Object.keys(FALLBACK_CUSTODY_ASSETS)) {
+      if (FALLBACK_CUSTODY_ASSETS[key].id === assetId) {
+        FALLBACK_CUSTODY_ASSETS[key].status = newStatus;
+        FALLBACK_CUSTODY_ASSETS[key].currentAssignedWorker = null;
+        FALLBACK_CUSTODY_ASSETS[key].version += 1;
+        mutateMockAsset(
+          FALLBACK_CUSTODY_ASSETS[key].qrCode,
+          {
+            status: newStatus,
+            currentAssignedWorker: null,
+            workerPhone: null,
+            condition,
+            expectedReturnDate: null,
+          },
+          {
+            action: 'CHECKIN',
+            performedBy: 'מחסנאי',
+            notes: notes || `החזרת כלי (מצב: ${condition})`,
+            damageReport: damageReport || null,
+          }
+        );
+        const updatedAsset = { ...FALLBACK_CUSTODY_ASSETS[key] };
+        appendAuditHistoryEntry({
+          id: `aud-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          assetId: updatedAsset.id,
+          qrCode: updatedAsset.qrCode,
+          toolName: updatedAsset.toolName,
+          brand: updatedAsset.brand,
+          modelNumber: updatedAsset.modelNumber,
           action: 'CHECKIN',
           performedBy: 'מחסנאי',
+          targetWorker: null,
+          workerPhone: null,
+          condition,
+          warehouseId: updatedAsset.currentWarehouseId,
+          warehouseName: updatedAsset.warehouseName,
+          warehouseCode: updatedAsset.warehouseCode,
           notes: notes || `החזרת כלי (מצב: ${condition})`,
+          createdAt: new Date().toISOString(),
           damageReport: damageReport || null,
+          gps: gps || null,
+        });
+
+        try {
+          await clearDashboardCaches();
+          revalidatePath('/dashboard/warehouse');
+          revalidatePath('/dashboard/manager');
+        } catch (e) {
+          console.warn('[checkinAssetAction] revalidatePath warning:', e);
         }
-      );
-      const updatedAsset = { ...FALLBACK_CUSTODY_ASSETS[key] };
-      appendAuditHistoryEntry({
-        id: `aud-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        assetId: updatedAsset.id,
-        qrCode: updatedAsset.qrCode,
-        toolName: updatedAsset.toolName,
-        brand: updatedAsset.brand,
-        modelNumber: updatedAsset.modelNumber,
-        action: 'CHECKIN',
-        performedBy: 'מחסנאי',
-        targetWorker: null,
-        workerPhone: null,
-        condition,
-        warehouseId: updatedAsset.currentWarehouseId,
-        warehouseName: updatedAsset.warehouseName,
-        warehouseCode: updatedAsset.warehouseCode,
-        notes: notes || `החזרת כלי (מצב: ${condition})`,
-        createdAt: new Date().toISOString(),
-        damageReport: damageReport || null,
-        gps: gps || null,
-      });
 
-      try {
-        await clearDashboardCaches();
-        revalidatePath('/dashboard/warehouse');
-        revalidatePath('/dashboard/manager');
-      } catch (e) {
-        console.warn('[checkinAssetAction] revalidatePath warning:', e);
+        return {
+          success: true,
+          message:
+            newStatus === 'maintenance'
+              ? 'הכלי הוחזר והועבר ישירות לסטטוס בבדיקה / תיקון.'
+              : 'הכלי הוחזר למחסן וסומן כזמין במלאי.',
+          asset: updatedAsset,
+        };
       }
-
-      return {
-        success: true,
-        message:
-          newStatus === 'maintenance'
-            ? 'הכלי הוחזר והועבר ישירות לסטטוס בבדיקה / תיקון.'
-            : 'הכלי הוחזר למחסן וסומן כזמין במלאי.',
-        asset: updatedAsset,
-      };
     }
+
+    const fallbackReturned = {
+      id: assetId,
+      qrCode: 'TOOL-CHECKIN',
+      status: newStatus,
+      condition,
+      currentAssignedWorker: null,
+      currentWarehouseId: 'wh-main-01',
+      warehouseName: "מחסן מרכזי - אגף א'",
+      warehouseCode: 'CDB-01',
+      toolName: 'כלי שהוחזר',
+      brand: 'כלי',
+      modelNumber: null,
+      version: 2,
+    };
+
+    appendAuditHistoryEntry({
+      id: `aud-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      assetId: fallbackReturned.id,
+      qrCode: fallbackReturned.qrCode,
+      toolName: fallbackReturned.toolName,
+      brand: fallbackReturned.brand,
+      modelNumber: fallbackReturned.modelNumber,
+      action: 'CHECKIN',
+      performedBy: 'מחסנאי',
+      targetWorker: null,
+      workerPhone: null,
+      condition,
+      warehouseId: fallbackReturned.currentWarehouseId,
+      warehouseName: fallbackReturned.warehouseName,
+      warehouseCode: fallbackReturned.warehouseCode,
+      notes: notes || `החזרת כלי (מצב: ${condition})`,
+      createdAt: new Date().toISOString(),
+      damageReport: damageReport || null,
+      gps: gps || null,
+    });
+
+    try {
+      await clearDashboardCaches();
+      revalidatePath('/dashboard/warehouse');
+      revalidatePath('/dashboard/manager');
+    } catch (e) {
+      console.warn('[checkinAssetAction] revalidatePath warning:', e);
+    }
+
+    return {
+      success: true,
+      message: 'הכלי הוחזר למחסן בהצלחה.',
+      asset: fallbackReturned,
+    };
   }
 
-  const fallbackReturned = {
-    id: assetId,
-    qrCode: 'TOOL-CHECKIN',
-    status: newStatus,
-    condition,
-    currentAssignedWorker: null,
-    currentWarehouseId: 'wh-main-01',
-    warehouseName: "מחסן מרכזי - אגף א'",
-    warehouseCode: 'CDB-01',
-    toolName: 'כלי שהוחזר',
-    brand: 'כלי',
-    modelNumber: null,
-    version: 2,
-  };
-
-  appendAuditHistoryEntry({
-    id: `aud-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-    assetId: fallbackReturned.id,
-    qrCode: fallbackReturned.qrCode,
-    toolName: fallbackReturned.toolName,
-    brand: fallbackReturned.brand,
-    modelNumber: fallbackReturned.modelNumber,
-    action: 'CHECKIN',
-    performedBy: 'מחסנאי',
-    targetWorker: null,
-    workerPhone: null,
-    condition,
-    warehouseId: fallbackReturned.currentWarehouseId,
-    warehouseName: fallbackReturned.warehouseName,
-    warehouseCode: fallbackReturned.warehouseCode,
-    notes: notes || `החזרת כלי (מצב: ${condition})`,
-    createdAt: new Date().toISOString(),
-    damageReport: damageReport || null,
-    gps: gps || null,
-  });
-
-  try {
-    await clearDashboardCaches();
-    revalidatePath('/dashboard/warehouse');
-    revalidatePath('/dashboard/manager');
-  } catch (e) {
-    console.warn('[checkinAssetAction] revalidatePath warning:', e);
-  }
-
-  return {
-    success: true,
-    message: 'הכלי הוחזר למחסן בהצלחה.',
-    asset: fallbackReturned,
-  };
+  return { success: false, error: 'הכלי לא נמצא במערכת' };
 }
 
 export interface ActiveCheckedOutAssetItem {
@@ -1443,6 +1455,40 @@ export async function checkinFromWorkerAction(
   input: CheckinInput
 ): Promise<CustodyActionResult> {
   return checkinAssetAction(input);
+}
+
+/**
+ * Direct alias for checkinAssetAction.
+ */
+export async function returnAssetAction(
+  input: CheckinInput
+): Promise<CustodyActionResult> {
+  return checkinAssetAction(input);
+}
+
+/**
+ * Batch check-in of multiple assets back to warehouse custody.
+ */
+export async function batchCheckinAction(
+  items: CheckinInput[]
+): Promise<{ success: boolean; error?: string; message?: string; results: CustodyActionResult[] }> {
+  const results: CustodyActionResult[] = [];
+  for (const item of items) {
+    const res = await checkinAssetAction(item);
+    results.push(res);
+    if (!res.success) {
+      return {
+        success: false,
+        error: res.error || 'אחד הכלים נכשל בקליטה למחסן',
+        results,
+      };
+    }
+  }
+  return {
+    success: true,
+    message: `נקלטו בהצלחה ${items.length} כלים למחסן`,
+    results,
+  };
 }
 
 /**
@@ -1596,12 +1642,20 @@ export async function getCheckedOutAssetsForReturnAction(
           };
         });
       }
+
+      if (error) {
+        console.error('[getCheckedOutAssetsForReturnAction] Supabase query error:', error);
+        return [];
+      }
+
+      return [];
     } catch (err) {
-      console.warn('Error in getCheckedOutAssetsForReturnAction Supabase query:', err);
+      console.error('[getCheckedOutAssetsForReturnAction] Supabase query exception:', err);
+      return [];
     }
   }
 
-  // Fallback to unified mock store
+  // Fallback to unified mock store ONLY when !isSupabaseConfigured()
   const mockAssets = getMockAssets(orgId);
   const { getMockAuditHistory } = await import('@/lib/mockStore');
   const mockHistory = getMockAuditHistory(undefined, orgId).records;

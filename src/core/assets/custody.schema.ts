@@ -67,6 +67,7 @@ export const CheckinSchema = z.object({
   damageReport: DamageReportSchema.optional(),
   gps: GpsCoordinatesSchema.nullable().optional(),
   notes: z.string().trim().optional(),
+  warehouseId: z.string().trim().optional(),
 });
 
 export type CheckinInput = z.infer<typeof CheckinSchema>;

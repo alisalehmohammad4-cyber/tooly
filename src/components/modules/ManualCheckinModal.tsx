@@ -39,7 +39,7 @@ interface ManualCheckinModalProps {
   onClose: () => void;
   warehouseId?: string;
   preSelectedAssetId?: string | null;
-  onSuccess?: () => void;
+  onSuccess?: (returnedAsset?: ScannedAssetDetails | ActiveCheckedOutAssetItem) => void;
 }
 
 type CheckinTab = 'scanner' | 'manual';
@@ -452,7 +452,7 @@ export default function ManualCheckinModal({
       });
       // Reload list and notify parent
       await loadLoans();
-      if (onSuccess) onSuccess();
+      if (onSuccess) onSuccess(res.asset || selectedAsset);
 
       // After a moment, clear selected asset so user can check in another or finish
       setTimeout(() => {

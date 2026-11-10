@@ -5558,9 +5558,39 @@ export default function WarehouseDashboardView({
         }}
         warehouseId={selectedWarehouseId}
         preSelectedAssetId={checkinPreselectedAssetId}
-        onSuccess={() => {
+        onSuccess={(returned) => {
+          if (returned) {
+            const assetId = returned.id;
+            const isMaintenance = 'status' in returned ? returned.status === 'maintenance' : false;
+            setData((prev) => ({
+              ...prev,
+              availableCount: (prev.availableCount || 0) + (isMaintenance ? 0 : 1),
+              checkedOutCount: Math.max(0, (prev.checkedOutCount || 1) - 1),
+              activeLoans: (prev.activeLoans || []).filter((l) => l.assetId !== assetId),
+              returnsDueToday: (prev.returnsDueToday || []).filter((r) => r.assetId !== assetId),
+              overdueAssets: (prev.overdueAssets || []).filter((o) => o.assetId !== assetId),
+            }));
+
+            if (!isMaintenance) {
+              const toolName = 'toolName' in returned ? returned.toolName : ('name' in returned ? (returned as unknown as { name: string }).name : 'כלי');
+              const optTransferItem: AvailableTransferAssetItem = {
+                id: returned.id,
+                name: toolName,
+                brand: returned.brand || '',
+                modelNumber: returned.modelNumber || null,
+                qrCode: returned.qrCode || '',
+                tagNumber: null,
+                serialNumber: 'serialNumber' in returned ? (returned.serialNumber || null) : null,
+                currentWarehouseId: selectedWarehouseId !== 'all' ? selectedWarehouseId : ('currentWarehouseId' in returned ? (returned.currentWarehouseId || '') : ''),
+                currentWarehouseName: 'warehouseName' in returned ? (returned.warehouseName || 'מחסן') : 'מחסן',
+              };
+              setAvailableAssets((prev) => prev.some((a) => a.id === assetId) ? prev : [optTransferItem, ...prev]);
+              setAvailableAssetsForInbox((prev) => prev.some((a) => a.id === assetId) ? prev : [optTransferItem, ...prev]);
+              setLocalAvailableAssets((prev) => prev.some((a) => a.id === assetId) ? prev : [optTransferItem, ...prev]);
+            }
+          }
           router.refresh();
-          void handleWarehouseChange(selectedWarehouseId);
+          void handleWarehouseChange(selectedWarehouseId, true);
         }}
       />
 
