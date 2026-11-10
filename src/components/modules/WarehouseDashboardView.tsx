@@ -1252,16 +1252,32 @@ export default function WarehouseDashboardView({
         return;
       }
 
-      // Optimistically remove from incoming transfers and increment available count:
+      // Optimistically remove from incoming transfers and increment available count if target matches:
       setIncomingTransfers((prev) => prev.filter((item) => item.id !== req.id));
-      setData((prev) => ({
-        ...prev,
-        availableCount: (prev.availableCount || 0) + 1,
-      }));
+      if (selectedWarehouseId === req.targetWarehouseId || selectedWarehouseId === 'all') {
+        setData((prev) => ({
+          ...prev,
+          availableCount: (prev.availableCount || 0) + 1,
+        }));
+        const optAsset: AvailableTransferAssetItem = {
+          id: req.assetId,
+          name: req.assetName,
+          brand: req.assetBrand || '',
+          modelNumber: req.assetModel || null,
+          qrCode: req.qrCode,
+          tagNumber: req.tagNumber || null,
+          serialNumber: req.serialNumber || null,
+          currentWarehouseId: req.targetWarehouseId,
+          currentWarehouseName: req.targetWarehouseName || 'מחסן',
+        };
+        setAvailableAssets((prev) => prev.some((a) => a.id === req.assetId) ? prev : [optAsset, ...prev]);
+        setAvailableAssetsForInbox((prev) => prev.some((a) => a.id === req.assetId) ? prev : [optAsset, ...prev]);
+        setLocalAvailableAssets((prev) => prev.some((a) => a.id === req.assetId) ? prev : [optAsset, ...prev]);
+      }
 
       // Force Next.js to re-fetch Server Components and update all tables/metrics:
       router.refresh();
-      await handleWarehouseChange(selectedWarehouseId);
+      await handleWarehouseChange(selectedWarehouseId, true);
       await loadIncomingTransfers(selectedWarehouseId);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'שגיאה בקליטת הציוד';
@@ -1277,13 +1293,6 @@ export default function WarehouseDashboardView({
     setOperatingFleetAssetId(item.assetId);
     setFleetOperationType('receive');
 
-    // Optimistically remove card from In-Transit view and refresh local state immediately
-    setInTransitFleet((prev) => prev.filter((f) => f.assetId !== item.assetId && f.id !== item.id));
-    setData((prev) => ({
-      ...prev,
-      availableCount: (prev.availableCount || 0) + 1,
-    }));
-
     try {
       const res = await completeTransferReceptionAction({
         assetId: item.assetId,
@@ -1295,14 +1304,37 @@ export default function WarehouseDashboardView({
 
       if (!res.success) {
         alert(`שגיאה בקליטת הציוד: ${res.error || 'שגיאה לא ידועה'}`);
-        await loadInTransitFleet();
         return;
+      }
+
+      // Optimistically remove card from In-Transit view
+      setInTransitFleet((prev) => prev.filter((f) => f.assetId !== item.assetId && f.id !== item.id));
+
+      if (selectedWarehouseId === item.destinationWarehouseId || selectedWarehouseId === 'all') {
+        setData((prev) => ({
+          ...prev,
+          availableCount: (prev.availableCount || 0) + 1,
+        }));
+        const optAsset: AvailableTransferAssetItem = {
+          id: item.assetId,
+          name: item.toolName,
+          brand: item.brand,
+          modelNumber: item.modelNumber || null,
+          qrCode: item.qrCode,
+          tagNumber: null,
+          serialNumber: null,
+          currentWarehouseId: item.destinationWarehouseId,
+          currentWarehouseName: item.destinationWarehouseName,
+        };
+        setAvailableAssets((prev) => prev.some((a) => a.id === item.assetId) ? prev : [optAsset, ...prev]);
+        setAvailableAssetsForInbox((prev) => prev.some((a) => a.id === item.assetId) ? prev : [optAsset, ...prev]);
+        setLocalAvailableAssets((prev) => prev.some((a) => a.id === item.assetId) ? prev : [optAsset, ...prev]);
       }
 
       router.refresh();
       await loadInTransitFleet();
       await loadIncomingTransfers(selectedWarehouseId);
-      await handleWarehouseChange(selectedWarehouseId);
+      await handleWarehouseChange(selectedWarehouseId, true);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'שגיאה לא ידועה';
       alert(`שגיאה בקליטת הציוד: ${msg}`);
@@ -1318,13 +1350,6 @@ export default function WarehouseDashboardView({
     setOperatingFleetAssetId(item.assetId);
     setFleetOperationType('cancel');
 
-    // Optimistically remove card from In-Transit view and refresh local state immediately
-    setInTransitFleet((prev) => prev.filter((f) => f.assetId !== item.assetId && f.id !== item.id));
-    setData((prev) => ({
-      ...prev,
-      availableCount: (prev.availableCount || 0) + 1,
-    }));
-
     try {
       const res = await cancelTransferRollbackAction({
         assetId: item.assetId,
@@ -1336,14 +1361,37 @@ export default function WarehouseDashboardView({
 
       if (!res.success) {
         alert(`שגיאה בביטול השינוע: ${res.error || 'שגיאה לא ידועה'}`);
-        await loadInTransitFleet();
         return;
+      }
+
+      // Optimistically remove card from In-Transit view
+      setInTransitFleet((prev) => prev.filter((f) => f.assetId !== item.assetId && f.id !== item.id));
+
+      if (selectedWarehouseId === item.originWarehouseId || selectedWarehouseId === 'all') {
+        setData((prev) => ({
+          ...prev,
+          availableCount: (prev.availableCount || 0) + 1,
+        }));
+        const optAsset: AvailableTransferAssetItem = {
+          id: item.assetId,
+          name: item.toolName,
+          brand: item.brand,
+          modelNumber: item.modelNumber || null,
+          qrCode: item.qrCode,
+          tagNumber: null,
+          serialNumber: null,
+          currentWarehouseId: item.originWarehouseId,
+          currentWarehouseName: item.originWarehouseName,
+        };
+        setAvailableAssets((prev) => prev.some((a) => a.id === item.assetId) ? prev : [optAsset, ...prev]);
+        setAvailableAssetsForInbox((prev) => prev.some((a) => a.id === item.assetId) ? prev : [optAsset, ...prev]);
+        setLocalAvailableAssets((prev) => prev.some((a) => a.id === item.assetId) ? prev : [optAsset, ...prev]);
       }
 
       router.refresh();
       await loadInTransitFleet();
       await loadIncomingTransfers(selectedWarehouseId);
-      await handleWarehouseChange(selectedWarehouseId);
+      await handleWarehouseChange(selectedWarehouseId, true);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'שגיאה לא ידועה';
       alert(`שגיאה בביטול השינוע: ${msg}`);

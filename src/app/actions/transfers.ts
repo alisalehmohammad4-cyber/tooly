@@ -792,18 +792,8 @@ export async function completeTransferReceptionAction(
       }
 
       if (!asset) {
-        // Check if exists in mockStore before failing
-        const mockAsset = getMockAssets().find(
-          (m) =>
-            m.id === rawId ||
-            m.id === lookupTarget ||
-            m.qrCode === cleanTag ||
-            m.qrCode === rawQr ||
-            m.serialNumber === cleanTag
-        );
-        if (!mockAsset) {
-          return { success: false, error: `כלי העבודה (${cleanTag || rawId}) לא נמצא במערכת` };
-        }
+        console.error('[TRANSFER RECEPTION FAILED]: Asset not found in database:', cleanTag || rawId);
+        return { success: false, error: `כלי העבודה (${cleanTag || rawId}) לא נמצא במערכת הארגון` };
       } else {
         resolvedAsset = asset;
         const activeOrg = asset.organization_id;
@@ -871,18 +861,23 @@ export async function completeTransferReceptionAction(
         const sourceWarehouseUuid = sourceWh?.id || null;
 
         // 2. Updates asset status from 'in_transit' to 'available'
+        const nextVersion = (asset.version || 1) + 1;
         const { error: updateErr } = await supabaseAdmin
           .from('assets')
           .update({
             current_warehouse_id: finalTargetWarehouseId,
             status: CANONICAL_AVAILABLE_STATUS,
             current_assigned_worker: null,
+            expected_return_date: null,
+            version: nextVersion,
             updated_at: now,
           })
-          .eq('id', asset.id);
+          .eq('id', asset.id)
+          .eq('organization_id', activeOrg);
 
         if (updateErr) {
-          return { success: false, error: `שגיאה בעדכון כלי: ${updateErr.message}` };
+          console.error('[TRANSFER RECEPTION FAILED]: Asset update failed:', updateErr);
+          return { success: false, error: `שגיאת מסד נתונים בעדכון כלי: ${updateErr.message}` };
         }
 
         // 3. Write a "RECEIVE_TRANSFER" entry into custody_ledger
@@ -901,16 +896,17 @@ export async function completeTransferReceptionAction(
         });
 
         if (ledgerErr) {
-          console.error('CRITICAL: Failed to write transfer reception to custody_ledger:', ledgerErr);
-          return { success: false, error: 'שגיאה ברישום תנועת קליטת השינוע ביומן: ' + ledgerErr.message };
+          console.error('[TRANSFER RECEPTION FAILED]: Ledger insert failed:', ledgerErr);
+          return { success: false, error: 'שגיאת מסד נתונים ברישום תנועת קליטת השינוע ביומן: ' + ledgerErr.message };
         }
 
-        // 4. Update transfer_requests record if present
+        // 4. Atomically update transfer_requests record to COMPLETED with received_at
         if (requestId && UUID_REGEX.test(requestId)) {
           await supabaseAdmin
             .from('transfer_requests')
             .update({
               status: 'COMPLETED',
+              received_at: now,
               updated_at: now,
             })
             .eq('id', requestId);
@@ -919,55 +915,59 @@ export async function completeTransferReceptionAction(
           .from('transfer_requests')
           .update({
             status: 'COMPLETED',
+            received_at: now,
             updated_at: now,
           })
           .eq('asset_id', asset.id)
           .in('status', [...ACTIVE_TRANSFER_REQUEST_STATUSES]);
       }
     } catch (err: unknown) {
+      console.error('[TRANSFER RECEPTION FAILED]: Exception in completeTransferReceptionAction:', err);
       const msg = err instanceof Error ? err.message : 'Database error';
-      return { success: false, error: msg };
+      return { success: false, error: 'שגיאת מסד נתונים בקליטת שינוע: ' + msg };
     }
   }
 
-  // 5. Clean Up Both Supabase & Mock Store on Reception
-  const targetWhMeta = getMockWarehouses(true).find(
-    (w) => w.id === (finalTargetWarehouseId || targetWarehouseId)
-  );
-
-  const identifiersToClean = Array.from(
-    new Set([rawId, rawQr, cleanTag, lookupTarget, resolvedAsset?.id, resolvedAsset?.qr_code, resolvedAsset?.tag_number].filter(Boolean) as string[])
-  );
-
-  for (const idKey of identifiersToClean) {
-    mutateMockAsset(
-      idKey,
-      {
-        currentWarehouseId: finalTargetWarehouseId || targetWarehouseId,
-        warehouseId: finalTargetWarehouseId || targetWarehouseId,
-        warehouseName: finalTargetWarehouseName || targetWhMeta?.name || 'מחסן יעד',
-        warehouseCode: targetWhMeta?.code || '',
-        status: CANONICAL_AVAILABLE_STATUS,
-      },
-      {
-        action: 'RECEIVE_TRANSFER',
-        performedBy: performerName,
-        notes: notes || 'קליטת ציוד במחסן היעד',
-      }
+  // 5. Clean Up Mock Store strictly when Supabase is NOT configured
+  if (!isSupabaseConfigured()) {
+    const targetWhMeta = getMockWarehouses(true).find(
+      (w) => w.id === (finalTargetWarehouseId || targetWarehouseId)
     );
-    clearInTransitMockAsset(idKey);
-  }
 
-  // Update in-memory transfer requests
-  inMemoryTransferRequests.forEach((req) => {
-    if (
-      (requestId && req.id === requestId) ||
-      identifiersToClean.includes(req.asset_id)
-    ) {
-      req.status = 'COMPLETED';
-      req.updated_at = now;
+    const identifiersToClean = Array.from(
+      new Set([rawId, rawQr, cleanTag, lookupTarget, resolvedAsset?.id, resolvedAsset?.qr_code, resolvedAsset?.tag_number].filter(Boolean) as string[])
+    );
+
+    for (const idKey of identifiersToClean) {
+      mutateMockAsset(
+        idKey,
+        {
+          currentWarehouseId: finalTargetWarehouseId || targetWarehouseId,
+          warehouseId: finalTargetWarehouseId || targetWarehouseId,
+          warehouseName: finalTargetWarehouseName || targetWhMeta?.name || 'מחסן יעד',
+          warehouseCode: targetWhMeta?.code || '',
+          status: CANONICAL_AVAILABLE_STATUS,
+        },
+        {
+          action: 'RECEIVE_TRANSFER',
+          performedBy: performerName,
+          notes: notes || 'קליטת ציוד במחסן היעד',
+        }
+      );
+      clearInTransitMockAsset(idKey);
     }
-  });
+
+    // Update in-memory transfer requests
+    inMemoryTransferRequests.forEach((req) => {
+      if (
+        (requestId && req.id === requestId) ||
+        identifiersToClean.includes(req.asset_id)
+      ) {
+        req.status = 'COMPLETED';
+        req.updated_at = now;
+      }
+    });
+  }
 
   try {
     await clearDashboardCaches();
@@ -1092,17 +1092,8 @@ export async function cancelTransferRollbackAction(
       }
 
       if (!asset) {
-        const mockAsset = getMockAssets().find(
-          (m) =>
-            m.id === rawId ||
-            m.id === lookupTarget ||
-            m.qrCode === cleanTag ||
-            m.qrCode === rawQr ||
-            m.serialNumber === cleanTag
-        );
-        if (!mockAsset) {
-          return { success: false, error: `כלי העבודה (${cleanTag || rawId}) לא נמצא במערכת` };
-        }
+        console.error('[TRANSFER ROLLBACK FAILED]: Asset not found in database:', cleanTag || rawId);
+        return { success: false, error: `כלי העבודה (${cleanTag || rawId}) לא נמצא במערכת הארגון` };
       } else {
         resolvedAsset = asset;
         const activeOrg = asset.organization_id;
@@ -1209,27 +1200,33 @@ export async function cancelTransferRollbackAction(
         const targetRollbackWarehouseId = finalSourceWarehouseId || asset.current_warehouse_id;
 
         // 1. Set asset status = 'available' & restore current_warehouse_id to source warehouse
+        const nextVersion = (asset.version || 1) + 1;
         const { error: assetUpdateErr } = await supabaseAdmin
           .from('assets')
           .update({
             current_warehouse_id: targetRollbackWarehouseId,
             status: CANONICAL_AVAILABLE_STATUS,
             current_assigned_worker: null,
+            expected_return_date: null,
+            version: nextVersion,
             updated_at: now,
           })
-          .eq('id', asset.id);
+          .eq('id', asset.id)
+          .eq('organization_id', activeOrg);
 
         if (assetUpdateErr) {
-          return { success: false, error: `שגיאה בעדכון כלי: ${assetUpdateErr.message}` };
+          console.error('[TRANSFER ROLLBACK FAILED]: Asset update failed:', assetUpdateErr);
+          return { success: false, error: `שגיאת מסד נתונים בעדכון כלי: ${assetUpdateErr.message}` };
         }
 
         // 2. If there is an active transfer_requests record for this asset, update its status to 'REJECTED'
+        const rejectionReason = notes?.trim() || 'ביטול שינוע שטח והחזרה למלאי המקור';
         if (requestId && UUID_REGEX.test(requestId)) {
           await supabaseAdmin
             .from('transfer_requests')
             .update({
               status: TRANSFER_REQUEST_DB_STATUS.REJECTED,
-              rejection_reason: 'ביטול שינוע שטח והחזרה למלאי המקור',
+              rejection_reason: rejectionReason,
               updated_at: now,
             })
             .eq('id', requestId);
@@ -1239,63 +1236,71 @@ export async function cancelTransferRollbackAction(
           .from('transfer_requests')
           .update({
             status: TRANSFER_REQUEST_DB_STATUS.REJECTED,
-            rejection_reason: 'ביטול שינוע שטח והחזרה למלאי המקור',
+            rejection_reason: rejectionReason,
             updated_at: now,
           })
           .eq('asset_id', asset.id)
           .in('status', [...ACTIVE_TRANSFER_REQUEST_STATUSES]);
 
         // 3. Insert audit record into custody_ledger
-        await supabaseAdmin.from('custody_ledger').insert({
-          organization_id: asset.organization_id,
+        const { error: ledgerErr } = await supabaseAdmin.from('custody_ledger').insert({
+          organization_id: activeOrg,
           asset_id: asset.id,
           action: 'CANCEL_TRANSFER',
           from_warehouse_id: asset.current_warehouse_id,
           to_warehouse_id: sourceWarehouseId || targetRollbackWarehouseId || asset.current_warehouse_id,
           warehouse_id: targetRollbackWarehouseId || asset.current_warehouse_id,
-          target_site_name: 'מחסן מקור (בוטל)',
-          performed_by: performerName,
-          notes: notes?.trim() || 'ביטול שינוע שטח והחזרה למלאי המקור',
+          target_site_name: finalSourceWarehouseName,
+          performed_by: sessionUser?.name || performerName,
+          notes: rejectionReason,
           created_at: now,
         });
+
+        if (ledgerErr) {
+          console.error('[TRANSFER ROLLBACK FAILED]: Ledger insert failed:', ledgerErr);
+          return { success: false, error: 'שגיאת מסד נתונים ברישום ביטול השינוע ביומן: ' + ledgerErr.message };
+        }
       }
     } catch (err: unknown) {
+      console.error('[TRANSFER ROLLBACK FAILED]: Exception in cancelTransferRollbackAction:', err);
       const msg = err instanceof Error ? err.message : 'Database error';
-      return { success: false, error: msg };
+      return { success: false, error: 'שגיאת מסד נתונים בביטול שינוע: ' + msg };
     }
   }
 
-  // Clean Up Both Supabase & Mock Store on Rollback
-  const identifiersToClean = Array.from(
-    new Set([rawId, rawQr, cleanTag, lookupTarget, resolvedAsset?.id, resolvedAsset?.qr_code, resolvedAsset?.tag_number].filter(Boolean) as string[])
-  );
-
-  for (const idKey of identifiersToClean) {
-    mutateMockAsset(
-      idKey,
-      {
-        status: CANONICAL_AVAILABLE_STATUS,
-        currentWarehouseId: finalSourceWarehouseId || sourceWarehouseId,
-        warehouseId: finalSourceWarehouseId || sourceWarehouseId,
-      },
-      {
-        action: 'CANCEL_TRANSFER',
-        performedBy: performerName,
-        notes: notes || 'ביטול שינוע שטח והחזרה למלאי המקור',
-      }
+  // Clean Up Mock Store strictly when Supabase is NOT configured
+  if (!isSupabaseConfigured()) {
+    const identifiersToClean = Array.from(
+      new Set([rawId, rawQr, cleanTag, lookupTarget, resolvedAsset?.id, resolvedAsset?.qr_code, resolvedAsset?.tag_number].filter(Boolean) as string[])
     );
-    clearInTransitMockAsset(idKey);
-  }
 
-  inMemoryTransferRequests.forEach((req) => {
-    if (
-      (requestId && req.id === requestId) ||
-      identifiersToClean.includes(req.asset_id)
-    ) {
-      req.status = TRANSFER_REQUEST_DB_STATUS.REJECTED;
-      req.updated_at = now;
+    for (const idKey of identifiersToClean) {
+      mutateMockAsset(
+        idKey,
+        {
+          status: CANONICAL_AVAILABLE_STATUS,
+          currentWarehouseId: finalSourceWarehouseId || sourceWarehouseId,
+          warehouseId: finalSourceWarehouseId || sourceWarehouseId,
+        },
+        {
+          action: 'CANCEL_TRANSFER',
+          performedBy: performerName,
+          notes: notes || 'ביטול שינוע שטח והחזרה למלאי המקור',
+        }
+      );
+      clearInTransitMockAsset(idKey);
     }
-  });
+
+    inMemoryTransferRequests.forEach((req) => {
+      if (
+        (requestId && req.id === requestId) ||
+        identifiersToClean.includes(req.asset_id)
+      ) {
+        req.status = TRANSFER_REQUEST_DB_STATUS.REJECTED;
+        req.updated_at = now;
+      }
+    });
+  }
 
   // 4. Revalidate /dashboard/warehouse, /history, and /catalog
   try {
@@ -1726,36 +1731,38 @@ export async function directStorekeeperTransferAction(data: {
     }
   }
 
-  // 3. Fallback / Synchronize in-memory stores
-  inMemoryTransferRequests.unshift({
-    id: requestId,
-    organization_id: orgId,
-    asset_id: assetId,
-    source_warehouse_id: sourceWhId || targetWarehouseUuid,
-    target_warehouse_id: targetWarehouseUuid,
-    requested_by: performedBy,
-    requested_by_user_id: sessionUser?.id || null,
-    reason: transporterNotes ? `העברה ישירה ע"י מחסנאי: ${transporterNotes}` : 'העברה ישירה ע"י מחסנאי',
-    status: 'APPROVED',
-    decided_by: performedBy,
-    decided_at: now,
-    created_at: now,
-    updated_at: now,
-  });
+  // 3. Fallback / Synchronize in-memory stores strictly when Supabase is NOT configured
+  if (!isSupabaseConfigured()) {
+    inMemoryTransferRequests.unshift({
+      id: requestId,
+      organization_id: orgId,
+      asset_id: assetId,
+      source_warehouse_id: sourceWhId || targetWarehouseUuid,
+      target_warehouse_id: targetWarehouseUuid,
+      requested_by: performedBy,
+      requested_by_user_id: sessionUser?.id || null,
+      reason: transporterNotes ? `העברה ישירה ע"י מחסנאי: ${transporterNotes}` : 'העברה ישירה ע"י מחסנאי',
+      status: 'APPROVED',
+      decided_by: performedBy,
+      decided_at: now,
+      created_at: now,
+      updated_at: now,
+    });
 
-  mutateMockAsset(
-    assetId,
-    {
-      status: 'in_transit',
-      warehouseId: targetWarehouseId,
-      currentWarehouseId: targetWarehouseId,
-    },
-    {
-      action: 'TRANSFER_INIT',
-      performedBy,
-      notes: `העברה ישירה ע"י מחסנאי לאתר יעד: ${transporterNotes || 'ללא'}`,
-    }
-  );
+    mutateMockAsset(
+      assetId,
+      {
+        status: 'in_transit',
+        warehouseId: targetWarehouseId,
+        currentWarehouseId: targetWarehouseId,
+      },
+      {
+        action: 'TRANSFER_INIT',
+        performedBy,
+        notes: `העברה ישירה ע"י מחסנאי לאתר יעד: ${transporterNotes || 'ללא'}`,
+      }
+    );
+  }
 
   try {
     await clearDashboardCaches();
