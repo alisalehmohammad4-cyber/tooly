@@ -1,88 +1,41 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import Link from 'next/link';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Building2,
-  Phone,
-  MessageCircle,
-  AlertTriangle,
-  AlertCircle,
-  Clock,
-  CheckCircle2,
-  Calendar,
-  ChevronDown,
-  Loader2,
-  Zap,
-  ZapOff,
-  FileText,
-  Scan,
-  Printer,
-  Layers,
-  TrendingDown,
-  ArrowLeftRight,
-  ClipboardCheck,
-  X,
-  Check,
   Lock,
-  Package,
-  Plus,
-  Search,
+  CheckCircle2,
+  Clock,
+  AlertTriangle,
+  Zap,
   Truck,
-  FileSignature,
-  QrCode,
-  PenTool,
-  ShieldCheck,
-  Inbox,
-  Send,
-  Flame,
-  PackageCheck,
-  RotateCcw,
   Wrench,
-  Trash2,
-  Sparkles,
-  RefreshCw,
-  Camera,
-  ScanLine,
+  FileText,
 } from 'lucide-react';
+
 import type { StorekeeperOperationsPayload, WarehouseOption, StorekeeperActiveLoan } from '@/app/actions/dashboard';
 import { getStorekeeperOperations } from '@/app/actions/dashboard';
 import AppLayout from '@/components/layout/AppLayout';
 import ToolPassportModal from '@/components/modules/ToolPassportModal';
 import ManualCheckinModal from '@/components/modules/ManualCheckinModal';
-import OcrScannerModal from '@/components/modules/OcrScannerModal';
 import ChiefNotesFeedView from '@/components/modules/ChiefNotesFeedView';
-import SignaturePad from '@/components/ui/SignaturePad';
 import { useAuth } from '@/context/AuthContext';
-import { useOcrScanner } from '@/lib/ocr/useOcrScanner';
-import { useLaserStripOcr } from '@/lib/ocr/useLaserStripOcr';
-import { snapTagToAsset, triggerOcrHaptic, playOcrBeep, normalizeFieldTag } from '@/lib/ocr/tagParser';
-import { isAssetAvailable } from '@/lib/assets/status';
-import { detectBarcodeOrQr, extractTagFromBarcodePayload } from '@/lib/ocr/barcodeDetector';
+import { normalizeFieldTag } from '@/lib/ocr/tagParser';
 import {
   getAssetDetailsByQr,
-  transferAssetAction,
-  dispatchAssetWithSignatureAction,
-  checkoutToWorkerAction,
   type ScannedAssetDetails,
 } from '@/app/actions/custody';
-import { reconcileStockAction } from '@/app/actions/warehouses';
 import {
-  createTransferRequestAction,
-  getAvailableAssetsForTransferAction,
   getIncomingInTransitTransfersAction,
   completeTransferReceptionAction,
   cancelTransferRollbackAction,
   getPendingTransfersAction,
   decideTransferRequestAction,
-  getLocalAvailableAssetsForTransferAction,
-  directStorekeeperTransferAction,
   type AvailableTransferAssetItem,
   type PendingTransferItem,
 } from '@/app/actions/transfers';
 import {
-  createSiteToolRequestAction,
   getSiteStorekeeperDashboardAction,
   getChiefStorekeeperInboxAction,
   resolveToolRequestAction,
@@ -93,11 +46,25 @@ import {
 import {
   getInTransitFleetAction,
   getMaintenanceAssetsAction,
-  returnFromMaintenanceAction,
-  scrapAndRetireAssetAction,
   type InTransitFleetItem,
   type MaintenanceAssetItem,
 } from '@/app/actions/maintenance';
+
+// Modularized Tabs
+import WarehouseDailyOperationsTab from './warehouse/tabs/WarehouseDailyOperationsTab';
+import WarehouseTransfersTab from './warehouse/tabs/WarehouseTransfersTab';
+import WarehouseMaintenanceTab from './warehouse/tabs/WarehouseMaintenanceTab';
+
+// Modularized Modals
+import DirectTransferModal from './warehouse/modals/DirectTransferModal';
+import RepairReturnModal from './warehouse/modals/RepairReturnModal';
+import ResolveToolRequestModal from './warehouse/modals/ResolveToolRequestModal';
+import ScrapRetireModal from './warehouse/modals/ScrapRetireModal';
+import SiteToolRequestModal from './warehouse/modals/SiteToolRequestModal';
+import { InterDepotTransferModal } from './warehouse/modals/InterDepotTransferModal';
+import { StockReconciliationModal } from './warehouse/modals/StockReconciliationModal';
+import { InterSiteTransferRequestModal } from './warehouse/modals/InterSiteTransferRequestModal';
+import { QuickCheckoutModal } from './warehouse/modals/QuickCheckoutModal';
 
 interface WarehouseDashboardViewProps {
   initialData: StorekeeperOperationsPayload;
@@ -118,27 +85,9 @@ export default function WarehouseDashboardView({
     user,
   } = useAuth();
   const router = useRouter();
+
+  // Core Data State
   const [data, setData] = useState<StorekeeperOperationsPayload>(initialData);
-
-  // Keep dashboard metrics and active loans synchronized when Server Component re-fetches via router.refresh()
-  React.useEffect(() => {
-    setData(initialData);
-  }, [initialData]);
-
-  // Quick Checkout to Worker Modal State ("הנפקה לעובד")
-  const [isCheckoutModalOpen, setIsCheckoutModalOpen] = useState<boolean>(false);
-  const [checkoutAssetInput, setCheckoutAssetInput] = useState<string>('');
-  const [checkoutAsset, setCheckoutAsset] = useState<ScannedAssetDetails | null>(null);
-  const [checkoutWorkerName, setCheckoutWorkerName] = useState<string>('');
-  const [checkoutWorkerPhone, setCheckoutWorkerPhone] = useState<string>('');
-  const [checkoutReturnDate, setCheckoutReturnDate] = useState<string>(() => {
-    return new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(0, 16);
-  });
-  const [checkoutNotes, setCheckoutNotes] = useState<string>('');
-  const [isSubmittingCheckout, setIsSubmittingCheckout] = useState<boolean>(false);
-  const [isSearchingCheckoutAsset, setIsSearchingCheckoutAsset] = useState<boolean>(false);
-  const [checkoutFeedback, setCheckoutFeedback] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
-
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>(() => {
     if (isStorekeeper && assignedWarehouseId) {
       return assignedWarehouseId;
@@ -146,446 +95,57 @@ export default function WarehouseDashboardView({
     return initialData.warehouse.id;
   });
   const [isLoadingWarehouse, setIsLoadingWarehouse] = useState<boolean>(false);
-  // 4-Tab Navigation Architecture State
-  const [activeTab, setActiveTab] = useState<'operations' | 'transfers' | 'maintenance' | 'notes'>('operations');
-  const [passportAsset, setPassportAsset] = useState<ScannedAssetDetails | null>(null);
-  const [isPassportOpen, setIsPassportOpen] = useState<boolean>(false);
-  const [passportLookupInput, setPassportLookupInput] = useState<string>('');
-  const [isSearchingPassport, setIsSearchingPassport] = useState<boolean>(false);
-  const [passportLookupFeedback, setPassportLookupFeedback] = useState<string | null>(null);
 
-  // Equipment Return / Check-in Modal State (Manual Omnisearch + Barcode Scanner)
+  // 4-Tab Navigation: 'operations' | 'transfers' | 'maintenance' | 'notes'
+  const [activeTab, setActiveTab] = useState<'operations' | 'transfers' | 'maintenance' | 'notes'>('operations');
+
+  // Keep dashboard metrics synchronized when Server Component re-fetches via router.refresh()
+  useEffect(() => {
+    setData(initialData);
+  }, [initialData]);
+
+  const warehouses = useMemo(
+    () => propWarehouses || data.warehouses || data.allWarehouses || [],
+    [propWarehouses, data.warehouses, data.allWarehouses]
+  );
+
+  // Modal Open States
+  const [isCheckoutModalOpen, setIsCheckoutModalOpen] = useState<boolean>(false);
   const [isCheckinModalOpen, setIsCheckinModalOpen] = useState<boolean>(false);
   const [checkinPreselectedAssetId, setCheckinPreselectedAssetId] = useState<string | null>(null);
+  const [isPassportOpen, setIsPassportOpen] = useState<boolean>(false);
+  const [passportAsset, setPassportAsset] = useState<ScannedAssetDetails | null>(null);
 
-  const warehouses = React.useMemo(() => propWarehouses || data.warehouses || data.allWarehouses || [], [propWarehouses, data.warehouses, data.allWarehouses]);
-
-  // Chief Operations: Inter-Depot Transfer Modal State
   const [isTransferModalOpen, setIsTransferModalOpen] = useState<boolean>(false);
-  const [transferQrCode, setTransferQrCode] = useState<string>('');
-  const [transferTargetWhId, setTransferTargetWhId] = useState<string>(() => {
-    const whList = propWarehouses || initialData.warehouses || initialData.allWarehouses || [];
-    const firstOther = whList.find((w) => w.id && w.id !== initialData.warehouse?.id && w.id !== 'all');
-    return firstOther ? firstOther.id : (whList.find((w) => w.id && w.id !== 'all')?.id || '');
-  });
-  const [transferNotes, setTransferNotes] = useState<string>('');
-  const [isTransferring, setIsTransferring] = useState<boolean>(false);
-  const [transferFeedback, setTransferFeedback] = useState<{
-    text: string;
-    type: 'success' | 'error';
-  } | null>(null);
-
-  // Chief Operations: Stock Reconciliation Modal State
   const [isReconcileModalOpen, setIsReconcileModalOpen] = useState<boolean>(false);
-  const [isReconciling, setIsReconciling] = useState<boolean>(false);
-  const [discrepancyNotes, setDiscrepancyNotes] = useState<string>('');
-  const [reconcileFeedback, setReconcileFeedback] = useState<{
-    text: string;
-    type: 'success' | 'error';
-  } | null>(null);
-
-  // Storekeeper: Inter-site Transfer Request Modal State
   const [isTransferRequestModalOpen, setIsTransferRequestModalOpen] = useState<boolean>(false);
-  const [availableAssets, setAvailableAssets] = useState<AvailableTransferAssetItem[]>([]);
-  const [isLoadingAvailableAssets, setIsLoadingAvailableAssets] = useState<boolean>(false);
-  const [selectedAssetToTransfer, setSelectedAssetToTransfer] = useState<AvailableTransferAssetItem | null>(null);
-  const [transferRequestTargetWhId, setTransferRequestTargetWhId] = useState<string>(() => {
-    return selectedWarehouseId !== 'all' ? selectedWarehouseId : (assignedWarehouseId || '');
-  });
-  const [transferRequestReason, setTransferRequestReason] = useState<string>('');
-  const [isSubmittingTransferRequest, setIsSubmittingTransferRequest] = useState<boolean>(false);
-  const [transferRequestFeedback, setTransferRequestFeedback] = useState<{
-    text: string;
-    type: 'success' | 'error';
-  } | null>(null);
-  const [assetSearchQuery, setAssetSearchQuery] = useState<string>('');
-
-  // Storekeeper: Direct Outbound Equipment Transfer Modal State
   const [isDirectTransferModalOpen, setIsDirectTransferModalOpen] = useState<boolean>(false);
-  const [isDirectTransferOcrOpen, setIsDirectTransferOcrOpen] = useState<boolean>(false);
-  const [isDispatchOcrOpen, setIsDispatchOcrOpen] = useState<boolean>(false);
-  const [isQuickOcrOpen, setIsQuickOcrOpen] = useState<boolean>(false);
-  const [localAvailableAssets, setLocalAvailableAssets] = useState<AvailableTransferAssetItem[]>([]);
-  const [isLoadingLocalAssets, setIsLoadingLocalAssets] = useState<boolean>(false);
-  const [selectedDirectAsset, setSelectedDirectAsset] = useState<AvailableTransferAssetItem | null>(null);
-  const [directTargetWarehouseId, setDirectTargetWarehouseId] = useState<string>('');
-  const [transporterNotes, setTransporterNotes] = useState<string>('');
-  const [directSearchQuery, setDirectSearchQuery] = useState<string>('');
-  const [isSubmittingDirectTransfer, setIsSubmittingDirectTransfer] = useState<boolean>(false);
-  const [directTransferFeedback, setDirectTransferFeedback] = useState<{
-    text: string;
-    type: 'success' | 'error';
-  } | null>(null);
+  const [isDispatchModalOpen, setIsDispatchModalOpen] = useState<boolean>(false);
+  const [isSiteRequestModalOpen, setIsSiteRequestModalOpen] = useState<boolean>(false);
 
-  // Inline Camera Scanner State & Hardware Watchdog
-  const [isInlineScannerOpen, setIsInlineScannerOpen] = useState<boolean>(false);
-  const inlineVideoRef = useRef<HTMLVideoElement | null>(null);
-  const inlineStreamRef = useRef<MediaStream | null>(null);
-  const inlineWatchdogIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const inlineIsPausedRef = useRef<boolean>(false);
-  const inlineIsDebounceLockedRef = useRef<boolean>(false);
-  const inlineIsBarcodeBusyRef = useRef<boolean>(false);
+  const [repairModalAsset, setRepairModalAsset] = useState<MaintenanceAssetItem | null>(null);
+  const [retireModalAsset, setRetireModalAsset] = useState<MaintenanceAssetItem | null>(null);
 
-  const [inlineFacingMode, setInlineFacingMode] = useState<'environment' | 'user'>('environment');
-  const [inlineTorchSupported, setInlineTorchSupported] = useState<boolean>(false);
-  const [inlineTorchEnabled, setInlineTorchEnabled] = useState<boolean>(false);
-  const [inlineTargetLocked, setInlineTargetLocked] = useState<boolean>(false);
-  const [inlineCandidateTag, setInlineCandidateTag] = useState<string | null>(null);
-  const [inlineCameraError, setInlineCameraError] = useState<string | null>(null);
-  const [inlineScanMode, setInlineScanMode] = useState<'qr' | 'ocr'>('qr');
+  // ---------------------------------------------------------------------------
+  // Data State for Tab 2 (Transfers) & Tab 3 (Maintenance)
+  // ---------------------------------------------------------------------------
+  const [inTransitFleet, setInTransitFleet] = useState<InTransitFleetItem[]>([]);
+  const [isLoadingInTransit, setIsLoadingInTransit] = useState<boolean>(false);
+  const [operatingFleetAssetId, setOperatingFleetAssetId] = useState<string | null>(null);
+  const [fleetOperationType, setFleetOperationType] = useState<'receive' | 'cancel' | null>(null);
 
-  // Ref to invoke handleOpenPassport safely from callbacks
-  const handleOpenPassportRef = useRef<((qrCode: string, fallbackItem?: unknown) => Promise<void>) | null>(null);
+  const [incomingTransfers, setIncomingTransfers] = useState<PendingTransferItem[]>([]);
+  const [receivingTransferId, setReceivingTransferId] = useState<string | null>(null);
 
-  // Fast Persistent Tesseract Worker + Throttled Cloud Fallback (Laser-Strip OCR for Inline Viewfinder)
-  const {
-    lastRawOcrText: inlineLastRawOcrText,
-    ocrMatchedTag: inlineOcrMatchedTag,
-    resetOcrStatus: resetInlineOcrStatus,
-  } = useLaserStripOcr({
-    videoRef: inlineVideoRef,
-    isActive: isInlineScannerOpen,
-    isPaused: inlineScanMode !== 'ocr' || isPassportOpen || inlineTargetLocked,
-    organizationId: currentOrganization?.id || user?.organizationId,
-    onTagDetected: async (tag, digits) => {
-      // a) Audio beep + haptic pulse handled in hook
-      // b) Immediately set manual search input state below camera
-      setPassportLookupInput(tag);
-      setInlineCandidateTag(tag);
-      setInlineTargetLocked(true);
+  const [siteRequestsInbox, setSiteRequestsInbox] = useState<SiteToolRequestItem[]>([]);
+  const [availableAssetsForInbox, setAvailableAssetsForInbox] = useState<SuggestedToolAsset[]>([]);
+  const [isLoadingInbox, setIsLoadingInbox] = useState<boolean>(false);
+  const [selectedAssetForRequest, setSelectedAssetForRequest] = useState<Record<string, string>>({});
+  const [isResolvingRequestId, setIsResolvingRequestId] = useState<string | null>(null);
+  const [rejectingSiteRequestId, setRejectingSiteRequestId] = useState<string | null>(null);
+  const [rejectReasonInput, setRejectReasonInput] = useState<string>('');
+  const [inboxFeedback, setInboxFeedback] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
-      // c) Immediately invoke the exact same function wired to the "אתר →" button with fallback
-      if (handleOpenPassportRef.current) {
-        try {
-          await handleOpenPassportRef.current(tag);
-        } catch (err) {
-          console.warn('[InlineOCR] Search with primary tag failed, trying digits fallback:', err);
-          await handleOpenPassportRef.current(digits);
-        }
-      }
-    },
-  });
-
-  const toggleInlineTorch = useCallback(async (track: MediaStreamTrack, enabled: boolean) => {
-    try {
-      await track.applyConstraints({
-        advanced: [{ torch: enabled } as unknown as MediaTrackConstraintSet],
-      });
-      setInlineTorchEnabled(enabled);
-    } catch {
-      setInlineTorchSupported(false);
-    }
-  }, []);
-
-  const handleToggleInlineTorch = useCallback(() => {
-    if (!inlineStreamRef.current) return;
-    const track = inlineStreamRef.current.getVideoTracks()[0];
-    if (track) {
-      void toggleInlineTorch(track, !inlineTorchEnabled);
-    }
-  }, [inlineTorchEnabled, toggleInlineTorch]);
-
-  const stopInlineCamera = useCallback(async () => {
-    if (inlineWatchdogIntervalRef.current) {
-      clearInterval(inlineWatchdogIntervalRef.current);
-      inlineWatchdogIntervalRef.current = null;
-    }
-    if (inlineStreamRef.current) {
-      try {
-        inlineStreamRef.current.getTracks().forEach((t) => t.stop());
-      } catch (err) {
-        console.warn('Error stopping inline stream:', err);
-      } finally {
-        inlineStreamRef.current = null;
-      }
-    }
-    if (inlineVideoRef.current) {
-      inlineVideoRef.current.srcObject = null;
-    }
-    setInlineTorchEnabled(false);
-  }, []);
-
-  const startInlineCamera = useCallback(
-    async (requestedFacing?: 'environment' | 'user') => {
-      setInlineCameraError(null);
-
-      if (
-        inlineStreamRef.current &&
-        inlineStreamRef.current.getVideoTracks().some((t) => t.readyState === 'live')
-      ) {
-        if (inlineVideoRef.current) {
-          if (inlineVideoRef.current.srcObject !== inlineStreamRef.current) {
-            inlineVideoRef.current.srcObject = inlineStreamRef.current;
-          }
-          try {
-            await inlineVideoRef.current.play();
-          } catch {
-            // ignore
-          }
-        }
-        inlineIsPausedRef.current = false;
-        return;
-      }
-
-      const activeFacing = requestedFacing || inlineFacingMode;
-      let stream: MediaStream | null = null;
-
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { ideal: activeFacing },
-            width: { ideal: 1920, min: 640 },
-            height: { ideal: 1080, min: 480 },
-          },
-          audio: false,
-        });
-      } catch {
-        try {
-          stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: activeFacing },
-            audio: false,
-          });
-        } catch {
-          try {
-            stream = await navigator.mediaDevices.getUserMedia({
-              video: true,
-              audio: false,
-            });
-          } catch (e3) {
-            console.error('[InlineCamera] getUserMedia failed completely:', e3);
-          }
-        }
-      }
-
-      if (!stream) {
-        setInlineCameraError('לא ניתן לגשת למצלמת המכשיר. לחץ על המסך לחידוש או אשר גישה.');
-        return;
-      }
-
-      inlineStreamRef.current = stream;
-      if (inlineVideoRef.current) {
-        inlineVideoRef.current.srcObject = stream;
-        try {
-          await inlineVideoRef.current.play();
-        } catch (playErr) {
-          console.warn('[InlineCamera] video.play() error:', playErr);
-        }
-      }
-
-      inlineIsPausedRef.current = false;
-
-      const track = stream.getVideoTracks()[0];
-      if (track) {
-        const getCaps = (track as unknown as { getCapabilities?: () => { torch?: boolean } }).getCapabilities;
-        if (typeof getCaps === 'function') {
-          const caps = getCaps.call(track);
-          setInlineTorchSupported(Boolean(caps?.torch));
-        } else {
-          setInlineTorchSupported(false);
-        }
-      }
-    },
-    [inlineFacingMode]
-  );
-
-  const handleInlineTapToWake = useCallback(async () => {
-    inlineIsPausedRef.current = false;
-    setInlineCameraError(null);
-    const noStream = !inlineStreamRef.current;
-    const tracksEnded = inlineStreamRef.current?.getVideoTracks().some((t) => t.readyState === 'ended');
-
-    if (noStream || tracksEnded) {
-      await startInlineCamera();
-    } else if (inlineVideoRef.current) {
-      try {
-        await inlineVideoRef.current.play();
-      } catch {
-        await startInlineCamera();
-      }
-    }
-  }, [startInlineCamera]);
-
-  const handleFlipInlineCamera = useCallback(async () => {
-    const nextFacing = inlineFacingMode === 'environment' ? 'user' : 'environment';
-    setInlineFacingMode(nextFacing);
-    await stopInlineCamera();
-    await startInlineCamera(nextFacing);
-  }, [inlineFacingMode, stopInlineCamera, startInlineCamera]);
-
-  const claimInlineDetection = useCallback(
-    async (detectedTag: string) => {
-      if (inlineIsDebounceLockedRef.current || inlineIsPausedRef.current) return;
-
-      inlineIsDebounceLockedRef.current = true;
-      inlineIsPausedRef.current = true;
-      setInlineTargetLocked(true);
-      setInlineCandidateTag(detectedTag);
-
-      triggerOcrHaptic([60, 40, 60]);
-      playOcrBeep(880, 140);
-
-      try {
-        const activeOrgId = currentOrganization?.id || user?.organizationId;
-        let matched = await snapTagToAsset(detectedTag, activeOrgId, selectedWarehouseId !== 'all' ? selectedWarehouseId : undefined);
-
-        const norm = normalizeFieldTag(detectedTag);
-        if (!matched && norm.success && norm.rawDigits) {
-          matched =
-            (await snapTagToAsset(`ZR-${norm.rawDigits}`, activeOrgId, selectedWarehouseId !== 'all' ? selectedWarehouseId : undefined)) ||
-            (await snapTagToAsset(norm.rawDigits, activeOrgId, selectedWarehouseId !== 'all' ? selectedWarehouseId : undefined));
-        }
-
-        const canonicalTag = norm.success && norm.tag ? norm.tag : (detectedTag.startsWith('ZR-') ? detectedTag : `ZR-${detectedTag}`);
-        const rawDigits = norm.success && norm.rawDigits ? norm.rawDigits : detectedTag;
-
-        const targetAsset: ScannedAssetDetails = matched || {
-          id: detectedTag,
-          qrCode: canonicalTag,
-          tagNumber: canonicalTag,
-          toolName: `כלי ${canonicalTag}`,
-          brand: 'צי כלי עבודה',
-          modelNumber: rawDigits,
-          status: 'available',
-          condition: 'good',
-          currentAssignedWorker: null,
-          currentWarehouseId: selectedWarehouseId !== 'all' ? selectedWarehouseId : 'wh-main-01',
-          warehouseName: data?.warehouse?.name || 'מחסן ראשי',
-          warehouseCode: 'WH',
-          version: 1,
-        };
-
-        setTimeout(() => {
-          setPassportAsset(targetAsset);
-          setIsPassportOpen(true);
-          inlineIsDebounceLockedRef.current = false;
-          setInlineTargetLocked(false);
-          setInlineCandidateTag(null);
-        }, 220);
-      } catch (err) {
-        console.warn('Error in inline detection asset snap:', err);
-        inlineIsDebounceLockedRef.current = false;
-        setInlineTargetLocked(false);
-        setInlineCandidateTag(null);
-        inlineIsPausedRef.current = false;
-      }
-    },
-    [currentOrganization, user, selectedWarehouseId, data]
-  );
-
-  /**
-   * ENGINE A: 60fps Continuous Barcode & QR Detection Loop for Inline Scanner
-   */
-  useEffect(() => {
-    if (!isInlineScannerOpen || isPassportOpen) return;
-
-    let animId: number;
-    let active = true;
-
-    const qrScanLoop = () => {
-      if (!active) return;
-
-      if (
-        !inlineIsPausedRef.current &&
-        !inlineIsDebounceLockedRef.current &&
-        !inlineIsBarcodeBusyRef.current &&
-        !isPassportOpen &&
-        inlineVideoRef.current &&
-        inlineVideoRef.current.readyState >= 2
-      ) {
-        inlineIsBarcodeBusyRef.current = true;
-        detectBarcodeOrQr(inlineVideoRef.current)
-          .then(async (barcodeResult) => {
-            if (
-              barcodeResult &&
-              barcodeResult.rawValue &&
-              !inlineIsDebounceLockedRef.current &&
-              !inlineIsPausedRef.current &&
-              !isPassportOpen
-            ) {
-              const cleanTag = extractTagFromBarcodePayload(barcodeResult.rawValue);
-              if (cleanTag) {
-                setPassportLookupInput(cleanTag);
-                await claimInlineDetection(cleanTag);
-              }
-            }
-          })
-          .catch(() => {})
-          .finally(() => {
-            inlineIsBarcodeBusyRef.current = false;
-          });
-      }
-
-      animId = requestAnimationFrame(qrScanLoop);
-    };
-
-    animId = requestAnimationFrame(qrScanLoop);
-
-    return () => {
-      active = false;
-      cancelAnimationFrame(animId);
-    };
-  }, [isInlineScannerOpen, isPassportOpen, claimInlineDetection]);
-
-  // Stream Watchdog: Revives dead or ended camera stream every 1000ms
-  useEffect(() => {
-    if (!isInlineScannerOpen) {
-      if (inlineWatchdogIntervalRef.current) {
-        clearInterval(inlineWatchdogIntervalRef.current);
-        inlineWatchdogIntervalRef.current = null;
-      }
-      return;
-    }
-
-    inlineWatchdogIntervalRef.current = setInterval(() => {
-      if (!isInlineScannerOpen) return;
-
-      const noStream = !inlineStreamRef.current;
-      const tracksEnded = inlineStreamRef.current?.getVideoTracks().some((t) => t.readyState === 'ended');
-      const videoPaused =
-        inlineVideoRef.current &&
-        inlineVideoRef.current.paused &&
-        !inlineIsPausedRef.current &&
-        !isPassportOpen;
-
-      if (noStream || tracksEnded) {
-        console.warn('[Watchdog] Inline camera stream ended or missing, reviving...');
-        void startInlineCamera();
-      } else if (videoPaused) {
-        void inlineVideoRef.current?.play().catch(() => {});
-      }
-    }, 1000);
-
-    return () => {
-      if (inlineWatchdogIntervalRef.current) {
-        clearInterval(inlineWatchdogIntervalRef.current);
-        inlineWatchdogIntervalRef.current = null;
-      }
-    };
-  }, [isInlineScannerOpen, isPassportOpen, startInlineCamera]);
-
-  // Resume stream immediately when ToolPassportModal closes
-  useEffect(() => {
-    if (!isPassportOpen && isInlineScannerOpen) {
-      inlineIsPausedRef.current = false;
-      inlineIsDebounceLockedRef.current = false;
-      setInlineTargetLocked(false);
-      setInlineCandidateTag(null);
-      resetInlineOcrStatus();
-      if (
-        inlineVideoRef.current &&
-        inlineStreamRef.current &&
-        inlineStreamRef.current.getVideoTracks().some((t) => t.readyState === 'live')
-      ) {
-        inlineVideoRef.current.play().catch(() => {
-          void startInlineCamera();
-        });
-      } else {
-        void startInlineCamera();
-      }
-    }
-  }, [isPassportOpen, isInlineScannerOpen, startInlineCamera, resetInlineOcrStatus]);
-
-  // Pending Inter-site Transfer Requests (Chief Operations / Operations Manager Approval)
   const [pendingTransfers, setPendingTransfers] = useState<PendingTransferItem[]>([]);
   const [isLoadingTransfers, setIsLoadingTransfers] = useState<boolean>(false);
   const [decidingTransferId, setDecidingTransferId] = useState<string | null>(null);
@@ -596,8 +156,106 @@ export default function WarehouseDashboardView({
     type: 'success' | 'error';
   } | null>(null);
 
-  // Load pending transfer requests for the organization
-  const loadPendingTransfers = React.useCallback(async () => {
+  const [siteIncomingShipments, setSiteIncomingShipments] = useState<SiteToolRequestItem[]>([]);
+  const [mySiteRequests, setMySiteRequests] = useState<SiteToolRequestItem[]>([]);
+  const [isLoadingSiteData, setIsLoadingSiteData] = useState<boolean>(false);
+  const [receivingSiteRequestId, setReceivingSiteRequestId] = useState<string | null>(null);
+  const [siteActionFeedback, setSiteActionFeedback] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  const [maintenanceAssets, setMaintenanceAssets] = useState<MaintenanceAssetItem[]>([]);
+  const [isLoadingMaintenance, setIsLoadingMaintenance] = useState<boolean>(false);
+
+  // ---------------------------------------------------------------------------
+  // Data Loaders
+  // ---------------------------------------------------------------------------
+  const handleWarehouseChange = useCallback(
+    async (newId: string, forceRefresh?: boolean) => {
+      setSelectedWarehouseId(newId);
+      setIsLoadingWarehouse(true);
+      try {
+        const activeOrgId = currentOrganization?.id || user?.organizationId;
+        const updated = await getStorekeeperOperations(newId, activeOrgId, forceRefresh);
+        setData(updated);
+        if (typeof window !== 'undefined') {
+          const url = new URL(window.location.href);
+          if (newId === 'all') {
+            url.searchParams.delete('warehouse');
+          } else {
+            url.searchParams.set('warehouse', newId);
+          }
+          window.history.replaceState(null, '', url.toString());
+        }
+      } catch (err) {
+        console.warn('Error loading warehouse operations:', err);
+      } finally {
+        setIsLoadingWarehouse(false);
+      }
+    },
+    [currentOrganization, user]
+  );
+
+  const loadInTransitFleet = useCallback(async () => {
+    setIsLoadingInTransit(true);
+    try {
+      const activeOrgId = currentOrganization?.id || user?.organizationId;
+      const list = await getInTransitFleetAction(activeOrgId);
+      setInTransitFleet(list);
+    } catch (err) {
+      console.warn('Error loading in-transit fleet:', err);
+    } finally {
+      setIsLoadingInTransit(false);
+    }
+  }, [currentOrganization, user]);
+
+  const loadMaintenanceAssets = useCallback(async () => {
+    setIsLoadingMaintenance(true);
+    try {
+      const activeOrgId = currentOrganization?.id || user?.organizationId;
+      const list = await getMaintenanceAssetsAction(activeOrgId);
+      setMaintenanceAssets(list);
+    } catch (err) {
+      console.warn('Error loading maintenance assets:', err);
+    } finally {
+      setIsLoadingMaintenance(false);
+    }
+  }, [currentOrganization, user]);
+
+  const loadChiefInbox = useCallback(async () => {
+    setIsLoadingInbox(true);
+    try {
+      const res = await getChiefStorekeeperInboxAction();
+      setSiteRequestsInbox(res.pendingRequests);
+      setAvailableAssetsForInbox(res.availableAssets);
+    } catch (err) {
+      console.warn('Error loading chief inbox:', err);
+    } finally {
+      setIsLoadingInbox(false);
+    }
+  }, []);
+
+  const loadSiteStorekeeperData = useCallback(async (whId: string) => {
+    setIsLoadingSiteData(true);
+    try {
+      const res = await getSiteStorekeeperDashboardAction(whId);
+      setSiteIncomingShipments(res.incomingShipments);
+      setMySiteRequests(res.myRequests);
+    } catch (err) {
+      console.warn('Error loading site storekeeper data:', err);
+    } finally {
+      setIsLoadingSiteData(false);
+    }
+  }, []);
+
+  const loadIncomingTransfers = useCallback(async (whId: string) => {
+    try {
+      const list = await getIncomingInTransitTransfersAction(whId);
+      setIncomingTransfers(list);
+    } catch (err) {
+      console.warn('Error loading incoming transfers:', err);
+    }
+  }, []);
+
+  const loadPendingTransfers = useCallback(async () => {
     setIsLoadingTransfers(true);
     try {
       const list = await getPendingTransfersAction();
@@ -609,11 +267,298 @@ export default function WarehouseDashboardView({
     }
   }, []);
 
-  React.useEffect(() => {
+  // Initial and reactive effects
+  useEffect(() => {
+    void loadInTransitFleet();
+    void loadMaintenanceAssets();
     if (isChiefOperations || isGeneralManager) {
+      void loadChiefInbox();
       void loadPendingTransfers();
     }
-  }, [isChiefOperations, isGeneralManager, loadPendingTransfers]);
+    void loadSiteStorekeeperData(selectedWarehouseId);
+    void loadIncomingTransfers(selectedWarehouseId);
+  }, [
+    isChiefOperations,
+    isGeneralManager,
+    selectedWarehouseId,
+    loadChiefInbox,
+    loadPendingTransfers,
+    loadSiteStorekeeperData,
+    loadIncomingTransfers,
+    loadInTransitFleet,
+    loadMaintenanceAssets,
+  ]);
+
+  // Sync warehouse for storekeeper if scoped
+  useEffect(() => {
+    if (
+      isStorekeeper &&
+      assignedWarehouseId &&
+      assignedWarehouseId !== selectedWarehouseId
+    ) {
+      const timer = setTimeout(() => {
+        void handleWarehouseChange(assignedWarehouseId);
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+  }, [isStorekeeper, assignedWarehouseId, selectedWarehouseId, handleWarehouseChange]);
+
+  // Open Tool Passport Modal
+  const handleOpenPassport = useCallback(
+    async (qrCode: string, fallbackItem?: unknown) => {
+      const clean = qrCode?.trim();
+      if (!clean && !fallbackItem) return;
+
+      const fb = (fallbackItem && typeof fallbackItem === 'object' ? fallbackItem : {}) as Record<string, unknown>;
+
+      if (fallbackItem) {
+        const itemObj: ScannedAssetDetails = {
+          id: String(fb.assetId || fb.id || ''),
+          qrCode: clean || String(fb.qrCode || fb.tag_number || ''),
+          name: String(fb.toolName || fb.name || 'כלי עבודה'),
+          toolName: String(fb.toolName || fb.name || 'כלי עבודה'),
+          brand: String(fb.brand || 'MAGMA'),
+          modelNumber: fb.modelNumber ? String(fb.modelNumber) : fb.model ? String(fb.model) : null,
+          status: (fb.status as 'available' | 'checked_out' | 'maintenance' | 'retired') || 'available',
+          condition: (fb.condition as 'excellent' | 'good' | 'needs_repair' | 'retired') || 'good',
+          warehouseName: String(fb.warehouseName || 'מתקן כללי'),
+          warehouseCode: 'WH',
+          currentWarehouseId: String(fb.currentWarehouseId || fb.warehouseId || selectedWarehouseId || ''),
+          currentAssignedWorker: fb.workerName
+            ? String(fb.workerName)
+            : fb.currentAssignedWorker
+            ? String(fb.currentAssignedWorker)
+            : null,
+          version: 1,
+        };
+        setPassportAsset(itemObj);
+        setIsPassportOpen(true);
+      }
+
+      try {
+        const activeOrgId = currentOrganization?.id || user?.organizationId;
+        let asset = await getAssetDetailsByQr(clean || String(fb.qrCode || ''), undefined, activeOrgId);
+
+        if (!asset && clean) {
+          const norm = normalizeFieldTag(clean);
+          if (norm.success && norm.rawDigits) {
+            const zrTag = `ZR-${norm.rawDigits}`;
+            if (clean !== zrTag) {
+              asset = await getAssetDetailsByQr(zrTag, undefined, activeOrgId);
+            }
+            if (!asset && clean !== norm.rawDigits) {
+              asset = await getAssetDetailsByQr(norm.rawDigits, undefined, activeOrgId);
+            }
+          }
+        }
+
+        if (asset) {
+          setPassportAsset(asset);
+          setIsPassportOpen(true);
+        }
+      } catch (err) {
+        console.warn('Error fetching tool passport:', err);
+      }
+    },
+    [currentOrganization, user, selectedWarehouseId]
+  );
+
+  // ---------------------------------------------------------------------------
+  // Action Handlers for Tab 2 (Transfers)
+  // ---------------------------------------------------------------------------
+  const handleConfirmArrivalFleet = async (item: InTransitFleetItem) => {
+    setOperatingFleetAssetId(item.assetId);
+    setFleetOperationType('receive');
+
+    try {
+      const res = await completeTransferReceptionAction({
+        assetId: item.assetId,
+        qrCode: item.qrCode,
+        targetWarehouseId: item.destinationWarehouseId,
+        notes: `אישור הגעה וקליטת ציוד ${item.toolName} (${item.qrCode})`,
+        requestId: item.requestId,
+      });
+
+      if (!res.success) {
+        alert(`שגיאה בקליטת הציוד: ${res.error || 'שגיאה לא ידועה'}`);
+        return;
+      }
+
+      setInTransitFleet((prev) => prev.filter((f) => f.assetId !== item.assetId && f.id !== item.id));
+
+      if (selectedWarehouseId === item.destinationWarehouseId || selectedWarehouseId === 'all') {
+        setData((prev) => ({
+          ...prev,
+          availableCount: (prev.availableCount || 0) + 1,
+        }));
+      }
+
+      router.refresh();
+      await loadInTransitFleet();
+      await loadIncomingTransfers(selectedWarehouseId);
+      await handleWarehouseChange(selectedWarehouseId, true);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'שגיאה לא ידועה';
+      alert(`שגיאה בקליטת הציוד: ${msg}`);
+      await loadInTransitFleet();
+    } finally {
+      setOperatingFleetAssetId(null);
+      setFleetOperationType(null);
+    }
+  };
+
+  const handleCancelTransferFleet = async (item: InTransitFleetItem) => {
+    setOperatingFleetAssetId(item.assetId);
+    setFleetOperationType('cancel');
+
+    try {
+      const res = await cancelTransferRollbackAction({
+        assetId: item.assetId,
+        qrCode: item.qrCode,
+        sourceWarehouseId: item.originWarehouseId,
+        notes: `ביטול שינוע והחזרת כלי ${item.toolName} (${item.qrCode}) למחסן מקור`,
+        requestId: item.requestId,
+      });
+
+      if (!res.success) {
+        alert(`שגיאה בביטול השינוע: ${res.error || 'שגיאה לא ידועה'}`);
+        return;
+      }
+
+      setInTransitFleet((prev) => prev.filter((f) => f.assetId !== item.assetId && f.id !== item.id));
+
+      if (selectedWarehouseId === item.originWarehouseId || selectedWarehouseId === 'all') {
+        setData((prev) => ({
+          ...prev,
+          availableCount: (prev.availableCount || 0) + 1,
+        }));
+      }
+
+      router.refresh();
+      await loadInTransitFleet();
+      await loadIncomingTransfers(selectedWarehouseId);
+      await handleWarehouseChange(selectedWarehouseId, true);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'שגיאה לא ידועה';
+      alert(`שגיאה בביטול השינוע: ${msg}`);
+      await loadInTransitFleet();
+    } finally {
+      setOperatingFleetAssetId(null);
+      setFleetOperationType(null);
+    }
+  };
+
+  const handleCompleteReception = async (req: PendingTransferItem) => {
+    setReceivingTransferId(req.id);
+    try {
+      const res = await completeTransferReceptionAction({
+        assetId: req.assetId,
+        qrCode: req.qrCode,
+        tagNumber: req.tagNumber || undefined,
+        targetWarehouseId: req.targetWarehouseId,
+        requestId: req.id,
+      });
+      if (!res.success) {
+        alert(`שגיאה בביצוע הפעולה: ${res.error || 'שגיאה בקליטת הציוד'}`);
+        return;
+      }
+
+      setIncomingTransfers((prev) => prev.filter((item) => item.id !== req.id));
+      if (selectedWarehouseId === req.targetWarehouseId || selectedWarehouseId === 'all') {
+        setData((prev) => ({
+          ...prev,
+          availableCount: (prev.availableCount || 0) + 1,
+        }));
+      }
+
+      router.refresh();
+      await handleWarehouseChange(selectedWarehouseId, true);
+      await loadIncomingTransfers(selectedWarehouseId);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'שגיאה בקליטת הציוד';
+      alert(`שגיאה בביצוע הפעולה: ${msg}`);
+    } finally {
+      setReceivingTransferId(null);
+    }
+  };
+
+  const handleResolveSiteRequest = async (requestId: string, decision: 'APPROVE' | 'REJECT') => {
+    setIsResolvingRequestId(requestId);
+    setInboxFeedback(null);
+    try {
+      let assignedAssetId: string | undefined = undefined;
+      let sourceWarehouseId: string | undefined = undefined;
+
+      if (decision === 'APPROVE') {
+        assignedAssetId = selectedAssetForRequest[requestId];
+        if (!assignedAssetId) {
+          setInboxFeedback({ text: 'יש לבחור כלי עבודה זמין לשינוע לאתר מהרשימה', type: 'error' });
+          setIsResolvingRequestId(null);
+          return;
+        }
+        const asset = availableAssetsForInbox.find((a) => a.id === assignedAssetId);
+        sourceWarehouseId = asset?.currentWarehouseId || 'wh-central';
+      }
+
+      const res = await resolveToolRequestAction({
+        requestId,
+        decision,
+        assignedAssetId,
+        sourceWarehouseId,
+        rejectionReason: decision === 'REJECT' ? rejectReasonInput : undefined,
+      });
+
+      if (res.success) {
+        setInboxFeedback({ text: res.message || 'הבקשה עודכנה בהצלחה', type: 'success' });
+        setRejectingSiteRequestId(null);
+        setRejectReasonInput('');
+        setSiteRequestsInbox((prev) => prev.filter((r) => r.id !== requestId));
+        router.refresh();
+        await loadChiefInbox();
+        if (selectedWarehouseId !== 'all') {
+          await loadSiteStorekeeperData(selectedWarehouseId);
+        }
+      } else {
+        alert(res.error || 'שגיאה בעדכון הבקשה');
+        setInboxFeedback({ text: res.error || 'שגיאה בעדכון הבקשה', type: 'error' });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'שגיאת תקשורת';
+      alert(msg);
+      setInboxFeedback({ text: msg, type: 'error' });
+    } finally {
+      setIsResolvingRequestId(null);
+    }
+  };
+
+  const handleConfirmSiteReception = async (req: SiteToolRequestItem) => {
+    if (!req.assignedAssetId) return;
+    setReceivingSiteRequestId(req.id);
+    setSiteActionFeedback(null);
+    try {
+      const res = await confirmToolReceptionAction(
+        req.id,
+        req.assignedAssetId,
+        selectedWarehouseId !== 'all' ? selectedWarehouseId : (assignedWarehouseId || '')
+      );
+      if (res.success) {
+        setSiteActionFeedback({ text: res.message || 'הכלי נקלט בהצלחה במחסן האתר!', type: 'success' });
+        setSiteIncomingShipments((prev) => prev.filter((s) => s.id !== req.id));
+        router.refresh();
+        await loadSiteStorekeeperData(selectedWarehouseId);
+        await handleWarehouseChange(selectedWarehouseId);
+      } else {
+        alert(res.error || 'שגיאה בקליטת הכלי');
+        setSiteActionFeedback({ text: res.error || 'שגיאה בקליטת הכלי', type: 'error' });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'שגיאת תקשורת';
+      alert(msg);
+      setSiteActionFeedback({ text: msg, type: 'error' });
+    } finally {
+      setReceivingSiteRequestId(null);
+    }
+  };
 
   const handleApproveTransfer = async (requestId: string) => {
     setDecidingTransferId(requestId);
@@ -676,1178 +621,66 @@ export default function WarehouseDashboardView({
     }
   };
 
-  // =========================================================================
-  // TWO-TIER LOGISTICS STATE: Site Storekeeper vs. Chief Operations Manager
-  // =========================================================================
+  // ---------------------------------------------------------------------------
+  // Action Handlers for Modals
+  // ---------------------------------------------------------------------------
+  const handleQuickCheckoutSuccess = (checkedOutAsset: {
+    id: string;
+    toolName: string;
+    brand: string;
+    modelNumber: string | null;
+    qrCode: string;
+    workerName: string;
+    workerPhone: string | null;
+    expectedReturnDate: string | null;
+    checkoutNotes: string | null;
+  }) => {
+    const newLoan: StorekeeperActiveLoan = {
+      assetId: checkedOutAsset.id,
+      toolName: checkedOutAsset.toolName,
+      brand: checkedOutAsset.brand,
+      modelNumber: checkedOutAsset.modelNumber || null,
+      qrCode: checkedOutAsset.qrCode || '',
+      workerName: checkedOutAsset.workerName,
+      workerPhone: checkedOutAsset.workerPhone || null,
+      expectedReturnDate: checkedOutAsset.expectedReturnDate || null,
+      checkedOutAt: new Date().toISOString(),
+      checkoutNote: checkedOutAsset.checkoutNotes || null,
+      daysActive: 0,
+    };
 
-  // 1. Chief Storekeeper Inbox State
-  const [siteRequestsInbox, setSiteRequestsInbox] = useState<SiteToolRequestItem[]>([]);
-  const [availableAssetsForInbox, setAvailableAssetsForInbox] = useState<SuggestedToolAsset[]>([]);
-  const [isLoadingInbox, setIsLoadingInbox] = useState<boolean>(false);
-  const [selectedAssetForRequest, setSelectedAssetForRequest] = useState<Record<string, string>>({});
-  const [isResolvingRequestId, setIsResolvingRequestId] = useState<string | null>(null);
-  const [rejectingSiteRequestId, setRejectingSiteRequestId] = useState<string | null>(null);
-  const [rejectReasonInput, setRejectReasonInput] = useState<string>('');
-  const [inboxFeedback, setInboxFeedback] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+    setData((prev) => ({
+      ...prev,
+      availableCount: Math.max(0, (prev.availableCount || 1) - 1),
+      checkedOutCount: (prev.checkedOutCount || 0) + 1,
+      activeLoans: prev.activeLoans
+        ? [newLoan, ...prev.activeLoans.filter((l) => l.assetId !== checkedOutAsset.id)]
+        : [newLoan],
+      returnsDueToday: (prev.returnsDueToday || []).filter((r) => r.assetId !== checkedOutAsset.id),
+      overdueAssets: (prev.overdueAssets || []).filter((o) => o.assetId !== checkedOutAsset.id),
+    }));
 
-  // 2. Site Storekeeper Dashboard State
-  const [siteIncomingShipments, setSiteIncomingShipments] = useState<SiteToolRequestItem[]>([]);
-  const [mySiteRequests, setMySiteRequests] = useState<SiteToolRequestItem[]>([]);
-  const [isLoadingSiteData, setIsLoadingSiteData] = useState<boolean>(false);
-  const [receivingSiteRequestId, setReceivingSiteRequestId] = useState<string | null>(null);
-  const [siteActionFeedback, setSiteActionFeedback] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
-
-  // 3. Site Tool Request Modal State ("בקשת ציוד לאתר")
-  const [isSiteRequestModalOpen, setIsSiteRequestModalOpen] = useState<boolean>(false);
-  const [requestToolDesc, setRequestToolDesc] = useState<string>('');
-  const [requestQuantity, setRequestQuantity] = useState<number>(1);
-  const [requestUrgency, setRequestUrgency] = useState<'NORMAL' | 'URGENT' | 'CRITICAL'>('NORMAL');
-  const [requestReason, setRequestReason] = useState<string>('');
-  const [isSubmittingSiteRequest, setIsSubmittingSiteRequest] = useState<boolean>(false);
-  const [siteRequestFeedback, setSiteRequestFeedback] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
-
-  // Load Chief Storekeeper Inbox
-  const loadChiefInbox = React.useCallback(async () => {
-    setIsLoadingInbox(true);
-    try {
-      const res = await getChiefStorekeeperInboxAction();
-      setSiteRequestsInbox(res.pendingRequests);
-      setAvailableAssetsForInbox(res.availableAssets);
-    } catch (err) {
-      console.warn('Error loading chief inbox:', err);
-    } finally {
-      setIsLoadingInbox(false);
-    }
-  }, []);
-
-  // Load Site Storekeeper Data
-  const loadSiteStorekeeperData = React.useCallback(async (whId: string) => {
-    setIsLoadingSiteData(true);
-    try {
-      const res = await getSiteStorekeeperDashboardAction(whId);
-      setSiteIncomingShipments(res.incomingShipments);
-      setMySiteRequests(res.myRequests);
-    } catch (err) {
-      console.warn('Error loading site storekeeper data:', err);
-    } finally {
-      setIsLoadingSiteData(false);
-    }
-  }, []);
-
-  // =========================================================================
-  // CHIEF OPERATIONS: IN-TRANSIT FLEET & CENTRAL MAINTENANCE
-  // =========================================================================
-  const [inTransitFleet, setInTransitFleet] = useState<InTransitFleetItem[]>([]);
-  const [isLoadingInTransit, setIsLoadingInTransit] = useState<boolean>(false);
-  const [operatingFleetAssetId, setOperatingFleetAssetId] = useState<string | null>(null);
-  const [fleetOperationType, setFleetOperationType] = useState<'receive' | 'cancel' | null>(null);
-
-  const [maintenanceAssets, setMaintenanceAssets] = useState<MaintenanceAssetItem[]>([]);
-  const [isLoadingMaintenance, setIsLoadingMaintenance] = useState<boolean>(false);
-
-  // Maintenance Return-to-Stock Modal State
-  const [repairModalAsset, setRepairModalAsset] = useState<MaintenanceAssetItem | null>(null);
-  const [repairCondition, setRepairCondition] = useState<'excellent' | 'good'>('good');
-  const [repairReceivingWhId, setRepairReceivingWhId] = useState<string>('');
-  const [repairNotes, setRepairNotes] = useState<string>('');
-  const [isSubmittingRepair, setIsSubmittingRepair] = useState<boolean>(false);
-  const [repairFeedback, setRepairFeedback] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
-
-  // Maintenance Scrap & Retire Modal State
-  const [retireModalAsset, setRetireModalAsset] = useState<MaintenanceAssetItem | null>(null);
-  const [retireReason, setRetireReason] = useState<string>('');
-  const [isSubmittingRetire, setIsSubmittingRetire] = useState<boolean>(false);
-  const [retireFeedback, setRetireFeedback] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
-
-  const loadInTransitFleet = React.useCallback(async () => {
-    setIsLoadingInTransit(true);
-    try {
-      const activeOrgId = currentOrganization?.id || user?.organizationId;
-      const list = await getInTransitFleetAction(activeOrgId);
-      setInTransitFleet(list);
-    } catch (err) {
-      console.warn('Error loading in-transit fleet:', err);
-    } finally {
-      setIsLoadingInTransit(false);
-    }
-  }, [currentOrganization, user]);
-
-  const loadMaintenanceAssets = React.useCallback(async () => {
-    setIsLoadingMaintenance(true);
-    try {
-      const activeOrgId = currentOrganization?.id || user?.organizationId;
-      const list = await getMaintenanceAssetsAction(activeOrgId);
-      setMaintenanceAssets(list);
-    } catch (err) {
-      console.warn('Error loading maintenance assets:', err);
-    } finally {
-      setIsLoadingMaintenance(false);
-    }
-  }, [currentOrganization, user]);
-
-  // Sync data on load and role/warehouse change
-  React.useEffect(() => {
-    void loadInTransitFleet();
-    void loadMaintenanceAssets();
-    if (isChiefOperations || isGeneralManager) {
-      void loadChiefInbox();
-    }
-    void loadSiteStorekeeperData(selectedWarehouseId);
-  }, [
-    isChiefOperations,
-    isGeneralManager,
-    selectedWarehouseId,
-    loadChiefInbox,
-    loadSiteStorekeeperData,
-    loadInTransitFleet,
-    loadMaintenanceAssets,
-  ]);
-
-  const handleOpenRepairModal = (asset: MaintenanceAssetItem) => {
-    setRepairModalAsset(asset);
-    setRepairCondition('good');
-    const defaultWh =
-      asset.currentWarehouseId && asset.currentWarehouseId !== 'all'
-        ? asset.currentWarehouseId
-        : selectedWarehouseId !== 'all'
-        ? selectedWarehouseId
-        : assignedWarehouseId || (warehouses.find((w) => w.id !== 'all')?.id || '');
-    setRepairReceivingWhId(defaultWh);
-    setRepairNotes('');
-    setRepairFeedback(null);
+    setAvailableAssetsForInbox((prev) => prev.filter((a) => a.id !== checkedOutAsset.id));
+    router.refresh();
+    void handleWarehouseChange(selectedWarehouseId, true);
   };
 
-  const handleOpenRetireModal = (asset: MaintenanceAssetItem) => {
-    setRetireModalAsset(asset);
-    setRetireReason('');
-    setRetireFeedback(null);
-  };
-
-  const handleReturnFromMaintenanceSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!repairModalAsset) return;
-    if (!repairReceivingWhId) {
-      setRepairFeedback({ text: 'אנא בחר מחסן לקליטת הכלי מהתיקון', type: 'error' });
-      return;
-    }
-    setIsSubmittingRepair(true);
-    setRepairFeedback(null);
-    try {
-      const res = await returnFromMaintenanceAction({
-        assetId: repairModalAsset.assetId,
-        receivingWarehouseId: repairReceivingWhId,
-        condition: repairCondition,
-        notes: repairNotes.trim() || undefined,
-      });
-      if (res.success) {
-        setMaintenanceAssets((prev) => prev.filter((a) => a.assetId !== repairModalAsset.assetId));
-        setRepairFeedback({ text: res.message || 'הכלי נקלט בהצלחה מתיקון והוחזר למלאי!', type: 'success' });
-        await loadMaintenanceAssets();
-        await handleWarehouseChange(selectedWarehouseId);
-        setTimeout(() => {
-          setRepairModalAsset(null);
-          setRepairFeedback(null);
-          setRepairNotes('');
-        }, 1500);
-      } else {
-        alert(`שגיאה בקליטת כלי מתיקון: ${res.error || 'נסה שוב'}`);
-        setRepairFeedback({ text: res.error || 'שגיאה בקליטת כלי מתיקון', type: 'error' });
-      }
-    } catch (err) {
-      setRepairFeedback({ text: err instanceof Error ? err.message : 'שגיאת תקשורת', type: 'error' });
-    } finally {
-      setIsSubmittingRepair(false);
-    }
-  };
-
-  const handleScrapAndRetireSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!retireModalAsset) return;
-    if (!retireReason.trim()) {
-      setRetireFeedback({ text: 'חובה לציין סיבת גריטה והשבתה', type: 'error' });
-      return;
-    }
-    setIsSubmittingRetire(true);
-    setRetireFeedback(null);
-    try {
-      const res = await scrapAndRetireAssetAction({
-        assetId: retireModalAsset.assetId,
-        reason: retireReason.trim(),
-      });
-      if (res.success) {
-        setMaintenanceAssets((prev) => prev.filter((a) => a.assetId !== retireModalAsset.assetId));
-        setRetireFeedback({ text: res.message || 'הכלי נגרט והושבת לצמיתות מהמערכת', type: 'success' });
-        await loadMaintenanceAssets();
-        await handleWarehouseChange(selectedWarehouseId);
-        setTimeout(() => {
-          setRetireModalAsset(null);
-          setRetireFeedback(null);
-          setRetireReason('');
-        }, 1500);
-      } else {
-        alert(`שגיאה בהשבתת הכלי: ${res.error || 'נסה שוב'}`);
-        setRetireFeedback({ text: res.error || 'שגיאה בהשבתת הכלי', type: 'error' });
-      }
-    } catch (err) {
-      setRetireFeedback({ text: err instanceof Error ? err.message : 'שגיאת תקשורת', type: 'error' });
-    } finally {
-      setIsSubmittingRetire(false);
-    }
-  };
-
-  // Chief Storekeeper: Approve (Dispatch) or Reject site tool request
-  const handleResolveSiteRequest = async (requestId: string, decision: 'APPROVE' | 'REJECT') => {
-    setIsResolvingRequestId(requestId);
-    setInboxFeedback(null);
-    try {
-      let assignedAssetId: string | undefined = undefined;
-      let sourceWarehouseId: string | undefined = undefined;
-
-      if (decision === 'APPROVE') {
-        assignedAssetId = selectedAssetForRequest[requestId];
-        if (!assignedAssetId) {
-          setInboxFeedback({ text: 'יש לבחור כלי עבודה זמין לשינוע לאתר מהרשימה', type: 'error' });
-          setIsResolvingRequestId(null);
-          return;
-        }
-        const asset = availableAssetsForInbox.find((a) => a.id === assignedAssetId);
-        sourceWarehouseId = asset?.currentWarehouseId || 'wh-central';
-      }
-
-      const res = await resolveToolRequestAction({
-        requestId,
-        decision,
-        assignedAssetId,
-        sourceWarehouseId,
-        rejectionReason: decision === 'REJECT' ? rejectReasonInput : undefined,
-      });
-
-      if (res.success) {
-        setInboxFeedback({ text: res.message || 'הבקשה עודכנה בהצלחה', type: 'success' });
-        setRejectingSiteRequestId(null);
-        setRejectReasonInput('');
-        setSiteRequestsInbox((prev) => prev.filter((r) => r.id !== requestId));
-        router.refresh();
-        await loadChiefInbox();
-        if (selectedWarehouseId !== 'all') {
-          await loadSiteStorekeeperData(selectedWarehouseId);
-        }
-      } else {
-        alert(res.error || 'שגיאה בעדכון הבקשה');
-        setInboxFeedback({ text: res.error || 'שגיאה בעדכון הבקשה', type: 'error' });
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'שגיאת תקשורת';
-      alert(msg);
-      setInboxFeedback({
-        text: msg,
-        type: 'error',
-      });
-    } finally {
-      setIsResolvingRequestId(null);
-    }
-  };
-
-  // Site Storekeeper: Confirm tool reception at job site
-  const handleConfirmSiteReception = async (req: SiteToolRequestItem) => {
-    if (!req.assignedAssetId) return;
-    setReceivingSiteRequestId(req.id);
-    setSiteActionFeedback(null);
-    try {
-      const res = await confirmToolReceptionAction(
-        req.id,
-        req.assignedAssetId,
-        selectedWarehouseId !== 'all' ? selectedWarehouseId : (assignedWarehouseId || '10000000-0000-0000-0000-000000000002')
-      );
-      if (res.success) {
-        setSiteActionFeedback({ text: res.message || 'הכלי נקלט בהצלחה במחסן האתר!', type: 'success' });
-        setSiteIncomingShipments((prev) => prev.filter((s) => s.id !== req.id));
-        router.refresh();
-        await loadSiteStorekeeperData(selectedWarehouseId);
-        await handleWarehouseChange(selectedWarehouseId);
-      } else {
-        alert(res.error || 'שגיאה בקליטת הכלי');
-        setSiteActionFeedback({ text: res.error || 'שגיאה בקליטת הכלי', type: 'error' });
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'שגיאת תקשורת';
-      alert(msg);
-      setSiteActionFeedback({
-        text: msg,
-        type: 'error',
-      });
-    } finally {
-      setReceivingSiteRequestId(null);
-    }
-  };
-
-  // Site Storekeeper: Submit new tool request for their site
-  const handleSubmitSiteToolRequest = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!requestToolDesc.trim()) {
-      setSiteRequestFeedback({ text: 'יש לציין תיאור של כלי העבודה הנדרש', type: 'error' });
-      return;
-    }
-    setIsSubmittingSiteRequest(true);
-    setSiteRequestFeedback(null);
-    try {
-      const targetWh = selectedWarehouseId !== 'all' ? selectedWarehouseId : assignedWarehouseId;
-      const res = await createSiteToolRequestAction({
-        toolDescription: requestToolDesc,
-        quantity: requestQuantity,
-        urgency: requestUrgency,
-        reason: requestReason,
-        requestingWarehouseId: targetWh,
-      });
-
-      if (res.success) {
-        setSiteRequestFeedback({ text: res.message || 'הבקשה נשלחה בהצלחה!', type: 'success' });
-        setRequestToolDesc('');
-        setRequestQuantity(1);
-        setRequestUrgency('NORMAL');
-        setRequestReason('');
-        router.refresh();
-        await loadSiteStorekeeperData(selectedWarehouseId);
-        if (isChiefOperations || isGeneralManager) {
-          await loadChiefInbox();
-        }
-        setTimeout(() => {
-          setIsSiteRequestModalOpen(false);
-          setSiteRequestFeedback(null);
-        }, 1500);
-      } else {
-        alert(res.error || 'שגיאה בהגשת הבקשה');
-        setSiteRequestFeedback({ text: res.error || 'שגיאה בהגשת הבקשה', type: 'error' });
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'שגיאת תקשורת';
-      alert(msg);
-      setSiteRequestFeedback({
-        text: msg,
-        type: 'error',
-      });
-    } finally {
-      setIsSubmittingSiteRequest(false);
-    }
-  };
-
-  // Incoming in-transit equipment to this warehouse
-  const [incomingTransfers, setIncomingTransfers] = useState<PendingTransferItem[]>([]);
-  const [receivingTransferId, setReceivingTransferId] = useState<string | null>(null);
-
-  // Site Dispatch with Tag Verification & Digital Signature State
-  const [isDispatchModalOpen, setIsDispatchModalOpen] = useState<boolean>(false);
-  const [dispatchTagInput, setDispatchTagInput] = useState<string>('');
-  const [isSearchingAsset, setIsSearchingAsset] = useState<boolean>(false);
-  const [dispatchAsset, setDispatchAsset] = useState<ScannedAssetDetails | null>(null);
-  const [isTagVerified, setIsTagVerified] = useState<boolean>(false);
-  const [dispatchTargetWhId, setDispatchTargetWhId] = useState<string>(() => {
-    const whList = propWarehouses || initialData.warehouses || initialData.allWarehouses || [];
-    const firstOther = whList.find((w) => w.id && w.id !== initialData.warehouse?.id && w.id !== 'all');
-    return firstOther ? firstOther.id : (whList.find((w) => w.id && w.id !== 'all')?.id || '');
-  });
-  const [dispatchWorkerName, setDispatchWorkerName] = useState<string>('');
-  const [dispatchWorkerPhone, setDispatchWorkerPhone] = useState<string>('');
-  const [dispatchSignature, setDispatchSignature] = useState<string | null>(null);
-  const [isSubmittingDispatch, setIsSubmittingDispatch] = useState<boolean>(false);
-  const [dispatchFeedback, setDispatchFeedback] = useState<{
-    text: string;
-    type: 'success' | 'error';
-  } | null>(null);
-
-  // Load incoming in-transit transfers for this warehouse
-  const loadIncomingTransfers = React.useCallback(async (whId: string) => {
-    try {
-      const list = await getIncomingInTransitTransfersAction(whId);
-      setIncomingTransfers(list);
-    } catch (err) {
-      console.warn('Error loading incoming transfers:', err);
-    }
-  }, []);
-
-  React.useEffect(() => {
-    void loadIncomingTransfers(selectedWarehouseId);
-  }, [selectedWarehouseId, loadIncomingTransfers]);
-
-  // Load available assets when modal opens or target warehouse changes
-  const loadAvailableAssets = React.useCallback(async (targetWh: string) => {
-    setIsLoadingAvailableAssets(true);
-    try {
-      const list = await getAvailableAssetsForTransferAction(targetWh);
-      setAvailableAssets(list);
-    } catch (err) {
-      console.warn('Error loading available assets for transfer:', err);
-    } finally {
-      setIsLoadingAvailableAssets(false);
-    }
-  }, []);
-
-  React.useEffect(() => {
-    if (isTransferRequestModalOpen) {
-      void loadAvailableAssets(transferRequestTargetWhId);
-    }
-  }, [isTransferRequestModalOpen, transferRequestTargetWhId, loadAvailableAssets]);
-
-  // Sync transferRequestTargetWhId when selectedWarehouseId changes
-  React.useEffect(() => {
-    if (selectedWarehouseId !== 'all') {
-      setTransferRequestTargetWhId(selectedWarehouseId);
-    } else if (assignedWarehouseId) {
-      setTransferRequestTargetWhId(assignedWarehouseId);
-    }
-  }, [selectedWarehouseId, assignedWarehouseId]);
-
-  // Submit transfer request
-  const handleSubmitTransferRequest = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedAssetToTransfer) {
-      setTransferRequestFeedback({ text: 'אנא בחר כלי עבודה להעברה מהרשימה', type: 'error' });
-      return;
-    }
-    if (!transferRequestTargetWhId) {
-      setTransferRequestFeedback({ text: 'אנא בחר מחסן יעד', type: 'error' });
-      return;
-    }
-    setIsSubmittingTransferRequest(true);
-    setTransferRequestFeedback(null);
-    try {
-      const res = await createTransferRequestAction({
-        assetId: selectedAssetToTransfer.id,
-        sourceWarehouseId: selectedAssetToTransfer.currentWarehouseId,
-        targetWarehouseId: transferRequestTargetWhId,
-        reason: transferRequestReason,
-      });
-      if (res.success) {
-        // Force Next.js to re-fetch Server Components and update all tables/metrics:
-        router.refresh();
-        setTransferRequestFeedback({
-          text: 'בקשת ההעברה נשלחה בהצלחה לאישור אחראי תפעול ראשי!',
-          type: 'success',
-        });
-        setSelectedAssetToTransfer(null);
-        setTransferRequestReason('');
-        void loadPendingTransfers();
-        setTimeout(() => {
-          setIsTransferRequestModalOpen(false);
-          setTransferRequestFeedback(null);
-        }, 2000);
-      } else {
-        alert(`שגיאה בביצוע הפעולה: ${res.error || 'נסה שוב'}`);
-        setTransferRequestFeedback({
-          text: res.error || 'שגיאה בהגשת בקשת העברה',
-          type: 'error',
-        });
-      }
-    } catch (err) {
-      setTransferRequestFeedback({
-        text: err instanceof Error ? err.message : 'שגיאת תקשורת',
-        type: 'error',
-      });
-    } finally {
-      setIsSubmittingTransferRequest(false);
-    }
-  };
-
-  // Load local available assets for direct outbound transfer
-  const loadLocalAvailableAssets = React.useCallback(async (whId: string) => {
-    setIsLoadingLocalAssets(true);
-    try {
-      const list = await getLocalAvailableAssetsForTransferAction(whId !== 'all' ? whId : undefined);
-      setLocalAvailableAssets(list);
-    } catch (err) {
-      console.warn('Error loading local available assets for transfer:', err);
-    } finally {
-      setIsLoadingLocalAssets(false);
-    }
-  }, []);
-
-  React.useEffect(() => {
-    if (isDirectTransferModalOpen) {
-      void loadLocalAvailableAssets(selectedWarehouseId);
-      const validOther = warehouses.find((w) => w.id && w.id !== 'all' && w.id !== selectedWarehouseId);
-      if (validOther && (!directTargetWarehouseId || directTargetWarehouseId === selectedWarehouseId)) {
-        setDirectTargetWarehouseId(validOther.id);
-      }
-    }
-  }, [isDirectTransferModalOpen, selectedWarehouseId, loadLocalAvailableAssets, warehouses, directTargetWarehouseId]);
-
-  // Submit direct outbound equipment transfer
-  const handleDirectTransferSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedDirectAsset) {
-      setDirectTransferFeedback({ text: 'אנא בחר כלי עבודה זמין לשילוח מהרשימה', type: 'error' });
-      return;
-    }
-    if (!directTargetWarehouseId) {
-      setDirectTransferFeedback({ text: 'אנא בחר מחסן או אתר יעד לקליטת הציוד', type: 'error' });
-      return;
-    }
-    if (selectedDirectAsset.currentWarehouseId === directTargetWarehouseId) {
-      setDirectTransferFeedback({ text: 'מחסן המקור ומחסן היעד חייבים להיות שונים', type: 'error' });
-      return;
-    }
-    setIsSubmittingDirectTransfer(true);
-    setDirectTransferFeedback(null);
-    try {
-      const res = await directStorekeeperTransferAction({
-        assetId: selectedDirectAsset.id,
-        targetWarehouseId: directTargetWarehouseId,
-        transporterNotes: transporterNotes.trim() || undefined,
-        sourceWarehouseId:
-          selectedDirectAsset.currentWarehouseId ||
-          (selectedWarehouseId !== 'all' ? selectedWarehouseId : undefined),
-      });
-
-      if (!res.success) {
-        alert(`שגיאה בביצוע הפעולה: ${res.error || 'נסה שוב'}`);
-        setDirectTransferFeedback({ text: res.error || 'שגיאה בשילוח ישיר', type: 'error' });
-        return;
-      }
-
-      // Optimistically remove from local available and decrement available count:
-      setLocalAvailableAssets((prev) => prev.filter((a) => a.id !== selectedDirectAsset.id));
+  const handleManualCheckinSuccess = (returned: unknown) => {
+    if (returned && typeof returned === 'object') {
+      const ret = returned as Record<string, unknown>;
+      const assetId = String(ret.id || '');
+      const isMaintenance = ret.status === 'maintenance';
       setData((prev) => ({
         ...prev,
-        availableCount: Math.max(0, (prev.availableCount || 1) - 1),
+        availableCount: (prev.availableCount || 0) + (isMaintenance ? 0 : 1),
+        checkedOutCount: Math.max(0, (prev.checkedOutCount || 1) - 1),
+        activeLoans: (prev.activeLoans || []).filter((l) => l.assetId !== assetId),
+        returnsDueToday: (prev.returnsDueToday || []).filter((r) => r.assetId !== assetId),
+        overdueAssets: (prev.overdueAssets || []).filter((o) => o.assetId !== assetId),
       }));
-
-      // Force Next.js to re-fetch Server Components and update all tables/metrics:
-      router.refresh();
-      setIsDirectTransferModalOpen(false);
-      setSelectedDirectAsset(null);
-      setTransporterNotes('');
-      setDirectTransferFeedback(null);
-      setDirectSearchQuery('');
-
-      await handleWarehouseChange(selectedWarehouseId);
-      if (isChiefOperations || isGeneralManager) {
-        await loadInTransitFleet();
-      }
-      await loadIncomingTransfers(selectedWarehouseId);
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : 'שגיאת תקשורת';
-      alert(`שגיאה בביצוע הפעולה: ${errorMsg}`);
-      setDirectTransferFeedback({
-        text: errorMsg,
-        type: 'error',
-      });
-    } finally {
-      setIsSubmittingDirectTransfer(false);
     }
-  };
-
-  // Complete Reception of in-transit equipment
-  const handleCompleteReception = async (req: PendingTransferItem) => {
-    setReceivingTransferId(req.id);
-    try {
-      const res = await completeTransferReceptionAction({
-        assetId: req.assetId,
-        qrCode: req.qrCode,
-        tagNumber: req.tagNumber || undefined,
-        targetWarehouseId: req.targetWarehouseId,
-        requestId: req.id,
-      });
-      if (!res.success) {
-        alert(`שגיאה בביצוע הפעולה: ${res.error || 'שגיאה בקליטת הציוד'}`);
-        return;
-      }
-
-      // Optimistically remove from incoming transfers and increment available count if target matches:
-      setIncomingTransfers((prev) => prev.filter((item) => item.id !== req.id));
-      if (selectedWarehouseId === req.targetWarehouseId || selectedWarehouseId === 'all') {
-        setData((prev) => ({
-          ...prev,
-          availableCount: (prev.availableCount || 0) + 1,
-        }));
-        const optAsset: AvailableTransferAssetItem = {
-          id: req.assetId,
-          name: req.assetName,
-          brand: req.assetBrand || '',
-          modelNumber: req.assetModel || null,
-          qrCode: req.qrCode,
-          tagNumber: req.tagNumber || null,
-          serialNumber: req.serialNumber || null,
-          currentWarehouseId: req.targetWarehouseId,
-          currentWarehouseName: req.targetWarehouseName || 'מחסן',
-        };
-        setAvailableAssets((prev) => prev.some((a) => a.id === req.assetId) ? prev : [optAsset, ...prev]);
-        setAvailableAssetsForInbox((prev) => prev.some((a) => a.id === req.assetId) ? prev : [optAsset, ...prev]);
-        setLocalAvailableAssets((prev) => prev.some((a) => a.id === req.assetId) ? prev : [optAsset, ...prev]);
-      }
-
-      // Force Next.js to re-fetch Server Components and update all tables/metrics:
-      router.refresh();
-      await handleWarehouseChange(selectedWarehouseId, true);
-      await loadIncomingTransfers(selectedWarehouseId);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'שגיאה בקליטת הציוד';
-      alert(`שגיאה בביצוע הפעולה: ${msg}`);
-      console.warn('Error completing reception:', err);
-    } finally {
-      setReceivingTransferId(null);
-    }
-  };
-
-  // In-Transit Fleet Operations: Primary Action - Confirm Arrival & Receive
-  const handleConfirmArrivalFleet = async (item: InTransitFleetItem) => {
-    setOperatingFleetAssetId(item.assetId);
-    setFleetOperationType('receive');
-
-    try {
-      const res = await completeTransferReceptionAction({
-        assetId: item.assetId,
-        qrCode: item.qrCode,
-        targetWarehouseId: item.destinationWarehouseId,
-        notes: `אישור הגעה וקליטת ציוד ${item.toolName} (${item.qrCode})`,
-        requestId: item.requestId,
-      });
-
-      if (!res.success) {
-        alert(`שגיאה בקליטת הציוד: ${res.error || 'שגיאה לא ידועה'}`);
-        return;
-      }
-
-      // Optimistically remove card from In-Transit view
-      setInTransitFleet((prev) => prev.filter((f) => f.assetId !== item.assetId && f.id !== item.id));
-
-      if (selectedWarehouseId === item.destinationWarehouseId || selectedWarehouseId === 'all') {
-        setData((prev) => ({
-          ...prev,
-          availableCount: (prev.availableCount || 0) + 1,
-        }));
-        const optAsset: AvailableTransferAssetItem = {
-          id: item.assetId,
-          name: item.toolName,
-          brand: item.brand,
-          modelNumber: item.modelNumber || null,
-          qrCode: item.qrCode,
-          tagNumber: null,
-          serialNumber: null,
-          currentWarehouseId: item.destinationWarehouseId,
-          currentWarehouseName: item.destinationWarehouseName,
-        };
-        setAvailableAssets((prev) => prev.some((a) => a.id === item.assetId) ? prev : [optAsset, ...prev]);
-        setAvailableAssetsForInbox((prev) => prev.some((a) => a.id === item.assetId) ? prev : [optAsset, ...prev]);
-        setLocalAvailableAssets((prev) => prev.some((a) => a.id === item.assetId) ? prev : [optAsset, ...prev]);
-      }
-
-      router.refresh();
-      await loadInTransitFleet();
-      await loadIncomingTransfers(selectedWarehouseId);
-      await handleWarehouseChange(selectedWarehouseId, true);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'שגיאה לא ידועה';
-      alert(`שגיאה בקליטת הציוד: ${msg}`);
-      await loadInTransitFleet();
-    } finally {
-      setOperatingFleetAssetId(null);
-      setFleetOperationType(null);
-    }
-  };
-
-  // In-Transit Fleet Operations: Secondary Action - Cancel Transfer & Rollback
-  const handleCancelTransferFleet = async (item: InTransitFleetItem) => {
-    setOperatingFleetAssetId(item.assetId);
-    setFleetOperationType('cancel');
-
-    try {
-      const res = await cancelTransferRollbackAction({
-        assetId: item.assetId,
-        qrCode: item.qrCode,
-        sourceWarehouseId: item.originWarehouseId,
-        notes: `ביטול שינוע והחזרת כלי ${item.toolName} (${item.qrCode}) למחסן מקור`,
-        requestId: item.requestId,
-      });
-
-      if (!res.success) {
-        alert(`שגיאה בביטול השינוע: ${res.error || 'שגיאה לא ידועה'}`);
-        return;
-      }
-
-      // Optimistically remove card from In-Transit view
-      setInTransitFleet((prev) => prev.filter((f) => f.assetId !== item.assetId && f.id !== item.id));
-
-      if (selectedWarehouseId === item.originWarehouseId || selectedWarehouseId === 'all') {
-        setData((prev) => ({
-          ...prev,
-          availableCount: (prev.availableCount || 0) + 1,
-        }));
-        const optAsset: AvailableTransferAssetItem = {
-          id: item.assetId,
-          name: item.toolName,
-          brand: item.brand,
-          modelNumber: item.modelNumber || null,
-          qrCode: item.qrCode,
-          tagNumber: null,
-          serialNumber: null,
-          currentWarehouseId: item.originWarehouseId,
-          currentWarehouseName: item.originWarehouseName,
-        };
-        setAvailableAssets((prev) => prev.some((a) => a.id === item.assetId) ? prev : [optAsset, ...prev]);
-        setAvailableAssetsForInbox((prev) => prev.some((a) => a.id === item.assetId) ? prev : [optAsset, ...prev]);
-        setLocalAvailableAssets((prev) => prev.some((a) => a.id === item.assetId) ? prev : [optAsset, ...prev]);
-      }
-
-      router.refresh();
-      await loadInTransitFleet();
-      await loadIncomingTransfers(selectedWarehouseId);
-      await handleWarehouseChange(selectedWarehouseId, true);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'שגיאה לא ידועה';
-      alert(`שגיאה בביטול השינוע: ${msg}`);
-      await loadInTransitFleet();
-    } finally {
-      setOperatingFleetAssetId(null);
-      setFleetOperationType(null);
-    }
-  };
-
-  // Search tool by Tag/QR for quick worker checkout
-  const handleSearchCheckoutAsset = async (overrideTerm?: string) => {
-    const term = (overrideTerm !== undefined ? overrideTerm : checkoutAssetInput).trim();
-    if (!term) return;
-
-    setIsSearchingCheckoutAsset(true);
-    setCheckoutFeedback(null);
-    try {
-      const activeOrgId = currentOrganization?.id || user?.organizationId;
-      const asset = await getAssetDetailsByQr(
-        term,
-        selectedWarehouseId !== 'all' ? selectedWarehouseId : undefined,
-        activeOrgId
-      );
-      if (asset) {
-        if (!isAssetAvailable(asset.status)) {
-          setCheckoutFeedback({
-            text: `הכלי שנמצא אינו זמין לניפוק (סטטוס נוכחי: ${asset.status})`,
-            type: 'error',
-          });
-          setCheckoutAsset(null);
-        } else {
-          setCheckoutAsset(asset);
-          setCheckoutFeedback({
-            text: `כלי אותר: ${asset.toolName} (${asset.brand})`,
-            type: 'success',
-          });
-        }
-      } else {
-        setCheckoutAsset(null);
-        setCheckoutFeedback({
-          text: `לא נמצא כלי עבודה התואם לתג/ברקוד "${term}". ודא שהכלי רשום במערכת.`,
-          type: 'error',
-        });
-      }
-    } catch {
-      setCheckoutFeedback({
-        text: 'שגיאה באיתור הכלי במאגר.',
-        type: 'error',
-      });
-    } finally {
-      setIsSearchingCheckoutAsset(false);
-    }
-  };
-
-  // Submit quick checkout to worker
-  const handleCheckoutSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!checkoutAsset) {
-      alert('אנא אתר ובחר כלי עבודה זמין לניפוק');
-      return;
-    }
-    if (!checkoutWorkerName.trim()) {
-      alert('אנא הזן את שם מקבל הציוד');
-      return;
-    }
-
-    setIsSubmittingCheckout(true);
-    setCheckoutFeedback(null);
-    try {
-      const res = await checkoutToWorkerAction({
-        assetId: checkoutAsset.id,
-        workerName: checkoutWorkerName.trim(),
-        workerPhone: checkoutWorkerPhone.trim() || undefined,
-        expectedReturnDate: checkoutReturnDate ? new Date(checkoutReturnDate).toISOString() : undefined,
-        notes: checkoutNotes.trim() || undefined,
-      });
-
-      if (!res.success) {
-        alert(`שגיאה בביצוע הפעולה: ${res.error || 'נסה שוב'}`);
-        setCheckoutFeedback({ text: res.error || 'שגיאה בניפוק כלי עבודה', type: 'error' });
-        return;
-      }
-
-      // Optimistically update local data state immediately:
-      const newLoan: StorekeeperActiveLoan = {
-        assetId: checkoutAsset.id,
-        toolName: checkoutAsset.toolName,
-        brand: checkoutAsset.brand,
-        modelNumber: checkoutAsset.modelNumber || null,
-        qrCode: checkoutAsset.qrCode || '',
-        workerName: checkoutWorkerName.trim(),
-        workerPhone: checkoutWorkerPhone.trim() || null,
-        expectedReturnDate: checkoutReturnDate || null,
-        checkedOutAt: new Date().toISOString(),
-        checkoutNote: checkoutNotes.trim() || null,
-        daysActive: 0,
-      };
-      setData((prev) => ({
-        ...prev,
-        availableCount: Math.max(0, (prev.availableCount || 1) - 1),
-        checkedOutCount: (prev.checkedOutCount || 0) + 1,
-        activeLoans: prev.activeLoans
-          ? [newLoan, ...prev.activeLoans.filter((l) => l.assetId !== checkoutAsset.id)]
-          : [newLoan],
-        returnsDueToday: (prev.returnsDueToday || []).filter((r) => r.assetId !== checkoutAsset.id),
-        overdueAssets: (prev.overdueAssets || []).filter((o) => o.assetId !== checkoutAsset.id),
-      }));
-
-      // Optimistically remove from available transfer/inbox selection lists
-      setAvailableAssets((prev) => prev.filter((a) => a.id !== checkoutAsset.id));
-      setAvailableAssetsForInbox((prev) => prev.filter((a) => a.id !== checkoutAsset.id));
-      setLocalAvailableAssets((prev) => prev.filter((a) => a.id !== checkoutAsset.id));
-
-      // Force Next.js to re-fetch Server Components and update all tables/metrics:
-      router.refresh();
-      setIsCheckoutModalOpen(false);
-      setCheckoutAsset(null);
-      setCheckoutAssetInput('');
-      setCheckoutWorkerName('');
-      setCheckoutWorkerPhone('');
-      setCheckoutNotes('');
-      setCheckoutFeedback(null);
-
-      // Re-fetch fresh operations data from server with forceRefresh: true to bypass 30s cache
-      await handleWarehouseChange(selectedWarehouseId, true);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'שגיאת תקשורת עם השרת';
-      alert(`שגיאה בביצוע הפעולה: ${msg}`);
-      setCheckoutFeedback({ text: msg, type: 'error' });
-    } finally {
-      setIsSubmittingCheckout(false);
-    }
-  };
-
-  // Search tool by Tag/QR for site dispatch
-  const handleSearchAssetForDispatch = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    const term = dispatchTagInput.trim();
-    if (!term) return;
-
-    setIsSearchingAsset(true);
-    setDispatchFeedback(null);
-    try {
-      const activeOrgId = currentOrganization?.id || user?.organizationId;
-      const asset = await getAssetDetailsByQr(
-        term,
-        selectedWarehouseId !== 'all' ? selectedWarehouseId : undefined,
-        activeOrgId
-      );
-      if (asset) {
-        setDispatchAsset(asset);
-        setIsTagVerified(false);
-      } else {
-        setDispatchAsset(null);
-        setDispatchFeedback({
-          text: `לא נמצא כלי עבודה התואם לתג/ברקוד "${term}". ודא שהכלי רשום במערכת.`,
-          type: 'error',
-        });
-      }
-    } catch {
-      setDispatchFeedback({
-        text: 'שגיאה באיתור הכלי. אנא נסה שנית.',
-        type: 'error',
-      });
-    } finally {
-      setIsSearchingAsset(false);
-    }
-  };
-
-  // Submit site dispatch with tag verification and signature
-  const handleDispatchSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!dispatchAsset) {
-      setDispatchFeedback({ text: 'אנא אמת כלי עבודה להוצאה', type: 'error' });
-      return;
-    }
-    if (!isTagVerified) {
-      setDispatchFeedback({ text: 'חובה לאשר פיזית את תקינות תג ה-QR על הכלי', type: 'error' });
-      return;
-    }
-    if (!dispatchTargetWhId) {
-      setDispatchFeedback({ text: 'אנא בחר אתר יעד להוצאת הכלי', type: 'error' });
-      return;
-    }
-    if (!dispatchWorkerName.trim()) {
-      setDispatchFeedback({ text: 'אנא הזן את שם מקבל הציוד', type: 'error' });
-      return;
-    }
-    if (!dispatchSignature) {
-      setDispatchFeedback({ text: 'חובה לחתום בחתימה דיגיטלית בלוח החתימה', type: 'error' });
-      return;
-    }
-
-    setIsSubmittingDispatch(true);
-    setDispatchFeedback(null);
-    try {
-      const result = await dispatchAssetWithSignatureAction({
-        assetId: dispatchAsset.id,
-        targetWarehouseId: dispatchTargetWhId,
-        workerName: dispatchWorkerName.trim(),
-        workerPhone: dispatchWorkerPhone.trim(),
-        signatureData: dispatchSignature,
-        isTagVerified: true,
-      });
-
-      if (result.success) {
-        // Force Next.js to re-fetch Server Components and update all tables/metrics:
-        router.refresh();
-        setDispatchFeedback({
-          text: result.message || 'הציוד נופק בהצלחה לאתר עם אישור תיוג וחתימה!',
-          type: 'success',
-        });
-        // Optimistically remove from available transfer/inbox selection lists
-        setAvailableAssets((prev) => prev.filter((a) => a.id !== dispatchAsset.id));
-        setAvailableAssetsForInbox((prev) => prev.filter((a) => a.id !== dispatchAsset.id));
-        setLocalAvailableAssets((prev) => prev.filter((a) => a.id !== dispatchAsset.id));
-
-        const activeOrgId = currentOrganization?.id || user?.organizationId;
-        const fresh = await getStorekeeperOperations(selectedWarehouseId, activeOrgId);
-        setData(fresh);
-        setTimeout(() => {
-          setIsDispatchModalOpen(false);
-          setDispatchAsset(null);
-          setDispatchTagInput('');
-          setIsTagVerified(false);
-          setDispatchWorkerName('');
-          setDispatchWorkerPhone('');
-          setDispatchSignature(null);
-          setDispatchFeedback(null);
-        }, 1500);
-      } else {
-        alert(`שגיאה בביצוע הפעולה: ${result.error || 'נסה שוב'}`);
-        setDispatchFeedback({ text: result.error || 'שגיאה בניפוק הציוד', type: 'error' });
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'אירעה שגיאה בלתי צפויה';
-      alert(`שגיאה בביצוע הפעולה: ${msg}`);
-      setDispatchFeedback({ text: msg, type: 'error' });
-    } finally {
-      setIsSubmittingDispatch(false);
-    }
-  };
-
-  // Switch active warehouse
-  const handleWarehouseChange = React.useCallback(async (newId: string, forceRefresh?: boolean) => {
-    setSelectedWarehouseId(newId);
-    setIsLoadingWarehouse(true);
-    try {
-      const activeOrgId = currentOrganization?.id || user?.organizationId;
-      const updated = await getStorekeeperOperations(newId, activeOrgId, forceRefresh);
-      setData(updated);
-      if (typeof window !== 'undefined') {
-        const url = new URL(window.location.href);
-        if (newId === 'all') {
-          url.searchParams.delete('warehouse');
-        } else {
-          url.searchParams.set('warehouse', newId);
-        }
-        window.history.replaceState(null, '', url.toString());
-      }
-    } catch (err) {
-      console.warn('Error loading warehouse operations:', err);
-    } finally {
-      setIsLoadingWarehouse(false);
-    }
-  }, [currentOrganization, user]);
-
-  // Sync warehouse for storekeeper if scoped
-  React.useEffect(() => {
-    if (
-      isStorekeeper &&
-      assignedWarehouseId &&
-      assignedWarehouseId !== selectedWarehouseId
-    ) {
-      const timer = setTimeout(() => {
-        void handleWarehouseChange(assignedWarehouseId);
-      }, 0);
-      return () => clearTimeout(timer);
-    }
-  }, [isStorekeeper, assignedWarehouseId, selectedWarehouseId, handleWarehouseChange]);
-
-  // Open tool passport modal by QR / Tag
-  const handleOpenPassport = async (qrCode: string, fallbackItem?: unknown) => {
-    const clean = qrCode?.trim();
-    if (!clean && !fallbackItem) return;
-
-    const fb = (fallbackItem && typeof fallbackItem === 'object' ? fallbackItem : {}) as Record<string, unknown>;
-
-    if (fallbackItem) {
-      const itemObj: ScannedAssetDetails = {
-        id: String(fb.assetId || fb.id || ''),
-        qrCode: clean || String(fb.qrCode || fb.tag_number || ''),
-        name: String(fb.toolName || fb.name || 'כלי עבודה'),
-        toolName: String(fb.toolName || fb.name || 'כלי עבודה'),
-        brand: String(fb.brand || 'MAGMA'),
-        modelNumber: fb.modelNumber ? String(fb.modelNumber) : (fb.model ? String(fb.model) : null),
-        status: (fb.status as 'available' | 'checked_out' | 'maintenance' | 'retired') || 'available',
-        condition: (fb.condition as 'excellent' | 'good' | 'needs_repair' | 'retired') || 'good',
-        warehouseName: String(fb.warehouseName || 'מתקן כללי'),
-        warehouseCode: 'WH',
-        currentWarehouseId: String(fb.currentWarehouseId || fb.warehouseId || selectedWarehouseId || ''),
-        currentAssignedWorker: fb.workerName ? String(fb.workerName) : (fb.currentAssignedWorker ? String(fb.currentAssignedWorker) : null),
-        version: 1,
-      };
-      setPassportAsset(itemObj);
-      setIsPassportOpen(true);
-      setPassportLookupInput('');
-    }
-
-    setIsSearchingPassport(true);
-    setPassportLookupFeedback(null);
-    try {
-      const activeOrgId = currentOrganization?.id || user?.organizationId;
-      let asset = await getAssetDetailsByQr(clean || String(fb.qrCode || ''), undefined, activeOrgId);
-
-      // Resilient fallback: Try ZR-XXXX and raw digits
-      if (!asset && clean) {
-        const norm = normalizeFieldTag(clean);
-        if (norm.success && norm.rawDigits) {
-          const zrTag = `ZR-${norm.rawDigits}`;
-          if (clean !== zrTag) {
-            asset = await getAssetDetailsByQr(zrTag, undefined, activeOrgId);
-          }
-          if (!asset && clean !== norm.rawDigits) {
-            asset = await getAssetDetailsByQr(norm.rawDigits, undefined, activeOrgId);
-          }
-        }
-      }
-
-      if (asset) {
-        setPassportAsset(asset);
-        setIsPassportOpen(true);
-        setPassportLookupInput('');
-      } else if (!fallbackItem) {
-        setPassportLookupFeedback(`לא נמצא כלי עבודה עבור תג / ברקוד "${clean}".`);
-      }
-    } catch (err) {
-      console.warn('Error fetching tool passport:', err);
-      if (!fallbackItem) {
-        setPassportLookupFeedback('שגיאה באיתור דרכון הכלי.');
-      }
-    } finally {
-      setIsSearchingPassport(false);
-    }
-  };
-
-  // Keep handleOpenPassportRef in sync
-  useEffect(() => {
-    handleOpenPassportRef.current = handleOpenPassport;
-  });
-
-  // Submit Inter-Depot Asset Transfer
-  const handleTransferSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!transferQrCode.trim()) return;
-    setIsTransferring(true);
-    setTransferFeedback(null);
-    try {
-      const asset = await getAssetDetailsByQr(transferQrCode.trim());
-      if (!asset) {
-        setTransferFeedback({
-          text: 'כלי העבודה לא נמצא במערכת לפי ברקוד/QR זה',
-          type: 'error',
-        });
-        setIsTransferring(false);
-        return;
-      }
-      const res = await transferAssetAction({
-        assetId: asset.id,
-        targetWarehouseId: transferTargetWhId,
-        notes: transferNotes || `העברה יזומה ע"י אחראי תפעול ראשי`,
-        isDirectTransfer: true,
-      });
-      if (res.success) {
-        // Force Next.js to re-fetch Server Components and update all tables/metrics:
-        router.refresh();
-        setTransferFeedback({
-          text: res.message || 'הכלי הועבר בהצלחה למחסן היעד',
-          type: 'success',
-        });
-        setTransferQrCode('');
-        setTransferNotes('');
-        await handleWarehouseChange(selectedWarehouseId);
-      } else {
-        alert(`שגיאה בביצוע הפעולה: ${res.error || 'נסה שוב'}`);
-        setTransferFeedback({
-          text: res.error || 'שגיאה בהעברת הכלי',
-          type: 'error',
-        });
-      }
-    } catch (err: unknown) {
-      setTransferFeedback({
-        text: err instanceof Error ? err.message : 'שגיאת תקשורת',
-        type: 'error',
-      });
-    } finally {
-      setIsTransferring(false);
-    }
-  };
-
-  // Submit Stock Reconciliation
-  const handleReconcileSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsReconciling(true);
-    setReconcileFeedback(null);
-    try {
-      const res = await reconcileStockAction({
-        warehouseId: selectedWarehouseId,
-        auditedBy: 'אחראי תפעול ראשי',
-        verifiedAssetIds: (data.overdueAssets || []).map((a) => a.assetId),
-        discrepancyNotes,
-      });
-      if (res.success) {
-        setReconcileFeedback({
-          text: res.message || 'ספירת המלאי אומתה בהצלחה',
-          type: 'success',
-        });
-        router.refresh();
-        setTimeout(() => {
-          setIsReconcileModalOpen(false);
-        }, 1500);
-      } else {
-        alert(res.error || 'שגיאה באימות ספירת מלאי');
-        setReconcileFeedback({
-          text: res.error || 'שגיאה באימות ספירת מלאי',
-          type: 'error',
-        });
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'שגיאה באימות ספירת מלאי';
-      alert(msg);
-      setReconcileFeedback({ text: msg, type: 'error' });
-    } finally {
-      setIsReconciling(false);
-    }
-  };
-
-  // Helper to format phone for WhatsApp (e.g. 050-1234567 -> 972501234567)
-  const getWhatsAppLink = (
-    phone: string | null,
-    workerName: string,
-    toolName: string,
-    qrCode: string,
-    daysOverdue: number
-  ) => {
-    if (!phone) return null;
-    let clean = phone.replace(/\D/g, '');
-    if (clean.startsWith('0')) {
-      clean = '972' + clean.slice(1);
-    } else if (!clean.startsWith('972')) {
-      clean = '972' + clean;
-    }
-
-    const msg = `שלום ${workerName}, כאן מחסן ${data.warehouse.name}. תזכורת להחזרת כלי העבודה "${toolName}" (מק"ט ${qrCode}) הנמצא באיחור של ${daysOverdue} ימים. נא לתאם החזרה למחסן בהקדם.`;
-    return `https://wa.me/${clean}?text=${encodeURIComponent(msg)}`;
+    router.refresh();
+    void handleWarehouseChange(selectedWarehouseId, true);
   };
 
   return (
@@ -1941,40 +774,72 @@ export default function WarehouseDashboardView({
                     ))}
                   </select>
                   {isStorekeeper && !!assignedWarehouseId ? (
-                    <Lock className="w-3.5 h-3.5 text-amber-600 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <Lock className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
                   ) : (
-                    <ChevronDown className="w-3.5 h-3.5 text-blue-600 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <div className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500 text-[10px]">
+                      ▼
+                    </div>
                   )}
                 </div>
               </div>
-              {isLoadingWarehouse && (
-                <Loader2 className="w-4 h-4 animate-spin text-blue-600 shrink-0" />
-              )}
             </div>
 
-            {/* 4 Compact KPI Badges */}
-            <div className="flex flex-nowrap items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 text-[11px] sm:text-xs font-bold">
-              <div className="shrink-0 px-2.5 py-1 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 flex items-center gap-1 shadow-2xs">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                <span>{data.availableCount} זמינים</span>
+            {/* 4 Compact Mobile-First KPI Badges */}
+            <div className="grid grid-cols-4 gap-1.5 sm:gap-2 flex-1 md:max-w-md">
+              {/* KPI 1: Available */}
+              <div className="bg-emerald-50/70 border border-emerald-200/80 rounded-xl p-1.5 text-center">
+                <span className="text-[10px] font-bold text-emerald-800 block truncate flex items-center justify-center gap-0.5">
+                  <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 shrink-0" />
+                  זמינים
+                </span>
+                <span className="text-sm sm:text-base font-black text-emerald-950 font-mono">
+                  {data.availableCount}
+                </span>
               </div>
-              <div className="shrink-0 px-2.5 py-1 rounded-xl bg-blue-50 text-blue-800 border border-blue-200 flex items-center gap-1 shadow-2xs">
-                <Clock className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                <span>{data.checkedOutCount} בשטח</span>
+
+              {/* KPI 2: Checked Out */}
+              <div className="bg-blue-50/70 border border-blue-200/80 rounded-xl p-1.5 text-center">
+                <span className="text-[10px] font-bold text-blue-800 block truncate flex items-center justify-center gap-0.5">
+                  <Clock className="w-2.5 h-2.5 text-blue-600 shrink-0" />
+                  בשטח
+                </span>
+                <span className="text-sm sm:text-base font-black text-blue-950 font-mono">
+                  {data.checkedOutCount}
+                </span>
               </div>
-              <div className="shrink-0 px-2.5 py-1 rounded-xl bg-rose-50 text-rose-800 border border-rose-200 flex items-center gap-1 shadow-2xs">
-                <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                <span>{data.overdueAssets.length} באיחור</span>
+
+              {/* KPI 3: Overdue */}
+              <div className={`rounded-xl p-1.5 text-center border ${
+                data.overdueAssets.length > 0
+                  ? 'bg-rose-50/90 border-rose-300 text-rose-950'
+                  : 'bg-slate-50 border-slate-200 text-slate-700'
+              }`}>
+                <span className={`text-[10px] font-bold block truncate flex items-center justify-center gap-0.5 ${
+                  data.overdueAssets.length > 0 ? 'text-rose-800' : 'text-slate-500'
+                }`}>
+                  <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
+                  באיחור
+                </span>
+                <span className="text-sm sm:text-base font-black font-mono">
+                  {data.overdueAssets.length}
+                </span>
               </div>
-              <div className="shrink-0 px-2.5 py-1 rounded-xl bg-sky-50 text-sky-800 border border-sky-200 flex items-center gap-1 shadow-2xs">
-                <Truck className="w-3.5 h-3.5 text-sky-600 shrink-0" />
-                <span>{inTransitFleet.length + incomingTransfers.length} בשינוע</span>
+
+              {/* KPI 4: Quarantined */}
+              <div className="bg-amber-50/70 border border-amber-200/80 rounded-xl p-1.5 text-center">
+                <span className="text-[10px] font-bold text-amber-800 block truncate flex items-center justify-center gap-0.5">
+                  <Wrench className="w-2.5 h-2.5 text-amber-600 shrink-0" />
+                  בתיקון
+                </span>
+                <span className="text-sm sm:text-base font-black text-amber-950 font-mono">
+                  {data.quarantinedCount}
+                </span>
               </div>
             </div>
           </div>
 
-          {/* Swipeable 4-Tab Navigation Bar */}
-          <div className="flex flex-nowrap overflow-x-auto no-scrollbar py-0.5 gap-1.5 sm:grid sm:grid-cols-4 p-1 bg-slate-100 rounded-xl">
+          {/* 4-Tab Navigation Architecture */}
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-1 border-t border-slate-100">
             {/* Tab 1: ⚡ תפעול שוטף */}
             <button
               type="button"
@@ -2064,1854 +929,90 @@ export default function WarehouseDashboardView({
         {/* TAB 1: ⚡ תפעול שוטף (DAILY OPERATIONS)                                    */}
         {/* ========================================================================= */}
         {activeTab === 'operations' && (
-          <div className="space-y-4 animate-in fade-in duration-200">
-            {/* 1. TOP ACTION GRID: Large, touch-friendly primary action buttons (min-h-[56px]) */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
-              {/* Button 1: הנפקה לעובד */}
-              <button
-                type="button"
-                onClick={() => {
-                  setCheckoutFeedback(null);
-                  setCheckoutAsset(null);
-                  setCheckoutAssetInput('');
-                  setCheckoutWorkerName('');
-                  setCheckoutWorkerPhone('');
-                  setCheckoutReturnDate('');
-                  setCheckoutNotes('');
-                  setIsCheckoutModalOpen(true);
-                }}
-                className="min-h-[56px] sm:min-h-[64px] p-3 rounded-2xl bg-gradient-to-br from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-black text-xs sm:text-sm flex flex-col items-center justify-center text-center gap-1.5 shadow-md shadow-blue-600/20 active:scale-95 transition-all cursor-pointer"
-              >
-                <Zap className="w-5 h-5 sm:w-6 sm:h-6 stroke-[2.5]" />
-                <span>⚡ הנפקה לעובד</span>
-              </button>
-
-              {/* Button 2: קליטת כלי והחזרה */}
-              <button
-                type="button"
-                onClick={() => {
-                  setCheckinPreselectedAssetId(null);
-                  setIsCheckinModalOpen(true);
-                }}
-                className="min-h-[56px] sm:min-h-[64px] p-3 rounded-2xl bg-white hover:bg-blue-50 text-blue-900 border-2 border-blue-200 font-black text-xs sm:text-sm flex flex-col items-center justify-center text-center gap-1.5 shadow-sm active:scale-95 transition-all cursor-pointer"
-              >
-                <Scan className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600" />
-                <span>📥 קליטת כלי והחזרה</span>
-              </button>
-
-              {/* Button 3: הדפסת תגיות TSC */}
-              <Link
-                href="/print-tags"
-                className="min-h-[56px] sm:min-h-[64px] p-3 rounded-2xl bg-white hover:bg-blue-50 text-blue-900 border-2 border-blue-200 font-black text-xs sm:text-sm flex flex-col items-center justify-center text-center gap-1.5 shadow-sm active:scale-95 transition-all"
-              >
-                <Printer className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600" />
-                <span>🖨️ הדפסת תגיות TSC</span>
-              </Link>
-
-              {/* Button 4: סורק שטח / בדיקת כלי */}
-              <button
-                type="button"
-                onClick={() => setIsInlineScannerOpen((prev) => !prev)}
-                className="min-h-[56px] sm:min-h-[64px] p-3 rounded-2xl bg-gradient-to-br from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white font-black text-xs sm:text-sm flex flex-col items-center justify-center text-center gap-1.5 shadow-md shadow-emerald-600/20 active:scale-95 transition-all cursor-pointer"
-              >
-                <Sparkles className="w-5 h-5 sm:w-6 sm:h-6 text-amber-300 stroke-[2.5]" />
-                <span>{isInlineScannerOpen ? '📷 סגור סורק' : '🔦 סריקת כלי'}</span>
-              </button>
-            </div>
-
-            {/* 2. COMPACT TOOL PASSPORT LOOKUP */}
-            <div className="bg-slate-900 text-white rounded-2xl p-3 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-              <div className="flex items-center gap-2">
-                <QrCode className="w-4 h-4 text-amber-400 shrink-0" />
-                <span className="text-xs font-bold text-slate-200">
-                  איתור מהיר בתיק כלי (Instant Tool Passport):
-                </span>
-              </div>
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (passportLookupInput.trim()) {
-                    void handleOpenPassport(passportLookupInput.trim());
-                  }
-                }}
-                className="flex items-center gap-2 flex-1 sm:max-w-md"
-              >
-                <div className="relative flex-1">
-                  <Search className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
-                  <input
-                    type="text"
-                    value={passportLookupInput}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setPassportLookupInput(val);
-                      setPassportLookupFeedback(null);
-                      if (/^(?:ZR[- ]?)?\d{3,6}$/i.test(val.trim())) {
-                        void handleOpenPassport(val.trim());
-                      }
-                    }}
-                    placeholder="הזן מספר תג ZR-XXXX או סרוק ברקוד..."
-                    className="w-full h-9 bg-white/10 text-white text-xs font-bold pr-8 pl-8 rounded-xl border border-slate-700 focus:border-amber-400 focus:outline-none placeholder:text-slate-400"
-                  />
-                  {passportLookupInput && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPassportLookupInput('');
-                        setPassportLookupFeedback(null);
-                      }}
-                      className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setIsInlineScannerOpen((prev) => !prev)}
-                  className={`h-9 px-3 rounded-xl border font-bold text-xs flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0 ${
-                    isInlineScannerOpen
-                      ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-md'
-                      : 'bg-slate-800 hover:bg-slate-700 text-emerald-400 border-slate-700'
-                  }`}
-                  title="סריקת מצלמה מהירה (QR + OCR)"
-                >
-                  <ScanLine className="w-3.5 h-3.5" />
-                  <span>{isInlineScannerOpen ? 'סגור מצלמה' : 'סרוק'}</span>
-                </button>
-                <button
-                  type="submit"
-                  disabled={!passportLookupInput.trim() || isSearchingPassport}
-                  className="h-9 px-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-black text-xs transition-all active:scale-95 cursor-pointer shrink-0 flex items-center gap-1"
-                >
-                  {isSearchingPassport ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <span>אתר &rarr;</span>}
-                </button>
-              </form>
-            </div>
-
-            {/* INLINE LIVE SCANNER VIEWFINDER */}
-            {isInlineScannerOpen && (
-              <div className="bg-slate-950 border-2 border-emerald-500/40 rounded-2xl p-3 space-y-2.5 animate-in fade-in zoom-in-95 duration-150 shadow-xl">
-                <div className="flex items-center justify-between text-xs text-slate-300 font-bold px-1">
-                  {/* Segmented Mode Selector: QR vs OCR */}
-                  <div className="flex items-center p-0.5 bg-slate-900 rounded-xl border border-white/10 shadow-inner">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setInlineScanMode('qr');
-                        resetInlineOcrStatus();
-                      }}
-                      className={`px-3 py-1 rounded-lg text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${
-                        inlineScanMode === 'qr'
-                          ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/50'
-                          : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      <QrCode className="w-3.5 h-3.5" />
-                      <span>סריקת QR</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setInlineScanMode('ocr');
-                        resetInlineOcrStatus();
-                      }}
-                      className={`px-3 py-1 rounded-lg text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${
-                        inlineScanMode === 'ocr'
-                          ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-500/50'
-                          : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span>סריקת OCR</span>
-                    </button>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setIsInlineScannerOpen(false)}
-                    className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-white/10 cursor-pointer"
-                    title="סגור סורק"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-
-                <div
-                  onClick={() => void handleInlineTapToWake()}
-                  className="relative bg-black aspect-[4/3] sm:aspect-[16/9] max-h-[320px] rounded-xl overflow-hidden flex items-center justify-center cursor-pointer select-none border border-white/10 shadow-inner"
-                  title="לחץ בכל מקום במסך להפעלת / חידוש המצלמה"
-                >
-                  <video
-                    ref={inlineVideoRef}
-                    playsInline
-                    muted
-                    autoPlay
-                    onLoadedMetadata={() => {
-                      void inlineVideoRef.current?.play().catch(() => {});
-                    }}
-                    className="w-full h-full object-cover"
-                  />
-
-                  {inlineScanMode === 'qr' ? (
-                    /* QR Viewfinder (Square 2D Framing) */
-                    <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                      <div
-                        className={`w-[68%] aspect-square max-w-[220px] relative rounded-3xl flex items-center justify-center transition-all duration-200 ${
-                          inlineTargetLocked || inlineCandidateTag
-                            ? 'border-4 border-blue-400 bg-blue-500/20 shadow-[0_0_35px_rgba(59,130,246,0.8)] scale-[1.02]'
-                            : 'border-2 border-white/50 bg-white/[0.02]'
-                        }`}
-                      >
-                        {/* 4 Precision Corner Brackets */}
-                        <div className="absolute top-0 left-0 w-5 h-5 border-t-3 border-l-3 border-blue-400 rounded-tl-xl" />
-                        <div className="absolute top-0 right-0 w-5 h-5 border-t-3 border-r-3 border-blue-400 rounded-tr-xl" />
-                        <div className="absolute bottom-0 left-0 w-5 h-5 border-b-3 border-l-3 border-blue-400 rounded-bl-xl" />
-                        <div className="absolute bottom-0 right-0 w-5 h-5 border-b-3 border-r-3 border-blue-400 rounded-br-xl" />
-
-                        {inlineTargetLocked || inlineCandidateTag ? (
-                          <div className="flex flex-col items-center justify-center text-center animate-in zoom-in-95 duration-150 z-10">
-                            <CheckCircle2 className="w-9 h-9 text-blue-400 mb-1 drop-shadow-md" />
-                            <span className="font-mono text-sm font-black text-white tracking-widest drop-shadow-md" dir="ltr">
-                              {inlineCandidateTag}
-                            </span>
-                            <span className="text-[10px] font-bold text-blue-300">פותח תיק כלי...</span>
-                          </div>
-                        ) : (
-                          <div className="absolute inset-x-2 h-0.5 bg-gradient-to-r from-transparent via-blue-400 to-transparent shadow-[0_0_10px_#60a5fa] animate-[bounce_2s_infinite]" />
-                        )}
-                      </div>
-                    </div>
-                  ) : (
-                    /* Laser-Strip ROI Target Box: middle 75% width, middle 30% height */
-                    <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                      <div
-                        className={`w-[75%] h-[30%] min-h-[75px] max-h-[120px] relative rounded-2xl flex items-center justify-center transition-all duration-150 ${
-                          inlineOcrMatchedTag || inlineTargetLocked
-                            ? 'border-4 border-emerald-400 bg-emerald-500/30 shadow-[0_0_40px_rgba(16,185,129,0.9)] scale-102'
-                            : 'border-2 border-emerald-400/60 bg-emerald-950/10'
-                        }`}
-                      >
-                        {/* 4 Precision Corner Guides */}
-                        <div className="absolute top-0 left-0 w-4 h-4 border-t-3 border-l-3 border-emerald-400 rounded-tl-lg" />
-                        <div className="absolute top-0 right-0 w-4 h-4 border-t-3 border-r-3 border-emerald-400 rounded-tr-lg" />
-                        <div className="absolute bottom-0 left-0 w-4 h-4 border-b-3 border-l-3 border-emerald-400 rounded-bl-lg" />
-                        <div className="absolute bottom-0 right-0 w-4 h-4 border-b-3 border-r-3 border-emerald-400 rounded-br-lg" />
-
-                        {/* Continuous Pulsing Laser Line Centered in Strip */}
-                        <div className="absolute inset-x-2 h-0.5 bg-emerald-400 shadow-[0_0_12px_#10b981] animate-pulse" />
-
-                        {(inlineOcrMatchedTag || inlineCandidateTag) && (
-                          <div className="flex flex-col items-center justify-center text-center animate-in zoom-in-95 duration-150 z-10">
-                            <CheckCircle2 className="w-8 h-8 text-emerald-400 mb-0.5 drop-shadow-md" />
-                            <span className="font-mono text-sm font-black text-white tracking-widest drop-shadow-md" dir="ltr">
-                              {inlineOcrMatchedTag || inlineCandidateTag}
-                            </span>
-                            <span className="text-[10px] font-bold text-emerald-300">פותח תיק כלי...</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Live On-Screen Status Pill inside bottom of camera viewfinder */}
-                  <div className="absolute bottom-12 inset-x-0 flex justify-center items-center pointer-events-none z-20 px-3">
-                    <div
-                      className={`px-3.5 py-1.5 rounded-full backdrop-blur-md border text-xs font-bold flex items-center gap-2 shadow-lg transition-all duration-200 max-w-[92%] truncate ${
-                        inlineOcrMatchedTag || inlineCandidateTag
-                          ? inlineScanMode === 'qr'
-                            ? 'bg-blue-950/90 border-blue-400 text-white shadow-[0_0_20px_rgba(59,130,246,0.7)] animate-pulse'
-                            : 'bg-emerald-950/90 border-emerald-400 text-white shadow-[0_0_20px_rgba(16,185,129,0.7)] animate-pulse'
-                          : inlineScanMode === 'ocr' && inlineLastRawOcrText
-                          ? 'bg-slate-950/90 border-amber-500/60 text-amber-200'
-                          : 'bg-black/80 border-white/20 text-slate-200'
-                      }`}
-                    >
-                      {inlineOcrMatchedTag || inlineCandidateTag ? (
-                        <span className="flex items-center gap-1.5 text-emerald-300 font-black">
-                          <span>✅ זוהה: {inlineOcrMatchedTag || inlineCandidateTag} - פותח כלי!</span>
-                        </span>
-                      ) : inlineScanMode === 'ocr' && inlineLastRawOcrText ? (
-                        <span className="flex items-center gap-1.5 font-mono text-[11px]">
-                          <span className="text-amber-400">👁️ נקרא:</span>
-                          <span className="text-white font-bold tracking-wider">{inlineLastRawOcrText}</span>
-                        </span>
-                      ) : inlineScanMode === 'qr' ? (
-                        <span className="flex items-center gap-1.5 text-[11px] text-blue-300 font-bold">
-                          <span className="w-2 h-2 rounded-full bg-blue-400 animate-ping inline-block" />
-                          <span>🔍 סורק קוד QR או ברקود...</span>
-                        </span>
-                      ) : (
-                        <span className="flex items-center gap-1.5 text-[11px] text-emerald-300 font-bold">
-                          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block" />
-                          <span>🔍 סורק טקסט בשטח הקו הירוק...</span>
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Floating Controls on Camera Feed (Flashlight + Flip Camera) */}
-                  <div className="absolute bottom-2.5 inset-x-3 flex items-center justify-between pointer-events-none z-10">
-                    <div className="pointer-events-auto" onClick={(e) => e.stopPropagation()}>
-                      {inlineTorchSupported ? (
-                        <button
-                          type="button"
-                          onClick={handleToggleInlineTorch}
-                          className={`w-9 h-9 rounded-full flex items-center justify-center backdrop-blur-md border shadow-md transition-all cursor-pointer ${
-                            inlineTorchEnabled
-                              ? 'bg-amber-500 text-slate-950 border-amber-300'
-                              : 'bg-black/50 text-white border-white/20 hover:bg-black/70'
-                          }`}
-                          title={inlineTorchEnabled ? 'כיבוי פנס' : 'הפעל פנס'}
-                        >
-                          {inlineTorchEnabled ? (
-                            <ZapOff className="w-3.5 h-3.5 fill-slate-950" />
-                          ) : (
-                            <Zap className="w-3.5 h-3.5" />
-                          )}
-                        </button>
-                      ) : (
-                        <div />
-                      )}
-                    </div>
-
-                    <div className="pointer-events-auto" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        type="button"
-                        onClick={() => void handleFlipInlineCamera()}
-                        className="w-9 h-9 rounded-full bg-black/50 hover:bg-black/70 text-white border border-white/20 flex items-center justify-center backdrop-blur-md shadow-md transition-all active:scale-90 cursor-pointer"
-                        title="החלף מצלמה (Flip Camera)"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {inlineCameraError && (
-                    <div className="absolute inset-0 bg-slate-950/95 flex flex-col items-center justify-center p-4 text-center space-y-2 z-20">
-                      <AlertTriangle className="w-8 h-8 text-rose-500" />
-                      <p className="text-xs font-bold text-rose-300">{inlineCameraError}</p>
-                      <button
-                        type="button"
-                        onClick={() => void startInlineCamera()}
-                        className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5" />
-                        <span>נסה שוב</span>
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-            {passportLookupFeedback && (
-              <div className="p-2 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-bold flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                <span>{passportLookupFeedback}</span>
-              </div>
-            )}
-
-            {/* 3. OVERDUE ALERTS BOX (כלים באיחור להחזרה) */}
-            {data.overdueAssets.length > 0 && (
-              <div className="rounded-2xl border-2 border-rose-200 bg-rose-50/40 p-4 shadow-sm space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-rose-950 font-black">
-                    <AlertTriangle className="w-4 h-4 text-rose-600" />
-                    <h3 className="text-sm font-black">
-                      כלים באיחור להחזרה &bull; מעקב דחוף ({data.overdueAssets.length})
-                    </h3>
-                  </div>
-                  <span className="text-[10px] font-bold text-rose-700 bg-rose-100 px-2 py-0.5 rounded-full border border-rose-200">
-                    טיפול מיידי
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 max-h-[260px] overflow-y-auto pr-1">
-                  {data.overdueAssets.map((tool) => {
-                    const waLink = getWhatsAppLink(
-                      tool.workerPhone,
-                      tool.workerName,
-                      tool.toolName,
-                      tool.qrCode,
-                      tool.daysOverdue
-                    );
-
-                    return (
-                      <div
-                        key={tool.assetId}
-                        className="p-3 rounded-xl bg-white border border-rose-200 space-y-2 hover:border-rose-300 transition-colors shadow-2xs"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[10px] font-black uppercase px-1.5 py-0.5 rounded bg-rose-100 text-rose-800">
-                                +{tool.daysOverdue} ימים באיחור
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => handleOpenPassport(tool.qrCode, tool)}
-                                className="font-mono text-[11px] font-black text-rose-950 hover:underline cursor-pointer flex items-center gap-0.5"
-                                dir="ltr"
-                              >
-                                <QrCode className="w-3 h-3 text-rose-600" />
-                                <span>{tool.qrCode}</span>
-                              </button>
-                            </div>
-                            <h4 className="text-xs font-black text-slate-900 mt-1 truncate">
-                              {tool.toolName}
-                            </h4>
-                            <div className="text-[11px] text-slate-500">
-                              {tool.brand} {tool.modelNumber ? `• ${tool.modelNumber}` : ''}
-                            </div>
-                          </div>
-
-                          <div className="text-left font-bold text-xs text-slate-700">
-                            <div className="text-slate-900 font-black">{tool.workerName}</div>
-                            <div className="text-[10px] text-slate-500" dir="ltr">
-                              {tool.workerPhone || 'ללא טלפון'}
-                            </div>
-                          </div>
-                        </div>
-
-                        {tool.checkoutNote && (
-                          <div className="p-1.5 rounded-lg bg-amber-50 border border-amber-200/80 text-[10px] text-amber-950 font-medium flex items-center gap-1">
-                            <FileText className="w-3 h-3 text-amber-600 shrink-0" />
-                            <span className="italic truncate">&ldquo;{tool.checkoutNote}&rdquo;</span>
-                          </div>
-                        )}
-
-                        <div className="pt-2 border-t border-rose-100 flex items-center gap-1.5">
-                          {tool.workerPhone && (
-                            <>
-                              <a
-                                href={`tel:${tool.workerPhone}`}
-                                className="py-1 px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 text-[11px] font-bold flex items-center gap-1"
-                              >
-                                <Phone className="w-3 h-3 text-blue-600" />
-                                <span>חייג</span>
-                              </a>
-                              {waLink && (
-                                <a
-                                  href={waLink}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="py-1 px-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold flex items-center gap-1"
-                                >
-                                  <MessageCircle className="w-3 h-3" />
-                                  <span>וואטסאפ</span>
-                                </a>
-                              )}
-                            </>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => handleOpenPassport(tool.qrCode, tool)}
-                            className="py-1 px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 text-[11px] font-bold flex items-center gap-1 mr-auto cursor-pointer"
-                          >
-                            <FileText className="w-3 h-3 text-blue-600" />
-                            <span>דרכון</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setCheckinPreselectedAssetId(tool.assetId);
-                              setIsCheckinModalOpen(true);
-                            }}
-                            className="py-1 px-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-black flex items-center gap-1 shadow-xs active:scale-95 transition-all cursor-pointer"
-                          >
-                            <RotateCcw className="w-3 h-3" />
-                            <span>קליטה מהירה</span>
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* 4. ACTIVE FIELD CUSTODY SUMMARY: Live list of tools checked out from this depot */}
-            <div className="rounded-2xl border-2 border-blue-100 bg-white p-4 shadow-sm space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-blue-950 font-black">
-                  <Clock className="w-4 h-4 text-blue-600" />
-                  <h3 className="text-sm font-black">
-                    כלים מנופקים בשטח &bull; משמורת פעילה (Active Field Custody)
-                  </h3>
-                  <span className="text-[10px] font-bold bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">
-                    {(data.activeLoans || []).length} כלים
-                  </span>
-                </div>
-              </div>
-
-              {(!data.activeLoans || data.activeLoans.length === 0) ? (
-                <div className="p-5 text-center bg-slate-50 rounded-xl border border-slate-200 text-xs font-bold text-slate-500">
-                  אין כרגע כלים מנופקים בשטח ממחסן זה. כל הציוד זמין במלאי!
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 max-h-[380px] overflow-y-auto pr-1">
-                  {data.activeLoans.map((loan) => (
-                    <div
-                      key={loan.assetId}
-                      className="p-3 rounded-xl bg-slate-50/80 border border-slate-200 hover:border-blue-200 transition-colors space-y-2"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-[10px] font-mono font-bold bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded">
-                              {loan.qrCode}
-                            </span>
-                            <span className="text-[10px] text-slate-500 font-medium">
-                              {loan.brand} {loan.modelNumber ? `• ${loan.modelNumber}` : ''}
-                            </span>
-                          </div>
-                          <h4 className="text-xs font-black text-slate-900 mt-1 truncate">
-                            {loan.toolName}
-                          </h4>
-                        </div>
-
-                        <div className="text-left shrink-0">
-                          <span className="text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
-                            {(loan.daysActive ?? 0) === 0 ? 'הונפק היום' : `בשטח ${loan.daysActive} ימים`}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center justify-between text-xs pt-1.5 border-t border-slate-200/80 text-slate-600">
-                        <div className="flex items-center gap-2">
-                          <span>עובד: <strong className="text-slate-900">{loan.workerName}</strong></span>
-                          {loan.workerPhone && (
-                            <a
-                              href={`tel:${loan.workerPhone}`}
-                              className="text-[11px] text-blue-600 hover:underline flex items-center gap-0.5"
-                              dir="ltr"
-                            >
-                              <Phone className="w-2.5 h-2.5" />
-                              <span>{loan.workerPhone}</span>
-                            </a>
-                          )}
-                        </div>
-
-                        <div className="flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => handleOpenPassport(loan.qrCode, loan)}
-                            className="px-2 py-1 rounded-lg bg-white hover:bg-slate-100 text-slate-700 text-[11px] font-bold border border-slate-200 cursor-pointer"
-                            title="דרכון כלי"
-                          >
-                            דרכון
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setCheckinPreselectedAssetId(loan.assetId);
-                              setIsCheckinModalOpen(true);
-                            }}
-                            className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-black flex items-center gap-1 shadow-2xs active:scale-95 transition-all cursor-pointer"
-                            title="קליטה מהירה למחסן"
-                          >
-                            <RotateCcw className="w-3 h-3" />
-                            <span>קליטה מהירה</span>
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* 5. RETURNS DUE TODAY (COMPACT CONTAINER) */}
-            {data.returnsDueToday.length > 0 && (
-              <div className="rounded-2xl border-2 border-blue-100 bg-white p-4 shadow-sm space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-blue-950 font-black">
-                    <Calendar className="w-4 h-4 text-blue-600" />
-                    <h3 className="text-sm font-black">
-                      החזרות צפויות היום במשמרת ({data.returnsDueToday.length})
-                    </h3>
-                  </div>
-                  <span className="text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
-                    משמרת פעילה
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 max-h-[220px] overflow-y-auto pr-1">
-                  {data.returnsDueToday.map((item) => (
-                    <div
-                      key={item.assetId}
-                      className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <h4 className="text-xs font-black text-blue-950 truncate">
-                            {item.toolName}
-                          </h4>
-                          <div className="text-[10px] text-slate-500 font-mono mt-0.5" dir="ltr">
-                            {item.brand} &bull; {item.qrCode}
-                          </div>
-                        </div>
-                        <span className="text-[10px] font-bold text-blue-700 bg-blue-100/60 px-2 py-0.5 rounded">
-                          היום ב-
-                          {new Date(item.expectedReturnDate).toLocaleTimeString('he-IL', {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-200 text-slate-600">
-                        <span>
-                          אצל: <strong>{item.workerName}</strong>
-                        </span>
-                        <div className="flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => handleOpenPassport(item.qrCode, item)}
-                            className="px-2 py-0.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-800 text-[10px] font-bold border border-blue-200 cursor-pointer"
-                          >
-                            דרכון
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setCheckinPreselectedAssetId(item.assetId);
-                              setIsCheckinModalOpen(true);
-                            }}
-                            className="px-2 py-0.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-black cursor-pointer"
-                          >
-                            קלוט
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* 6. LOW STOCK ALERTS (COMPACT) */}
-            {data.lowStockAlerts.length > 0 && (
-              <div className="rounded-2xl border-2 border-amber-200 bg-white p-4 shadow-sm space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-amber-950 font-black">
-                    <TrendingDown className="w-4 h-4 text-amber-600" />
-                    <h3 className="text-sm font-black">
-                      התרעות מלאי קריטי במחסן ({data.lowStockAlerts.length})
-                    </h3>
-                  </div>
-                  <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
-                    נדרש חידוש מלאי
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                  {data.lowStockAlerts.map((alert) => (
-                    <div
-                      key={alert.categoryId}
-                      className="p-3 rounded-xl bg-amber-50/50 border border-amber-200 space-y-1"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-black text-amber-950 truncate">
-                          {alert.categoryName}
-                        </span>
-                        <span
-                          className={`text-[9px] font-black px-1.5 py-0.2 rounded uppercase ${
-                            alert.status === 'critical'
-                              ? 'bg-rose-100 text-rose-800'
-                              : 'bg-amber-100 text-amber-800'
-                          }`}
-                        >
-                          {alert.status === 'critical' ? 'קריטי' : 'נמוך'}
-                        </span>
-                      </div>
-                      <div className="flex items-baseline gap-1 text-xs">
-                        <span className="text-lg font-black text-amber-950">
-                          {alert.availableCount}
-                        </span>
-                        <span className="text-slate-500 text-[11px]">
-                          זמינים (סף: {alert.minStockThreshold})
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* 7. ZERO STATE ALERT */}
-            {data.availableCount === 0 && data.checkedOutCount === 0 && data.quarantinedCount === 0 && (
-              <div className="p-6 rounded-2xl bg-amber-50/90 border-2 border-amber-200 text-center space-y-2 shadow-sm">
-                <div className="w-10 h-10 mx-auto rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center border border-amber-200">
-                  <Package className="w-5 h-5" />
-                </div>
-                <h4 className="text-sm font-black text-amber-950">
-                  אין עדיין כלים רשומים במחסן זה
-                </h4>
-                <p className="text-xs text-amber-800/90 max-w-md mx-auto">
-                  ניתן לקלוט כלי עבודה חדשים, לקודד תגיות QR או לנייד כלים ממחסנים אחרים.
-                </p>
-                <div className="pt-1 flex justify-center gap-2">
-                  <Link
-                    href="/"
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-black shadow transition-all"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>קליטת כלי חדש</span>
-                  </Link>
-                  <Link
-                    href="/catalog"
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-amber-100 text-amber-900 border border-amber-300 text-xs font-black shadow-sm transition-all"
-                  >
-                    <Layers className="w-3.5 h-3.5" />
-                    <span>צפייה בקטלוג הציוד</span>
-                  </Link>
-                </div>
-              </div>
-            )}
-          </div>
+          <WarehouseDailyOperationsTab
+            data={data}
+            selectedWarehouseId={selectedWarehouseId}
+            isPassportOpen={isPassportOpen}
+            onOpenCheckout={() => setIsCheckoutModalOpen(true)}
+            onOpenCheckin={(assetId) => {
+              setCheckinPreselectedAssetId(assetId || null);
+              setIsCheckinModalOpen(true);
+            }}
+            onOpenPassport={handleOpenPassport}
+            organizationId={currentOrganization?.id || user?.organizationId}
+          />
         )}
 
         {/* ========================================================================= */}
-        {/* TAB 2: 🚚 שינוע ובקשות שטח (TRANSFERS & REQUISITIONS)                     */}
+        {/* TAB 2: 🚚 שינוע ובקשות שטח (TRANSFERS & FIELD LOGISTICS)                   */}
         {/* ========================================================================= */}
         {activeTab === 'transfers' && (
-          <div className="space-y-5 animate-in fade-in duration-200">
-            {/* SITE STOREKEEPER: REQUEST TOOL FOR SITE BANNER */}
-        {(!isChiefOperations && !isGeneralManager) && (
-          <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-blue-700/40">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-blue-600/50 text-blue-200 flex items-center justify-center border border-blue-400/30 shrink-0">
-                <Send className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="text-sm font-black text-white flex items-center gap-2">
-                  <span>בקשת ציוד לאתר (מכולת שטח)</span>
-                  <span className="text-[10px] font-bold bg-blue-500/30 text-blue-200 px-2 py-0.5 rounded-full border border-blue-400/30">
-                    דרישה מבצעית ישירה
-                  </span>
-                </h3>
-                <p className="text-xs text-blue-200 mt-0.5">
-                  חסר כלי עבודה באתר? הגש דרישה מנומקת ישירות לאחראי תפעול ראשי לצורך אספקה וניוד מיידי
-                </p>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => {
-                setSiteRequestFeedback(null);
-                setRequestToolDesc('');
-                setRequestQuantity(1);
-                setRequestUrgency('NORMAL');
-                setRequestReason('');
-                setIsSiteRequestModalOpen(true);
-              }}
-              className="py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-black flex items-center justify-center gap-2 shadow-md shadow-blue-500/20 active:scale-95 transition-all cursor-pointer shrink-0"
-            >
-              <Plus className="w-4 h-4" />
-              <span>בקשת ציוד לאתר</span>
-            </button>
-          </div>
-        )}
-
-        {/* INTER-SITE EQUIPMENT TRANSFER REQUEST (Strictly Site Storekeepers Only) */}
-        {isStorekeeper && !isChiefOperations && !isGeneralManager && (
-          <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-blue-700/40">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-blue-600/50 text-blue-200 flex items-center justify-center border border-blue-400/30 shrink-0">
-                <ArrowLeftRight className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="text-sm font-black text-white flex items-center gap-2">
-                  <span>בקשת העברת ציוד בין אתרים</span>
-                  <span className="text-[10px] font-bold bg-blue-500/30 text-blue-200 px-2 py-0.5 rounded-full border border-blue-400/30">
-                    נוהל מבוקר &bull; אישור מנהל תפעול
-                  </span>
-                </h3>
-                <p className="text-xs text-blue-200 mt-0.5">
-                  חסר כלי עבודה באתר? בחר כלי זמין ממתקן אחר והגש בקשה מנומקת לאישור אחראי תפעול ראשי
-                </p>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => {
-                setTransferRequestFeedback(null);
-                setSelectedAssetToTransfer(null);
-                setTransferRequestReason('');
-                setAssetSearchQuery('');
-                setIsTransferRequestModalOpen(true);
-              }}
-              className="py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-black flex items-center justify-center gap-2 shadow-md shadow-blue-500/20 active:scale-95 transition-all cursor-pointer shrink-0"
-            >
-              <Plus className="w-4 h-4" />
-              <span>בקשת העברת ציוד בין אתרים</span>
-            </button>
-          </div>
-        )}
-
-            {/* SITE EQUIPMENT DISPATCH WITH TAG VERIFICATION & DIGITAL SIGNATURE */}
-        <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-900 via-teal-900 to-slate-900 text-white shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-emerald-700/40">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-600/50 text-emerald-200 flex items-center justify-center border border-emerald-400/30 shrink-0">
-              <FileSignature className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="text-sm font-black text-white flex items-center gap-2">
-                <span>הוצאת ציוד לאתר (אישור תיוג וחתימה)</span>
-                <span className="text-[10px] font-bold bg-emerald-500/30 text-emerald-200 px-2 py-0.5 rounded-full border border-emerald-400/30">
-                  אישור תיוג &bull; חתימה חיה
-                </span>
-              </h3>
-              <p className="text-xs text-emerald-200 mt-0.5">
-                נוהל שחרור ציוד לאתרי בנייה: אימות תג QR פיזי על הכלי והחתמה דיגיטלית של מקבל הציוד בשטח
-              </p>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => {
-              setDispatchFeedback(null);
-              setDispatchAsset(null);
-              setDispatchTagInput('');
-              setIsTagVerified(false);
-              setDispatchWorkerName('');
-              setDispatchWorkerPhone('');
-              setDispatchSignature(null);
-              setIsDispatchModalOpen(true);
-            }}
-            className="py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-black flex items-center justify-center gap-2 shadow-md shadow-emerald-500/20 active:scale-95 transition-all cursor-pointer shrink-0"
-          >
-            <PenTool className="w-4 h-4" />
-            <span>הוצאת ציוד לאתר (אישור תיוג וחתימה)</span>
-          </button>
-        </div>
-
-            {/* IN-TRANSIT EQUIPMENT ARRIVING TO THIS WAREHOUSE */}
-        {incomingTransfers.length > 0 && (
-          <div className="p-4 rounded-2xl bg-amber-50/90 border-2 border-amber-300 shadow-sm space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-amber-950 font-black">
-                <Truck className="w-5 h-5 text-amber-600" />
-                <h3 className="text-sm font-black">
-                  ציוד בשינוע הממתין לקליטה במחסן ({incomingTransfers.length})
-                </h3>
-              </div>
-              <span className="text-[11px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-200">
-                In-Transit
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[500px] overflow-y-auto pr-1">
-              {incomingTransfers.map((req) => (
-                <div
-                  key={req.id}
-                  className="p-3.5 rounded-xl bg-white border border-amber-200 shadow-xs flex flex-col justify-between gap-2"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <span className="font-mono text-[10px] font-bold text-slate-500" dir="ltr">
-                        {req.qrCode} {req.tagNumber ? `(${req.tagNumber})` : ''}
-                      </span>
-                      <h4 className="text-sm font-black text-slate-900">{req.assetName}</h4>
-                      <p className="text-xs text-slate-500">
-                        {req.assetBrand} {req.assetModel ? `• ${req.assetModel}` : ''}
-                      </p>
-                    </div>
-                    <div className="text-left text-[11px] font-bold text-slate-600">
-                      <div>ממחסן: <strong className="text-slate-900">{req.sourceWarehouseName}</strong></div>
-                      <div>ליעד: <strong className="text-blue-900">{req.targetWarehouseName}</strong></div>
-                    </div>
-                  </div>
-
-                  {req.reason && (
-                    <div className="p-2.5 rounded-xl bg-amber-50/80 border border-amber-200 text-xs text-amber-950 font-medium space-y-0.5">
-                      <div className="flex items-center gap-1 font-bold text-amber-900 text-[10px]">
-                        <Truck className="w-3 h-3 text-amber-600" />
-                        <span>🚚 הערת שינוע / סיבת העברה:</span>
-                      </div>
-                      <p className="text-xs font-bold italic leading-relaxed whitespace-pre-wrap">
-                        &ldquo;{req.reason}&rdquo;
-                      </p>
-                    </div>
-                  )}
-
-                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-                    <span className="text-[11px] text-slate-500">
-                      הוגש ע&quot;י {req.requestedBy}
-                    </span>
-                    <button
-                      type="button"
-                      disabled={receivingTransferId === req.id}
-                      onClick={() => handleCompleteReception(req)}
-                      className="py-1.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center gap-1.5 shadow-sm active:scale-95 transition-all cursor-pointer"
-                    >
-                      {receivingTransferId === req.id ? (
-                        <>
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          <span>קולט כלי...</span>
-                        </>
-                      ) : (
-                        <>
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>קליטת ציוד במחסן</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-            {/* CHIEF STOREKEEPER: IN-TRANSIT FLEET TRACKER (מעקב שינוע וציוד בדרך) */}
-        
-          <div className="bg-white border-2 border-sky-200/90 rounded-3xl p-5 shadow-sm space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-sky-100/70 border border-sky-200 text-sky-700 flex items-center justify-center shrink-0">
-                  <Truck className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
-                    <span>מעקב שינוע וציוד בדרך</span>
-                    <span className="text-xs font-bold text-slate-500 font-mono" dir="ltr">(In-Transit Fleet Logistics)</span>
-                    {inTransitFleet.length > 0 && (
-                      <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-sky-600 text-white animate-pulse">
-                        {inTransitFleet.length} בשינוע פעיל
-                      </span>
-                    )}
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    ניטור ציוד בתנועה בין מתקנים ומחסני שטח &bull; מעקב זמני שינוע, אתרי יעד ואחראי ניוד
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 self-end sm:self-auto">
-                <button
-                  type="button"
-                  onClick={() => void loadInTransitFleet()}
-                  disabled={isLoadingInTransit}
-                  className="px-3 py-1.5 rounded-xl border border-sky-200 hover:bg-sky-50 text-sky-800 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingInTransit ? 'animate-spin' : ''}`} />
-                  <span>רענן נתוני שינוע</span>
-                </button>
-              </div>
-            </div>
-
-            {isLoadingInTransit && inTransitFleet.length === 0 ? (
-              <div className="p-8 text-center bg-slate-50/70 rounded-2xl border border-slate-200 text-xs font-bold text-slate-500 flex items-center justify-center gap-2">
-                <Loader2 className="w-5 h-5 animate-spin text-sky-600" />
-                <span>טוען נתוני שינוע ציוד...</span>
-              </div>
-            ) : inTransitFleet.length === 0 ? (
-              <div className="p-6 text-center bg-slate-50/70 rounded-2xl border border-slate-200 text-xs font-bold text-slate-500 flex items-center justify-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                <span>כל הכלים נמצאים כרגע במחסנים ובאתרי העבודה &bull; אין ציוד בתנועה בין מתקנים</span>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 max-h-[500px] overflow-y-auto pr-1">
-                {inTransitFleet.map((item) => (
-                  <div
-                    key={item.id}
-                    className="p-4 rounded-2xl bg-gradient-to-br from-white to-sky-50/30 border-2 border-sky-200 shadow-sm flex flex-col justify-between gap-3.5 hover:border-sky-400 transition-all"
-                  >
-                    <div className="space-y-3">
-                      {/* Top Bar: Tool Tag, Model, and Delivery Status badge */}
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => handleOpenPassport(item.qrCode, item)}
-                              className="font-mono text-xs font-black text-indigo-900 bg-white hover:bg-indigo-50 px-2.5 py-0.5 rounded-lg border border-slate-300 hover:border-indigo-400 transition-colors cursor-pointer group flex items-center gap-1 shadow-2xs"
-                              title={`לחץ לפתיחת תיק כלי מלא עבור ${item.qrCode}`}
-                              dir="ltr"
-                            >
-                              <QrCode className="w-3.5 h-3.5 text-indigo-600 group-hover:scale-110 transition-transform" />
-                              <span className="underline decoration-indigo-300">{item.qrCode}</span>
-                            </button>
-                            {item.serialNumber && (
-                              <span className="font-mono text-[10px] text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
-                                מס&quot;ד: {item.serialNumber}
-                              </span>
-                            )}
-                          </div>
-                          <h4 className="text-base font-black text-slate-900 mt-1">
-                            {item.toolName}
-                          </h4>
-                          <p className="text-xs text-slate-500">
-                            {item.brand} {item.modelNumber ? `• דגם: ${item.modelNumber}` : ''}
-                          </p>
-                        </div>
-
-                        {/* Delivery Status Badge: 🚚 "בשינוע לשטח" (En Route) */}
-                        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-sky-500 text-white text-xs font-black shadow-xs shrink-0 animate-pulse">
-                          <Truck className="w-3.5 h-3.5" />
-                          <span>🚚 בשינוע לשטח</span>
-                        </div>
-                      </div>
-
-                      {/* Origin Warehouse (מקור) ➔ Destination Site (יעד) */}
-                      <div className="p-3 rounded-xl bg-white border border-sky-100 flex items-center justify-between text-xs shadow-xs">
-                        <div className="flex items-center gap-2 text-slate-700">
-                          <Building2 className="w-4 h-4 text-slate-400 shrink-0" />
-                          <div>
-                            <div className="text-[10px] text-slate-400 font-bold">מקור (מחסן שולח)</div>
-                            <div className="font-black text-slate-900">{item.originWarehouseName}</div>
-                          </div>
-                        </div>
-
-                        <div className="flex flex-col items-center px-2">
-                          <ArrowLeftRight className="w-4 h-4 text-sky-600" />
-                        </div>
-
-                        <div className="flex items-center gap-2 text-sky-950 text-right">
-                          <div>
-                            <div className="text-[10px] text-sky-600 font-bold">יעד (אתר מקבל)</div>
-                            <div className="font-black text-sky-900">{item.destinationWarehouseName}</div>
-                          </div>
-                          <Building2 className="w-4 h-4 text-sky-500 shrink-0" />
-                        </div>
-                      </div>
-
-                      {/* Transporter Notes if present */}
-                      {item.transporterNotes && (
-                        <div className="p-2.5 rounded-xl bg-sky-50 border border-sky-200/80 text-xs text-sky-950 font-medium space-y-0.5">
-                          <div className="flex items-center gap-1 font-bold text-sky-900 text-[10px]">
-                            <Truck className="w-3 h-3 text-sky-600" />
-                            <span>🚚 הערת שינוע / מוביל:</span>
-                          </div>
-                          <p className="text-xs font-bold italic leading-relaxed whitespace-pre-wrap">
-                            &ldquo;{item.transporterNotes}&rdquo;
-                          </p>
-                        </div>
-                      )}
-
-                      {/* Transit Details: Dispatch timestamp + elapsed transit time + authorized storekeeper */}
-                      <div className="grid grid-cols-2 gap-2 text-xs pt-1">
-                        <div className="p-2 rounded-lg bg-slate-50 border border-slate-200">
-                          <span className="text-[10px] text-slate-400 block font-bold">משך שינוע / יציאה</span>
-                          <span className="font-bold text-slate-800 flex items-center gap-1 mt-0.5">
-                            <Clock className="w-3 h-3 text-sky-600" />
-                            <span>{item.elapsedTransitTimeText}</span>
-                          </span>
-                        </div>
-
-                        <div className="p-2 rounded-lg bg-slate-50 border border-slate-200">
-                          <span className="text-[10px] text-slate-400 block font-bold">אחראי ניוד / מנפק</span>
-                          <span className="font-bold text-slate-800 flex items-center gap-1 mt-0.5 truncate">
-                            <ShieldCheck className="w-3 h-3 text-emerald-600 shrink-0" />
-                            <span className="truncate">{item.dispatchedBy}</span>
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Operational Action Buttons: Confirm Arrival & Receive (Primary) / Cancel Transfer & Rollback (Secondary) */}
-                    <div className="pt-3 border-t border-sky-100 flex items-center justify-between gap-2">
-                      {/* Primary Action: אשר הגעה וקליטה [Green Button] */}
-                      <button
-                        type="button"
-                        disabled={operatingFleetAssetId === item.assetId}
-                        onClick={() => void handleConfirmArrivalFleet(item)}
-                        className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 disabled:opacity-50 text-white text-xs font-black flex items-center justify-center gap-1.5 shadow-sm transition-all cursor-pointer"
-                        title="אשר הגעה וקליטה של הכלי במחסן היעד"
-                      >
-                        {operatingFleetAssetId === item.assetId && fleetOperationType === 'receive' ? (
-                          <>
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            <span>קולט כלי...</span>
-                          </>
-                        ) : (
-                          <>
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            <span>אשר הגעה וקליטה</span>
-                          </>
-                        )}
-                      </button>
-
-                      {/* Secondary Action: ביטול שינוע והחזרה [Outline/Cancel Button] */}
-                      <button
-                        type="button"
-                        disabled={operatingFleetAssetId === item.assetId}
-                        onClick={() => void handleCancelTransferFleet(item)}
-                        className="py-2 px-3 rounded-xl border border-rose-300 hover:bg-rose-50 hover:border-rose-400 active:scale-95 disabled:opacity-50 text-rose-700 text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer"
-                        title="ביטול שינוע והחזרה של הכלי למחסן המקור"
-                      >
-                        {operatingFleetAssetId === item.assetId && fleetOperationType === 'cancel' ? (
-                          <>
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            <span>מבטל שינוע...</span>
-                          </>
-                        ) : (
-                          <>
-                            <RotateCcw className="w-3.5 h-3.5" />
-                            <span>ביטול שינוע והחזרה</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-            {/* CHIEF STOREKEEPER: FIELD REQUISITIONS INBOX (תיבת בקשות ציוד מהאתרים) */}
-        {(isChiefOperations || isGeneralManager) && (
-          <div className="bg-white border-2 border-indigo-300/80 rounded-3xl p-5 shadow-sm space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-indigo-100/70 border border-indigo-200 text-indigo-700 flex items-center justify-center shrink-0">
-                  <Inbox className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
-                    <span>תיבת בקשות ציוד מהאתרים</span>
-                    <span className="text-xs font-bold text-slate-500 font-mono" dir="ltr">(Field Requisitions)</span>
-                    {siteRequestsInbox.length > 0 && (
-                      <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-indigo-600 text-white animate-pulse">
-                        {siteRequestsInbox.length} ממתינות
-                      </span>
-                    )}
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    דרישות כלי עבודה שהוגשו ע&quot;י מחסנאי אתרים ומכולות שטח &bull; שיוך כלי זמין ואישור ניוד
-                  </p>
-                </div>
-              </div>
-
-              {isLoadingInbox && (
-                <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
-              )}
-            </div>
-
-            {inboxFeedback && (
-              <div
-                className={`p-3 rounded-xl border text-xs font-bold flex items-center justify-between ${
-                  inboxFeedback.type === 'success'
-                    ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
-                    : 'bg-rose-50 border-rose-300 text-rose-950'
-                }`}
-              >
-                <span>{inboxFeedback.text}</span>
-                <button
-                  type="button"
-                  onClick={() => setInboxFeedback(null)}
-                  className="text-slate-400 hover:text-slate-600 cursor-pointer"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            )}
-
-            {siteRequestsInbox.length === 0 ? (
-              <div className="p-6 text-center bg-slate-50/70 rounded-2xl border border-slate-200 text-xs font-bold text-slate-500 flex items-center justify-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                <span>אין כרגע בקשות ציוד ממתינות מהאתרים &bull; כל הדרישות טופלו במלואן</span>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 max-h-[500px] overflow-y-auto pr-1">
-                {siteRequestsInbox.map((req) => (
-                  <div
-                    key={req.id}
-                    className="p-4 rounded-2xl bg-gradient-to-br from-white to-indigo-50/20 border-2 border-indigo-200 shadow-sm flex flex-col justify-between gap-3.5 hover:border-indigo-400 transition-all"
-                  >
-                    <div className="space-y-2.5">
-                      {/* Top Bar: Warehouse Name + Urgency Pill */}
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-1.5 text-xs font-black text-indigo-950 bg-indigo-50 px-2.5 py-1 rounded-xl border border-indigo-200">
-                          <Building2 className="w-3.5 h-3.5 text-indigo-600" />
-                          <span>אתר מכולה: <strong>{req.requestingWarehouseName}</strong></span>
-                        </div>
-
-                        {req.urgency === 'CRITICAL' ? (
-                          <span className="text-[11px] font-black text-white bg-rose-600 px-2.5 py-0.5 rounded-full flex items-center gap-1 shadow-xs animate-pulse">
-                            <Flame className="w-3 h-3" />
-                            <span>קריטי - עצירת עבודה</span>
-                          </span>
-                        ) : req.urgency === 'URGENT' ? (
-                          <span className="text-[11px] font-black text-amber-900 bg-amber-100 border border-amber-300 px-2.5 py-0.5 rounded-full flex items-center gap-1">
-                            <Zap className="w-3 h-3 text-amber-600" />
-                            <span>דחוף למחר</span>
-                          </span>
-                        ) : (
-                          <span className="text-[11px] font-bold text-slate-700 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full">
-                            רגיל (שוטף)
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Tool description & quantity */}
-                      <div>
-                        <h4 className="text-base font-black text-slate-900 leading-snug">
-                          {req.toolDescription}
-                        </h4>
-                        <div className="flex items-center gap-3 text-xs text-slate-500 mt-1">
-                          <span>כמות מבוקשת: <strong className="text-slate-900 font-mono text-sm">{req.quantity}</strong></span>
-                          <span>&bull;</span>
-                          <span>הוגש ע&quot;י: <strong className="text-slate-700">{req.requestedBy}</strong></span>
-                          <span>&bull;</span>
-                          <span dir="ltr">{new Date(req.createdAt).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
-                        </div>
-                      </div>
-
-                      {/* Reason */}
-                      {req.reason && (
-                        <div className="p-2.5 rounded-xl bg-indigo-50/80 border border-indigo-200 text-xs text-indigo-950 font-medium space-y-1">
-                          <div className="flex items-center gap-1.5 font-black text-indigo-900 text-[11px]">
-                            <FileText className="w-3.5 h-3.5 text-indigo-600" />
-                            <span>סיבת דרישה / הערת שטח:</span>
-                          </div>
-                          <p className="italic text-xs font-bold leading-relaxed whitespace-pre-wrap">
-                            &ldquo;{req.reason}&rdquo;
-                          </p>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* FULFILLMENT CONTROLS */}
-                    <div className="pt-3 border-t border-slate-200/80 space-y-2.5">
-                      {rejectingSiteRequestId === req.id ? (
-                        <div className="space-y-2 animate-in fade-in duration-150">
-                          <input
-                            type="text"
-                            autoFocus
-                            value={rejectReasonInput}
-                            onChange={(e) => setRejectReasonInput(e.target.value)}
-                            placeholder="סיבת הדחייה (למשל: לא קיים במלאי / יש להזמין רכש)..."
-                            className="w-full bg-white border border-rose-300 rounded-xl px-3 py-1.5 text-xs text-slate-900 font-medium focus:outline-none focus:border-rose-500"
-                          />
-                          <div className="flex items-center justify-end gap-2">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setRejectingSiteRequestId(null);
-                                setRejectReasonInput('');
-                              }}
-                              className="px-3 py-1 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
-                            >
-                              ביטול
-                            </button>
-                            <button
-                              type="button"
-                              disabled={isResolvingRequestId === req.id}
-                              onClick={() => handleResolveSiteRequest(req.id, 'REJECT')}
-                              className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-black cursor-pointer"
-                            >
-                              {isResolvingRequestId === req.id ? 'מעדכן...' : 'אשר דחייה'}
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          <div className="space-y-1">
-                            <label className="text-[11px] font-bold text-slate-600 flex items-center justify-between">
-                              <span>בחר כלי עבודה זמין לניוד לאתר:</span>
-                              <span className="text-[10px] text-slate-400 font-normal">מציג כלים במחסנים מרכזיים</span>
-                            </label>
-                            <select
-                              value={selectedAssetForRequest[req.id] || ''}
-                              onChange={(e) =>
-                                setSelectedAssetForRequest((prev) => ({
-                                  ...prev,
-                                  [req.id]: e.target.value,
-                                }))
-                              }
-                              className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-900 focus:outline-none focus:border-indigo-500 cursor-pointer"
-                            >
-                              <option value="">-- בחר כלי עבודה זמין ממתקן אחר --</option>
-                              {availableAssetsForInbox.map((a) => (
-                                <option key={a.id} value={a.id}>
-                                  {a.name} ({a.brand} {a.modelNumber || ''}) • {a.qrCode} {a.tagNumber ? `[${a.tagNumber}]` : ''} — במחסן {a.currentWarehouseName}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-
-                          <div className="flex items-center justify-end gap-2 pt-1">
-                            <button
-                              type="button"
-                              disabled={isResolvingRequestId === req.id}
-                              onClick={() => {
-                                setRejectingSiteRequestId(req.id);
-                                setRejectReasonInput('');
-                              }}
-                              className="py-1.5 px-3 rounded-xl border border-rose-200 text-rose-700 hover:bg-rose-50 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
-                            >
-                              <X className="w-3.5 h-3.5" />
-                              <span>דחה בקשה</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              disabled={isResolvingRequestId === req.id || !selectedAssetForRequest[req.id]}
-                              onClick={() => handleResolveSiteRequest(req.id, 'APPROVE')}
-                              className="py-1.5 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-xs font-black flex items-center gap-1.5 shadow-sm active:scale-95 transition-all cursor-pointer"
-                            >
-                              {isResolvingRequestId === req.id ? (
-                                <>
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                  <span>מאשר...</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Send className="w-3.5 h-3.5" />
-                                  <span>אשר ניוד לאתר</span>
-                                </>
-                              )}
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-            {/* PENDING INTER-SITE TRANSFER REQUESTS (Chief Operations / Operations Manager Approval) */}
-        {(isChiefOperations || isGeneralManager) && (
-          <div className="bg-white border-2 border-indigo-200 rounded-3xl p-5 shadow-sm space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-600 flex items-center justify-center shrink-0">
-                  <ArrowLeftRight className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
-                    <span>בקשות העברה ממתינות לאישור</span>
-                    {pendingTransfers.length > 0 && (
-                      <span className="px-2 py-0.5 rounded-full text-[11px] font-black bg-indigo-100 text-indigo-800 border border-indigo-200">
-                        {pendingTransfers.length} ממתינות
-                      </span>
-                    )}
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    אישור ניוד כלי עבודה בין אתרי ומחסני הארגון &bull; הרשאת אחראי תפעול ראשי
-                  </p>
-                </div>
-              </div>
-
-              {isLoadingTransfers && (
-                <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
-              )}
-            </div>
-
-            {transferApprovalFeedback && (
-              <div
-                className={`p-3 rounded-xl border text-xs font-bold flex items-center justify-between ${
-                  transferApprovalFeedback.type === 'success'
-                    ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
-                    : 'bg-rose-50 border-rose-300 text-rose-950'
-                }`}
-              >
-                <span>{transferApprovalFeedback.text}</span>
-                <button
-                  type="button"
-                  onClick={() => setTransferApprovalFeedback(null)}
-                  className="text-slate-400 hover:text-slate-600 cursor-pointer"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            )}
-
-            {pendingTransfers.length === 0 ? (
-              <div className="p-6 text-center bg-slate-50/70 rounded-2xl border border-slate-200 text-xs font-bold text-slate-500 flex items-center justify-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                <span>אין כרגע בקשות העברה ממתינות לאישור</span>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 max-h-[500px] overflow-y-auto pr-1">
-                {pendingTransfers.map((req) => (
-                  <div
-                    key={req.id}
-                    className="p-4 rounded-2xl bg-gradient-to-br from-slate-50 to-indigo-50/30 border-2 border-indigo-100/80 shadow-xs flex flex-col justify-between gap-3 hover:border-indigo-300 transition-all"
-                  >
-                    <div>
-                      {/* Tool Info & Tags */}
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => handleOpenPassport(req.qrCode, req)}
-                              className="font-mono text-[11px] font-black text-indigo-900 bg-white hover:bg-indigo-50 px-2 py-0.5 rounded border border-slate-200 hover:border-indigo-400 transition-colors cursor-pointer group flex items-center gap-1 shadow-2xs"
-                              title={`לחץ לפתיחת תיק כלי מלא עבור ${req.qrCode}`}
-                              dir="ltr"
-                            >
-                              <QrCode className="w-3 h-3 text-indigo-600 group-hover:scale-110 transition-transform" />
-                              <span className="underline decoration-indigo-300">{req.qrCode}</span>
-                            </button>
-                            {req.tagNumber && (
-                              <span className="font-mono text-[10px] font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200" dir="ltr">
-                                {req.tagNumber}
-                              </span>
-                            )}
-                          </div>
-                          <h4 className="text-sm font-black text-slate-900 mt-1">
-                            {req.assetName}
-                          </h4>
-                          <p className="text-xs text-slate-500">
-                            {req.assetBrand} {req.assetModel ? `• ${req.assetModel}` : ''} {req.serialNumber ? `(מס"ד: ${req.serialNumber})` : ''}
-                          </p>
-                        </div>
-                        <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 shrink-0">
-                          ממתין לאישור
-                        </span>
-                      </div>
-
-                      {/* Route: Source -> Target */}
-                      <div className="mt-3 p-2.5 rounded-xl bg-white border border-slate-200 flex items-center justify-between text-xs">
-                        <div className="flex items-center gap-1.5 text-slate-700">
-                          <Building2 className="w-3.5 h-3.5 text-slate-400" />
-                          <span>ממחסן: <strong className="text-slate-900">{req.sourceWarehouseName}</strong></span>
-                        </div>
-                        <ArrowLeftRight className="w-4 h-4 text-indigo-500 shrink-0 mx-2" />
-                        <div className="flex items-center gap-1.5 text-indigo-900">
-                          <Building2 className="w-3.5 h-3.5 text-indigo-400" />
-                          <span>ליעד: <strong>{req.targetWarehouseName}</strong></span>
-                        </div>
-                      </div>
-
-                      {/* Reason / Requester */}
-                      <div className="mt-2 text-xs space-y-1">
-                        <div className="text-slate-500">
-                          הוגש ע&quot;י: <strong className="text-slate-700">{req.requestedBy}</strong> בתאריך {new Date(req.createdAt).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                        </div>
-                        {req.reason && (
-                          <div className="p-2 rounded-lg bg-indigo-50/50 border border-indigo-100 text-indigo-950 font-medium italic text-[11px]">
-                            &quot;{req.reason}&quot;
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Action Buttons */}
-                    <div className="pt-2 border-t border-slate-200/80">
-                      {rejectingTransferId === req.id ? (
-                        <div className="space-y-2 animate-in fade-in duration-150">
-                          <input
-                            type="text"
-                            autoFocus
-                            value={rejectionReasonInput}
-                            onChange={(e) => setRejectionReasonInput(e.target.value)}
-                            placeholder="סיבת הדחייה (למשל: הכלי מיועד לפרויקט אחר)..."
-                            className="w-full bg-white border border-rose-300 rounded-xl px-3 py-1.5 text-xs text-slate-900 font-medium focus:outline-none focus:border-rose-500"
-                          />
-                          <div className="flex items-center justify-end gap-2">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setRejectingTransferId(null);
-                                setRejectionReasonInput('');
-                              }}
-                              className="px-3 py-1 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
-                            >
-                              ביטול
-                            </button>
-                            <button
-                              type="button"
-                              disabled={decidingTransferId === req.id}
-                              onClick={() => handleRejectTransfer(req.id)}
-                              className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-black cursor-pointer"
-                            >
-                              {decidingTransferId === req.id ? 'מעדכן...' : 'אשר דחייה'}
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="flex items-center justify-end gap-2">
-                          <button
-                            type="button"
-                            disabled={decidingTransferId === req.id}
-                            onClick={() => {
-                              setRejectingTransferId(req.id);
-                              setRejectionReasonInput('');
-                            }}
-                            className="py-1.5 px-3 rounded-xl border border-rose-200 text-rose-700 hover:bg-rose-50 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                            <span>דחייה</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            disabled={decidingTransferId === req.id}
-                            onClick={() => handleApproveTransfer(req.id)}
-                            className="py-1.5 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center gap-1.5 shadow-sm active:scale-95 transition-all cursor-pointer"
-                          >
-                            {decidingTransferId === req.id ? (
-                              <>
-                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                <span>מאשר...</span>
-                              </>
-                            ) : (
-                              <>
-                                <Check className="w-3.5 h-3.5" />
-                                <span>אישור העברה</span>
-                              </>
-                            )}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-            {/* SITE STOREKEEPER: INCOMING IN-TRANSIT TOOLS TO THIS SITE */}
-        {(!isChiefOperations && !isGeneralManager) && siteIncomingShipments.length > 0 && (
-          <div className="p-4 rounded-2xl bg-amber-50/90 border-2 border-amber-300 shadow-sm space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-amber-950 font-black">
-                <Truck className="w-5 h-5 text-amber-600" />
-                <h3 className="text-sm font-black">
-                  ציוד בדרך לאתר (במשלוח / In-Transit) ({siteIncomingShipments.length})
-                </h3>
-              </div>
-              <span className="text-[11px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-200">
-                ממתין לקליטה ואישור הגעה
-              </span>
-            </div>
-
-            {siteActionFeedback && (
-              <div
-                className={`p-3 rounded-xl border text-xs font-bold flex items-center justify-between ${
-                  siteActionFeedback.type === 'success'
-                    ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
-                    : 'bg-rose-50 border-rose-300 text-rose-950'
-                }`}
-              >
-                <span>{siteActionFeedback.text}</span>
-                <button
-                  type="button"
-                  onClick={() => setSiteActionFeedback(null)}
-                  className="text-slate-400 hover:text-slate-600 cursor-pointer"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 max-h-[500px] overflow-y-auto pr-1">
-              {siteIncomingShipments.map((req) => (
-                <div
-                  key={req.id}
-                  className="p-4 rounded-xl bg-white border border-amber-300/80 shadow-xs flex flex-col justify-between gap-3"
-                >
-                  <div>
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          {req.assignedAssetQr && (
-                            <span className="font-mono text-[11px] font-black text-slate-700 bg-slate-50 px-2 py-0.5 rounded border border-slate-200" dir="ltr">
-                              {req.assignedAssetQr}
-                            </span>
-                          )}
-                          {req.assignedAssetTag && (
-                            <span className="font-mono text-[10px] font-bold text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200" dir="ltr">
-                              {req.assignedAssetTag}
-                            </span>
-                          )}
-                        </div>
-                        <h4 className="text-sm font-black text-slate-900 mt-1">
-                          {req.assignedAssetName || req.toolDescription}
-                        </h4>
-                        <p className="text-xs text-slate-500">
-                          {req.assignedAssetBrand} {req.assignedAssetModel ? `• ${req.assignedAssetModel}` : ''} {req.assignedAssetSerial ? `(מס"ד: ${req.assignedAssetSerial})` : ''}
-                        </p>
-                      </div>
-                      <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 shrink-0">
-                        במשלוח לאתר
-                      </span>
-                    </div>
-
-                    <div className="mt-2.5 p-2 rounded-lg bg-amber-50/50 border border-amber-200/60 text-xs space-y-1">
-                      <div className="text-slate-700">
-                        נשלח מ: <strong className="text-slate-900">{req.sourceWarehouseName || 'מחסן מרכזי'}</strong>
-                      </div>
-                      <div className="text-slate-500 text-[11px]">
-                        אושר ע&quot;י: <strong>{req.decidedBy || 'אחראי תפעול'}</strong> &bull; {req.decidedAt ? new Date(req.decidedAt).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="pt-2 border-t border-slate-100 flex items-center justify-end">
-                    <button
-                      type="button"
-                      disabled={receivingSiteRequestId === req.id}
-                      onClick={() => handleConfirmSiteReception(req)}
-                      className="py-1.5 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center gap-1.5 shadow-sm active:scale-95 transition-all cursor-pointer"
-                    >
-                      {receivingSiteRequestId === req.id ? (
-                        <>
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          <span>קולט כלי...</span>
-                        </>
-                      ) : (
-                        <>
-                          <PackageCheck className="w-4 h-4" />
-                          <span>קליטה ואישור הגעה באתר</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-            {/* SITE STOREKEEPER: MY REQUESTS STATUS TRACKER */}
-        {(!isChiefOperations && !isGeneralManager) && mySiteRequests.length > 0 && (
-          <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-black text-slate-900 flex items-center gap-2">
-                  <ClipboardCheck className="w-4 h-4 text-indigo-600" />
-                  <span>סטטוס בקשות שנשלחו מהאתר ({mySiteRequests.length})</span>
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  מעקב אחר דרישות ציוד שהוגשו לאחראי תפעול ראשי
-                </p>
-              </div>
-
-              {isLoadingSiteData && (
-                <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
-              )}
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {mySiteRequests.slice(0, 6).map((req) => (
-                <div
-                  key={req.id}
-                  className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex flex-col justify-between gap-2"
-                >
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between gap-1.5">
-                      <span className="text-[10px] font-bold text-slate-500" dir="ltr">
-                        {new Date(req.createdAt).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit' })}
-                      </span>
-                      {req.status === 'PENDING' ? (
-                        <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
-                          🟡 בטיפול
-                        </span>
-                      ) : req.status === 'IN_TRANSIT' ? (
-                        <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 animate-pulse">
-                          🟢 אושר ובדרך
-                        </span>
-                      ) : req.status === 'REJECTED' ? (
-                        <span className="text-[10px] font-bold text-rose-800 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200">
-                          🔴 נדחה
-                        </span>
-                      ) : (
-                        <span className="text-[10px] font-bold text-slate-700 bg-slate-200 px-2 py-0.5 rounded-full">
-                          ⚪ נקלט באתר
-                        </span>
-                      )}
-                    </div>
-
-                    <h4 className="text-xs font-black text-slate-900 leading-snug">
-                      {req.toolDescription}
-                    </h4>
-                    <div className="text-[11px] text-slate-500">
-                      כמות: <strong className="text-slate-800">{req.quantity}</strong>
-                      {req.urgency === 'CRITICAL' && (
-                        <span className="text-rose-600 font-bold mr-2">&bull; קריטי</span>
-                      )}
-                      {req.urgency === 'URGENT' && (
-                        <span className="text-amber-600 font-bold mr-2">&bull; דחוף</span>
-                      )}
-                    </div>
-
-                    {req.rejectionReason && (
-                      <div className="p-1.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-[10px]">
-                        סיבת דחייה: {req.rejectionReason}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-          </div>
+          <WarehouseTransfersTab
+            isChiefOperations={isChiefOperations}
+            isGeneralManager={isGeneralManager}
+            isStorekeeper={isStorekeeper}
+            onOpenSiteRequestModal={() => setIsSiteRequestModalOpen(true)}
+            onOpenTransferRequestModal={() => setIsTransferRequestModalOpen(true)}
+            onOpenDispatchModal={() => setIsDispatchModalOpen(true)}
+            inTransitFleet={inTransitFleet}
+            isLoadingInTransit={isLoadingInTransit}
+            onRefreshInTransitFleet={loadInTransitFleet}
+            operatingFleetAssetId={operatingFleetAssetId}
+            fleetOperationType={fleetOperationType}
+            onConfirmArrivalFleet={handleConfirmArrivalFleet}
+            onCancelTransferFleet={handleCancelTransferFleet}
+            incomingTransfers={incomingTransfers}
+            receivingTransferId={receivingTransferId}
+            onCompleteReception={handleCompleteReception}
+            siteRequestsInbox={siteRequestsInbox}
+            isLoadingInbox={isLoadingInbox}
+            inboxFeedback={inboxFeedback}
+            setInboxFeedback={setInboxFeedback}
+            availableAssetsForInbox={availableAssetsForInbox}
+            selectedAssetForRequest={selectedAssetForRequest}
+            setSelectedAssetForRequest={setSelectedAssetForRequest}
+            rejectingSiteRequestId={rejectingSiteRequestId}
+            setRejectingSiteRequestId={setRejectingSiteRequestId}
+            rejectReasonInput={rejectReasonInput}
+            setRejectReasonInput={setRejectReasonInput}
+            isResolvingRequestId={isResolvingRequestId}
+            onResolveSiteRequest={handleResolveSiteRequest}
+            pendingTransfers={pendingTransfers}
+            isLoadingTransfers={isLoadingTransfers}
+            transferApprovalFeedback={transferApprovalFeedback}
+            setTransferApprovalFeedback={setTransferApprovalFeedback}
+            rejectingTransferId={rejectingTransferId}
+            setRejectingTransferId={setRejectingTransferId}
+            rejectionReasonInput={rejectionReasonInput}
+            setRejectionReasonInput={setRejectionReasonInput}
+            decidingTransferId={decidingTransferId}
+            onApproveTransfer={handleApproveTransfer}
+            onRejectTransfer={handleRejectTransfer}
+            onRefreshPendingTransfers={loadPendingTransfers}
+            siteIncomingShipments={siteIncomingShipments}
+            mySiteRequests={mySiteRequests}
+            isLoadingSiteData={isLoadingSiteData}
+            onRefreshSiteData={() => loadSiteStorekeeperData(selectedWarehouseId)}
+            receivingSiteRequestId={receivingSiteRequestId}
+            siteActionFeedback={siteActionFeedback}
+            setSiteActionFeedback={setSiteActionFeedback}
+            onConfirmSiteReception={handleConfirmSiteReception}
+            onOpenPassport={handleOpenPassport}
+          />
         )}
 
         {/* ========================================================================= */}
-        {/* TAB 3: 🔧 מרכז אחזקה ותיקונים (MAINTENANCE HUB)                           */}
+        {/* TAB 3: 🔧 מרכז אחזקה ותיקונים (CENTRAL MAINTENANCE & REPAIRS)              */}
         {/* ========================================================================= */}
         {activeTab === 'maintenance' && (
-          <div className="space-y-5 animate-in fade-in duration-200">
-            {/* CHIEF STOREKEEPER: CENTRAL MAINTENANCE & REPAIR HUB (מרכז אחזקה ובקרת תיקונים) */}
-        
-          <div className="bg-white border-2 border-amber-300/80 rounded-3xl p-5 shadow-sm space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-amber-100/70 border border-amber-200 text-amber-700 flex items-center justify-center shrink-0">
-                  <Wrench className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
-                    <span>מרכז אחזקה ובקרת תיקונים</span>
-                    <span className="text-xs font-bold text-slate-500 font-mono" dir="ltr">(Central Maintenance & Repair Hub)</span>
-                    {maintenanceAssets.length > 0 && (
-                      <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-amber-600 text-white animate-pulse">
-                        {maintenanceAssets.length} כלים בטיפול
-                      </span>
-                    )}
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    ספר מעקב אחזקה מרכזי &bull; שליטה במעבדות שירות, קליטה מתיקון והחזרה למלאי, וגריטת ציוד תקול
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 self-end sm:self-auto">
-                <button
-                  type="button"
-                  onClick={() => void loadMaintenanceAssets()}
-                  disabled={isLoadingMaintenance}
-                  className="px-3 py-1.5 rounded-xl border border-amber-200 hover:bg-amber-50 text-amber-900 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingMaintenance ? 'animate-spin' : ''}`} />
-                  <span>רענן נתוני אחזקה</span>
-                </button>
-              </div>
-            </div>
-
-            {isLoadingMaintenance && maintenanceAssets.length === 0 ? (
-              <div className="p-8 text-center bg-slate-50/70 rounded-2xl border border-slate-200 text-xs font-bold text-slate-500 flex items-center justify-center gap-2">
-                <Loader2 className="w-5 h-5 animate-spin text-amber-600" />
-                <span>טוען נתוני תיקונים ומעבדות...</span>
-              </div>
-            ) : maintenanceAssets.length === 0 ? (
-              <div className="p-6 text-center bg-slate-50/70 rounded-2xl border border-slate-200 text-xs font-bold text-slate-500 flex items-center justify-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                <span>כל הציוד הארגוני תקין ועומד לרשות המחסנים והאתרים &bull; אין כרגע כלים בתיקון או במעבדה</span>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 max-h-[500px] overflow-y-auto pr-1">
-                {maintenanceAssets.map((asset) => (
-                  <div
-                    key={asset.id}
-                    className="p-4 rounded-2xl bg-gradient-to-br from-white to-amber-50/30 border-2 border-amber-200 shadow-sm flex flex-col justify-between gap-4 hover:border-amber-400 transition-all"
-                  >
-                    <div className="space-y-3">
-                      {/* Top Bar: Tool Tag & Model + Status Badge */}
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => handleOpenPassport(asset.qrCode, asset)}
-                              className="font-mono text-xs font-black text-amber-950 bg-amber-50 hover:bg-amber-100 px-2.5 py-0.5 rounded-lg border border-amber-300 hover:border-amber-500 transition-colors cursor-pointer group flex items-center gap-1 shadow-2xs"
-                              title={`לחץ לפתיחת תיק כלי מלא עבור ${asset.qrCode}`}
-                              dir="ltr"
-                            >
-                              <QrCode className="w-3.5 h-3.5 text-amber-700 group-hover:scale-110 transition-transform" />
-                              <span className="underline decoration-amber-400">{asset.qrCode}</span>
-                            </button>
-                            {asset.serialNumber && (
-                              <span className="font-mono text-[10px] text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
-                                מס&quot;ד: {asset.serialNumber}
-                              </span>
-                            )}
-                          </div>
-                          <h4 className="text-base font-black text-slate-900 mt-1">
-                            {asset.toolName}
-                          </h4>
-                          <p className="text-xs text-slate-500">
-                            {asset.brand} {asset.modelNumber ? `• דגם: ${asset.modelNumber}` : ''}
-                          </p>
-                        </div>
-
-                        <span className="text-[11px] font-black text-amber-900 bg-amber-100 border border-amber-300 px-2.5 py-1 rounded-full flex items-center gap-1.5 shrink-0">
-                          <Wrench className="w-3.5 h-3.5 text-amber-700" />
-                          <span>בתיקון / מעבדה</span>
-                        </span>
-                      </div>
-
-                      {/* Fault Description Callout from custody_ledger */}
-                      <div className="p-3 rounded-xl bg-amber-50/70 border border-amber-200/90 text-xs space-y-1">
-                        <div className="font-black text-amber-950 flex items-center gap-1.5">
-                          <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                          <span>תיאור תקלה ודוח פגם:</span>
-                        </div>
-                        <p className="text-amber-900 font-medium leading-relaxed">
-                          {asset.faultDescription}
-                        </p>
-                      </div>
-
-                      {/* Lab / Tech + Reporting Site + Dispatch Date */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                        <div className="p-2.5 rounded-xl bg-white border border-slate-200 space-y-1">
-                          <span className="text-[10px] text-slate-400 font-bold block">מעבדה / טכנאי מטפל</span>
-                          <span className="font-black text-slate-900 flex items-center gap-1.5">
-                            <Building2 className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                            <span className="truncate">{asset.assignedTechnicianOrLab}</span>
-                          </span>
-                        </div>
-
-                        <div className="p-2.5 rounded-xl bg-white border border-slate-200 space-y-1">
-                          <span className="text-[10px] text-slate-400 font-bold block">מחסן / אתר מדווח</span>
-                          <span className="font-bold text-slate-800 flex items-center gap-1.5">
-                            <Building2 className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                            <span className="truncate">{asset.reportingWarehouseName}</span>
-                          </span>
-                        </div>
-
-                        <div className="p-2.5 rounded-xl bg-white border border-slate-200 sm:col-span-2 flex items-center justify-between text-slate-600">
-                          <span className="flex items-center gap-1.5">
-                            <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                            <span>נשלח לתיקון: <strong>{new Date(asset.dispatchedDate).toLocaleDateString('he-IL')}</strong></span>
-                          </span>
-                          <span className="font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded text-[11px]">
-                            {asset.elapsedTimeText}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Direct Action Buttons on each card */}
-                    <div className="pt-3 border-t border-amber-200/80 flex items-center justify-between gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleOpenRetireModal(asset)}
-                        className="py-2 px-3 rounded-xl border border-rose-200 text-rose-700 hover:bg-rose-50 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>גריטת כלי / השבתה</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleOpenRepairModal(asset)}
-                        className="py-2 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center gap-1.5 shadow-sm active:scale-95 transition-all cursor-pointer"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5" />
-                        <span>קליטה מתיקון / Return to Stock</span>
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-          </div>
+          <WarehouseMaintenanceTab
+            maintenanceAssets={maintenanceAssets}
+            isLoadingMaintenance={isLoadingMaintenance}
+            onRefreshMaintenance={loadMaintenanceAssets}
+            onOpenPassport={(qrCode, asset) => handleOpenPassport(qrCode, asset)}
+            onOpenRepairModal={(asset) => setRepairModalAsset(asset)}
+            onOpenRetireModal={(asset) => setRetireModalAsset(asset)}
+          />
         )}
 
         {/* ========================================================================= */}
@@ -3919,14 +1020,17 @@ export default function WarehouseDashboardView({
         {/* ========================================================================= */}
         {activeTab === 'notes' && (
           <div className="space-y-5 animate-in fade-in duration-200">
-            {/* CENTRAL NOTES & FIELD REMARKS FEED (מרכז הערות ותיעוד שטח) */}
-        <ChiefNotesFeedView
-          warehouses={data.allWarehouses || data.warehouses}
-          onOpenPassport={handleOpenPassport}
-        />
+            <ChiefNotesFeedView
+              warehouses={data.allWarehouses || data.warehouses}
+              onOpenPassport={handleOpenPassport}
+            />
           </div>
         )}
       </div>
+
+      {/* ========================================================================= */}
+      {/* MODALS & DIALOGS                                                          */}
+      {/* ========================================================================= */}
 
       {/* DIGITAL TOOL PASSPORT MODAL */}
       <ToolPassportModal
@@ -3935,1669 +1039,13 @@ export default function WarehouseDashboardView({
         onClose={() => {
           setIsPassportOpen(false);
           setPassportAsset(null);
-          inlineIsPausedRef.current = false;
-          if (isInlineScannerOpen) {
-            void inlineVideoRef.current?.play().catch(() => {
-              void startInlineCamera();
-            });
-          }
         }}
         onAssetUpdated={(updated) => {
           setPassportAsset(updated);
         }}
       />
 
-      {/* CHIEF OPERATIONS: INTER-DEPOT ASSET TRANSFER MODAL */}
-      {isTransferModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white border-2 border-indigo-200 rounded-3xl max-w-md w-full shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="p-5 bg-gradient-to-r from-indigo-900 to-slate-900 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-indigo-600/50 flex items-center justify-center border border-indigo-400/30">
-                  <ArrowLeftRight className="w-5 h-5 text-indigo-200" />
-                </div>
-                <div>
-                  <h3 className="font-black text-sm text-white">ניוד ציוד בין מחסנים ואתרים</h3>
-                  <p className="text-[11px] text-indigo-200">סמכות תפעולית: העברת בעלות ומיקום כלי</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsTransferModalOpen(false)}
-                className="p-1 rounded-lg hover:bg-white/10 text-white cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleTransferSubmit} className="p-5 space-y-4">
-              {transferFeedback && (
-                <div
-                  className={`p-3 rounded-xl text-xs font-bold flex items-center gap-2 border ${
-                    transferFeedback.type === 'success'
-                      ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
-                      : 'bg-rose-50 text-rose-900 border-rose-300'
-                  }`}
-                >
-                  {transferFeedback.type === 'success' ? (
-                    <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                  ) : (
-                    <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                  )}
-                  <span>{transferFeedback.text}</span>
-                </div>
-              )}
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  ברקוד / QR של הכלי להעברה <span className="text-indigo-600">*</span>:
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={transferQrCode}
-                  onChange={(e) => setTransferQrCode(e.target.value)}
-                  placeholder="לדוגמה: TOOL-DEW-01 או סריקת ברקוד"
-                  dir="ltr"
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-mono font-bold focus:border-indigo-600 focus:bg-white focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  מתקן / מחסן יעד <span className="text-indigo-600">*</span>:
-                </label>
-                <select
-                  value={transferTargetWhId}
-                  onChange={(e) => setTransferTargetWhId(e.target.value)}
-                  className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-bold focus:border-indigo-600 focus:outline-none"
-                >
-                  {warehouses
-                    ?.filter((w) => w.id !== selectedWarehouseId)
-                    .map((wh) => (
-                      <option key={wh.id} value={wh.id}>
-                        {wh.name} {wh.code ? `(${wh.code})` : ''}
-                      </option>
-                    ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  סיבת העברה / הערות תפעול:
-                </label>
-                <textarea
-                  rows={2}
-                  value={transferNotes}
-                  onChange={(e) => setTransferNotes(e.target.value)}
-                  placeholder="לדוגמה: תגבור ציוד לפרויקט גשרים, החלפת כלי תקול באתר..."
-                  className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-xs text-slate-900 font-medium focus:border-indigo-600 focus:outline-none resize-none"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsTransferModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
-                >
-                  ביטול
-                </button>
-                <button
-                  type="submit"
-                  disabled={isTransferring}
-                  className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-black flex items-center gap-1.5 shadow-md cursor-pointer transition-all"
-                >
-                  {isTransferring ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>מעביר כלי...</span>
-                    </>
-                  ) : (
-                    <>
-                      <ArrowLeftRight className="w-3.5 h-3.5" />
-                      <span>בצע ניוד למתקן היעד</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* CHIEF OPERATIONS: STOCK RECONCILIATION MODAL */}
-      {isReconcileModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white border-2 border-indigo-200 rounded-3xl max-w-md w-full shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="p-5 bg-gradient-to-r from-indigo-900 to-slate-900 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-emerald-600/50 flex items-center justify-center border border-emerald-400/30">
-                  <ClipboardCheck className="w-5 h-5 text-emerald-200" />
-                </div>
-                <div>
-                  <h3 className="font-black text-sm text-white">ספירת מלאי מבוקרת וסנכרון מתקן</h3>
-                  <p className="text-[11px] text-indigo-200">אימות פיזי של הציוד מול ספר המחסן</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsReconcileModalOpen(false)}
-                className="p-1 rounded-lg hover:bg-white/10 text-white cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleReconcileSubmit} className="p-5 space-y-4">
-              {reconcileFeedback && (
-                <div
-                  className={`p-3 rounded-xl text-xs font-bold flex items-center gap-2 border ${
-                    reconcileFeedback.type === 'success'
-                      ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
-                      : 'bg-rose-50 text-rose-900 border-rose-300'
-                  }`}
-                >
-                  {reconcileFeedback.type === 'success' ? (
-                    <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                  ) : (
-                    <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                  )}
-                  <span>{reconcileFeedback.text}</span>
-                </div>
-              )}
-
-              <div className="p-3.5 rounded-2xl bg-indigo-50/70 border border-indigo-200 space-y-1">
-                <span className="text-[11px] font-bold text-indigo-900 block">מתקן בביקורת:</span>
-                <span className="text-sm font-black text-indigo-950 block">{data.warehouse.name}</span>
-                <div className="flex items-center gap-3 text-xs text-slate-600 pt-1">
-                  <span>זמינים: <strong>{data.availableCount}</strong></span>
-                  <span>בשטח: <strong>{data.checkedOutCount}</strong></span>
-                  <span>השבתה: <strong>{data.quarantinedCount}</strong></span>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  הערות ספירה / ממצאי בדיקה פיזית:
-                </label>
-                <textarea
-                  rows={3}
-                  value={discrepancyNotes}
-                  onChange={(e) => setDiscrepancyNotes(e.target.value)}
-                  placeholder="לדוגמה: כל הכלים במדפי המחסן אומתו פיזית, ללא פערים או חוסרים..."
-                  className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-xs text-slate-900 font-medium focus:border-indigo-600 focus:outline-none resize-none"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsReconcileModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
-                >
-                  ביטול
-                </button>
-                <button
-                  type="submit"
-                  disabled={isReconciling}
-                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-black flex items-center gap-1.5 shadow-md cursor-pointer transition-all"
-                >
-                  {isReconciling ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>מאמת ספירה...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Check className="w-3.5 h-3.5" />
-                      <span>אשר ספירת מלאי רשמית</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-      {/* STOREKEEPER: INTER-SITE EQUIPMENT TRANSFER REQUEST MODAL */}
-      {isTransferRequestModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white border-2 border-blue-200 rounded-3xl max-w-lg w-full shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 max-h-[90vh] flex flex-col">
-            <div className="p-5 bg-gradient-to-r from-blue-900 to-indigo-900 text-white flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-blue-600/50 flex items-center justify-center border border-blue-400/30">
-                  <ArrowLeftRight className="w-5 h-5 text-blue-200" />
-                </div>
-                <div>
-                  <h3 className="font-black text-sm text-white">בקשת העברת ציוד בין אתרים</h3>
-                  <p className="text-[11px] text-blue-200">הגשת בקשה מנומקת לאישור אחראי תפעול ראשי</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsTransferRequestModalOpen(false)}
-                className="p-1 rounded-lg hover:bg-white/10 text-white cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSubmitTransferRequest} className="p-5 space-y-4 overflow-y-auto flex-1">
-              {transferRequestFeedback && (
-                <div
-                  className={`p-3 rounded-xl text-xs font-bold flex items-center gap-2 border ${
-                    transferRequestFeedback.type === 'success'
-                      ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
-                      : 'bg-rose-50 text-rose-900 border-rose-300'
-                  }`}
-                >
-                  {transferRequestFeedback.type === 'success' ? (
-                    <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                  ) : (
-                    <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                  )}
-                  <span>{transferRequestFeedback.text}</span>
-                </div>
-              )}
-
-              {/* Target Warehouse Selection */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  מתקן / מחסן יעד לקליטה <span className="text-blue-600">*</span>:
-                </label>
-                <select
-                  value={transferRequestTargetWhId}
-                  onChange={(e) => {
-                    setTransferRequestTargetWhId(e.target.value);
-                    setSelectedAssetToTransfer(null);
-                  }}
-                  className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-bold focus:border-blue-600 focus:outline-none"
-                >
-                  {warehouses
-                    .filter((w) => w.id !== 'all')
-                    .map((wh) => (
-                      <option key={wh.id} value={wh.id}>
-                        {wh.name} {wh.code ? `(${wh.code})` : ''}
-                      </option>
-                    ))}
-                </select>
-                <p className="text-[11px] text-slate-500 mt-1">
-                  המחסן שאליו יועבר הכלי לאחר אישור מנהל התפעול
-                </p>
-              </div>
-
-              {/* Selected Asset or Asset Picker */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  בחר כלי עבודה ממתקן אחר <span className="text-blue-600">*</span>:
-                </label>
-
-                {selectedAssetToTransfer ? (
-                  <div className="p-3.5 rounded-2xl bg-blue-50 border-2 border-blue-200 flex items-center justify-between gap-3">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-blue-200 text-blue-900">
-                          {selectedAssetToTransfer.currentWarehouseName}
-                        </span>
-                        <span className="font-mono text-xs font-bold text-slate-500" dir="ltr">
-                          {selectedAssetToTransfer.qrCode}
-                        </span>
-                      </div>
-                      <h4 className="text-sm font-black text-blue-950 mt-1">
-                        {selectedAssetToTransfer.name}
-                      </h4>
-                      <p className="text-xs text-slate-600">
-                        {selectedAssetToTransfer.brand} {selectedAssetToTransfer.modelNumber ? `• ${selectedAssetToTransfer.modelNumber}` : ''}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedAssetToTransfer(null)}
-                      className="px-2.5 py-1 rounded-lg bg-white hover:bg-slate-100 text-rose-700 text-xs font-bold border border-slate-200 cursor-pointer"
-                    >
-                      החלף כלי
-                    </button>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    <div className="relative">
-                      <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                      <input
-                        type="text"
-                        value={assetSearchQuery}
-                        onChange={(e) => setAssetSearchQuery(e.target.value)}
-                        placeholder="סנן לפי שם כלי, מותג, מחסן או מק&quot;ט..."
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl pr-9 pl-3.5 py-2 text-xs text-slate-900 font-medium focus:border-blue-600 focus:bg-white focus:outline-none"
-                      />
-                    </div>
-
-                    <div className="border border-slate-200 rounded-2xl max-h-48 overflow-y-auto divide-y divide-slate-100 bg-slate-50/50">
-                      {isLoadingAvailableAssets ? (
-                        <div className="p-4 text-center text-xs text-slate-500 flex items-center justify-center gap-2">
-                          <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
-                          <span>טוען כלים זמינים במחסנים אחרים...</span>
-                        </div>
-                      ) : availableAssets.length === 0 ? (
-                        <div className="p-4 text-center text-xs text-slate-500">
-                          לא נמצאו כלים זמינים במחסנים אחרים להעברה
-                        </div>
-                      ) : (
-                        availableAssets
-                          .filter((a) => {
-                            if (!assetSearchQuery.trim()) return true;
-                            const q = assetSearchQuery.toLowerCase();
-                            return (
-                              a.name.toLowerCase().includes(q) ||
-                              a.brand.toLowerCase().includes(q) ||
-                              (a.modelNumber && a.modelNumber.toLowerCase().includes(q)) ||
-                              a.qrCode.toLowerCase().includes(q) ||
-                              a.currentWarehouseName.toLowerCase().includes(q)
-                            );
-                          })
-                          .map((asset) => (
-                            <div
-                              key={asset.id}
-                              onClick={() => setSelectedAssetToTransfer(asset)}
-                              className="p-2.5 flex items-center justify-between hover:bg-blue-50/80 cursor-pointer transition-colors"
-                            >
-                              <div>
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-[10px] font-bold text-blue-800 bg-blue-100 px-1.5 py-0.5 rounded">
-                                    {asset.currentWarehouseName}
-                                  </span>
-                                  <span className="font-mono text-[10px] text-slate-500" dir="ltr">
-                                    {asset.qrCode}
-                                  </span>
-                                </div>
-                                <div className="text-xs font-black text-slate-900 mt-0.5">
-                                  {asset.name}
-                                </div>
-                                <div className="text-[11px] text-slate-500">
-                                  {asset.brand} {asset.modelNumber ? `• ${asset.modelNumber}` : ''}
-                                </div>
-                              </div>
-                              <button
-                                type="button"
-                                className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shrink-0"
-                              >
-                                בחר
-                              </button>
-                            </div>
-                          ))
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Reason / Notes */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  סיבת הבקשה / צורך תפעולי באתר <span className="text-blue-600">*</span>:
-                </label>
-                <textarea
-                  rows={3}
-                  required
-                  value={transferRequestReason}
-                  onChange={(e) => setTransferRequestReason(e.target.value)}
-                  placeholder="לדוגמה: מחסור בפטישונים באתר חגית עקב תגבור צוות יציקות..."
-                  className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-xs text-slate-900 font-medium focus:border-blue-600 focus:outline-none resize-none"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsTransferRequestModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
-                >
-                  ביטול
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmittingTransferRequest || !selectedAssetToTransfer}
-                  className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-black flex items-center gap-1.5 shadow-md cursor-pointer transition-all"
-                >
-                  {isSubmittingTransferRequest ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>שולח בקשה...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Check className="w-3.5 h-3.5" />
-                      <span>שלח בקשה לאישור מנהל</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* QUICK CHECKOUT TO WORKER MODAL */}
-      {isCheckoutModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white border-2 border-blue-300 rounded-3xl max-w-lg w-full shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 max-h-[92vh] flex flex-col">
-            {/* Header */}
-            <div className="p-5 bg-gradient-to-r from-blue-950 via-indigo-900 to-slate-950 text-white flex items-center justify-between shrink-0 border-b border-blue-700/50">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-blue-500/30 flex items-center justify-center border border-blue-400/30">
-                  <Zap className="w-5 h-5 text-blue-300" />
-                </div>
-                <div>
-                  <h3 className="font-black text-base text-white flex items-center gap-2">
-                    <span>ניפוק כלי עבודה לעובד</span>
-                    <span className="text-[10px] font-bold bg-blue-400/20 text-blue-200 px-2 py-0.5 rounded-full border border-blue-300/30">
-                      הנפקה מהירה
-                    </span>
-                  </h3>
-                  <p className="text-xs text-blue-200">
-                    שיוך כלי עבודה זמין לעובד בשטח ועדכון סטטוס השאלה
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsCheckoutModalOpen(false)}
-                className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white/80 hover:text-white transition-all cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Form */}
-            <form onSubmit={handleCheckoutSubmit} className="p-5 overflow-y-auto space-y-4 text-right flex-1">
-              {checkoutFeedback && (
-                <div
-                  className={`p-3 rounded-xl text-xs font-bold border flex items-center gap-2 ${
-                    checkoutFeedback.type === 'success'
-                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                      : 'bg-rose-50 text-rose-800 border-rose-200'
-                  }`}
-                >
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  <span>{checkoutFeedback.text}</span>
-                </div>
-              )}
-
-              {/* Step 1: Find Asset */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-700 block">
-                  1. איתור כלי עבודה (ברקוד / תג QR / שם כלי) <span className="text-rose-500">*</span>
-                </label>
-                <div className="flex gap-2">
-                  <div className="relative flex-1">
-                    <input
-                      type="text"
-                      value={checkoutAssetInput}
-                      onChange={(e) => setCheckoutAssetInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          void handleSearchCheckoutAsset();
-                        }
-                      }}
-                      placeholder="הקלד ברקוד או תג כלי..."
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-blue-500"
-                    />
-                    {checkoutAssetInput && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setCheckoutAssetInput('');
-                          setCheckoutAsset(null);
-                        }}
-                        className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    disabled={isSearchingCheckoutAsset || !checkoutAssetInput.trim()}
-                    onClick={() => void handleSearchCheckoutAsset()}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-black rounded-xl flex items-center gap-1.5 transition-all cursor-pointer shrink-0"
-                  >
-                    {isSearchingCheckoutAsset ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Search className="w-3.5 h-3.5" />
-                    )}
-                    <span>חפש</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Asset Details Preview */}
-              {checkoutAsset && (
-                <div className="p-3 bg-blue-50/60 border border-blue-200 rounded-2xl flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <div className="text-xs font-black text-blue-950">
-                      {checkoutAsset.toolName}
-                    </div>
-                    <div className="text-[11px] text-blue-700">
-                      יצרן: {checkoutAsset.brand || '—'} {checkoutAsset.modelNumber ? `| דגם: ${checkoutAsset.modelNumber}` : ''}
-                    </div>
-                    <div className="text-[10px] text-slate-500 font-mono">
-                      תג: {checkoutAsset.qrCode}
-                    </div>
-                  </div>
-                  <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
-                    זמין לניפוק
-                  </span>
-                </div>
-              )}
-
-              {/* Step 2: Worker Info */}
-              <div className="space-y-3 pt-1 border-t border-slate-100">
-                <label className="text-xs font-bold text-slate-700 block">
-                  2. פרטי מקבל הציוד (עובד)
-                </label>
-                <div>
-                  <label className="text-[11px] font-bold text-slate-600 block mb-1">
-                    שם עובד <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={checkoutWorkerName}
-                    onChange={(e) => setCheckoutWorkerName(e.target.value)}
-                    placeholder="לדוגמה: ישראל ישראלי"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-2.5">
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-600 block mb-1">
-                      טלפון עובד
-                    </label>
-                    <input
-                      type="tel"
-                      value={checkoutWorkerPhone}
-                      onChange={(e) => setCheckoutWorkerPhone(e.target.value)}
-                      placeholder="050-0000000"
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-blue-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-600 block mb-1">
-                      תאריך החזרה צפוי
-                    </label>
-                    <input
-                      type="date"
-                      value={checkoutReturnDate}
-                      onChange={(e) => setCheckoutReturnDate(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-blue-500"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="text-[11px] font-bold text-slate-600 block mb-1">
-                    הערות ניפוק
-                  </label>
-                  <input
-                    type="text"
-                    value={checkoutNotes}
-                    onChange={(e) => setCheckoutNotes(e.target.value)}
-                    placeholder="הערה אופציונלית..."
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-              </div>
-
-              {/* Actions Footer */}
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsCheckoutModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
-                >
-                  ביטול
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmittingCheckout || !checkoutAsset || !checkoutWorkerName.trim()}
-                  className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-black flex items-center gap-1.5 shadow-md cursor-pointer transition-all"
-                >
-                  {isSubmittingCheckout ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>מבצע ניפוק...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Check className="w-3.5 h-3.5" />
-                      <span>אשר ניפוק לעובד</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* STOREKEEPER: DIRECT OUTBOUND EQUIPMENT TRANSFER MODAL */}
-      {isDirectTransferModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white border-2 border-sky-300 rounded-3xl max-w-xl w-full shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 max-h-[92vh] flex flex-col">
-            {/* Header */}
-            <div className="p-5 bg-gradient-to-r from-sky-950 via-blue-900 to-indigo-950 text-white flex items-center justify-between shrink-0 border-b border-sky-700/50">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-sky-500/30 flex items-center justify-center border border-sky-400/30">
-                  <Truck className="w-5 h-5 text-sky-200" />
-                </div>
-                <div>
-                  <h3 className="font-black text-base text-white flex items-center gap-2">
-                    <span>העברה ישירה לאתר אחר</span>
-                    <span className="text-[10px] font-bold bg-sky-400/20 text-sky-200 px-2 py-0.5 rounded-full border border-sky-300/30">
-                      שילוח מיידי
-                    </span>
-                  </h3>
-                  <p className="text-xs text-sky-200">
-                    שילוח כלי עבודה זמין ממחסן זה ישירות לאתר בנייה או מחסן אחר בארגון
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsDirectTransferModalOpen(false)}
-                className="p-1.5 rounded-xl hover:bg-white/10 text-slate-300 hover:text-white cursor-pointer transition-all"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleDirectTransferSubmit} className="p-5 space-y-4 overflow-y-auto flex-1">
-              {directTransferFeedback && (
-                <div
-                  className={`p-3 rounded-xl text-xs font-bold flex items-center gap-2 border ${
-                    directTransferFeedback.type === 'success'
-                      ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
-                      : 'bg-rose-50 text-rose-900 border-rose-300'
-                  }`}
-                >
-                  {directTransferFeedback.type === 'success' ? (
-                    <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                  ) : (
-                    <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                  )}
-                  <span>{directTransferFeedback.text}</span>
-                </div>
-              )}
-
-              {/* Source Warehouse Info */}
-              <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between text-xs">
-                <div className="flex items-center gap-2 text-slate-700">
-                  <Building2 className="w-4 h-4 text-slate-400 shrink-0" />
-                  <span>
-                    מחסן מקור (נוכחי): <strong className="text-slate-900">{data.warehouse?.name || 'מחסן שטח'}</strong>
-                  </span>
-                </div>
-                <span className="text-[10px] font-bold text-sky-800 bg-sky-50 px-2 py-0.5 rounded border border-sky-200">
-                  מלאי זמין לשילוח
-                </span>
-              </div>
-
-              {/* 1. Tool Selection */}
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
-                  <span>1. בחירת כלי עבודה מהמלאי הזמין <span className="text-rose-500">*</span></span>
-                  {selectedDirectAsset && (
-                    <button
-                      type="button"
-                      onClick={() => setSelectedDirectAsset(null)}
-                      className="text-[11px] text-blue-600 hover:text-blue-800 font-bold cursor-pointer"
-                    >
-                      החלף כלי
-                    </button>
-                  )}
-                </label>
-
-                {selectedDirectAsset ? (
-                  <div className="p-3.5 rounded-2xl bg-sky-50/80 border-2 border-sky-400 flex items-center justify-between gap-3 shadow-xs">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-xs font-black text-sky-950 bg-white px-2 py-0.5 rounded border border-sky-200" dir="ltr">
-                          {selectedDirectAsset.qrCode}
-                        </span>
-                        {selectedDirectAsset.tagNumber && (
-                          <span className="font-mono text-[10px] font-bold text-sky-700 bg-sky-100 px-1.5 py-0.5 rounded">
-                            {selectedDirectAsset.tagNumber}
-                          </span>
-                        )}
-                        <span className="text-xs font-black text-sky-950">
-                          {selectedDirectAsset.name}
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-600">
-                        {selectedDirectAsset.brand} {selectedDirectAsset.modelNumber ? `• דגם: ${selectedDirectAsset.modelNumber}` : ''} {selectedDirectAsset.serialNumber ? `• מס"ד: ${selectedDirectAsset.serialNumber}` : ''}
-                      </p>
-                    </div>
-                    <Check className="w-5 h-5 text-sky-600 shrink-0" />
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <div className="relative flex-1">
-                        <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
-                        <input
-                          type="text"
-                          value={directSearchQuery}
-                          onChange={(e) => setDirectSearchQuery(e.target.value)}
-                          placeholder="סנן לפי תג (למשל: ZR-1099), שם כלי, מותג או מס' סידורי..."
-                          className="w-full bg-slate-50 border border-slate-300 rounded-xl pr-9 pl-3 py-2 text-xs font-medium text-slate-900 focus:outline-none focus:border-sky-500"
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setIsDirectTransferOcrOpen(true)}
-                        className="py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer shrink-0 shadow-sm transition-all"
-                        title="סריקת כלי"
-                      >
-                        <Camera className="w-3.5 h-3.5" />
-                        <span>סרוק כלי</span>
-                      </button>
-                    </div>
-
-                    {isLoadingLocalAssets ? (
-                      <div className="p-6 text-center text-xs text-slate-500 flex items-center justify-center gap-2">
-                        <Loader2 className="w-4 h-4 animate-spin text-sky-600" />
-                        <span>טוען כלי עבודה זמינים במחסן...</span>
-                      </div>
-                    ) : (
-                      <div className="max-h-48 overflow-y-auto space-y-1.5 border border-slate-200 rounded-2xl p-1.5 bg-slate-50/50">
-                        {localAvailableAssets
-                          .filter((a) => {
-                            if (!directSearchQuery.trim()) return true;
-                            const q = directSearchQuery.toLowerCase();
-                            return (
-                              a.name.toLowerCase().includes(q) ||
-                              a.brand.toLowerCase().includes(q) ||
-                              a.qrCode.toLowerCase().includes(q) ||
-                              (a.tagNumber && a.tagNumber.toLowerCase().includes(q)) ||
-                              (a.modelNumber && a.modelNumber.toLowerCase().includes(q)) ||
-                              (a.serialNumber && a.serialNumber.toLowerCase().includes(q))
-                            );
-                          })
-                          .slice(0, 50)
-                          .map((asset) => (
-                            <button
-                              key={asset.id}
-                              type="button"
-                              onClick={() => setSelectedDirectAsset(asset)}
-                              className="w-full text-right p-2.5 rounded-xl bg-white hover:bg-sky-50/70 border border-slate-200 hover:border-sky-300 transition-all flex items-center justify-between gap-2 cursor-pointer shadow-2xs"
-                            >
-                              <div>
-                                <div className="flex items-center gap-2">
-                                  <span className="font-mono text-[11px] font-black text-slate-800 bg-slate-100 px-2 py-0.5 rounded" dir="ltr">
-                                    {asset.qrCode}
-                                  </span>
-                                  {asset.tagNumber && (
-                                    <span className="font-mono text-[10px] text-sky-700 bg-sky-50 px-1.5 py-0.5 rounded border border-sky-200">
-                                      {asset.tagNumber}
-                                    </span>
-                                  )}
-                                  <span className="text-xs font-bold text-slate-900">{asset.name}</span>
-                                </div>
-                                <p className="text-[11px] text-slate-500 mt-0.5">
-                                  {asset.brand} {asset.modelNumber ? `• ${asset.modelNumber}` : ''}
-                                </p>
-                              </div>
-                              <span className="text-[11px] font-bold text-sky-700 bg-sky-50 border border-sky-200 px-2.5 py-1 rounded-lg shrink-0">
-                                בחר כלי
-                              </span>
-                            </button>
-                          ))}
-
-                        {localAvailableAssets.length === 0 && (
-                          <div className="p-4 text-center text-xs text-slate-500">
-                            אין כרגע כלים זמינים במחסן זה לשילוח
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* 2. Destination Warehouse */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-700">
-                  2. אתר יעד לקליטת הציוד (מחסן מקבל) <span className="text-rose-500">*</span>
-                </label>
-                <select
-                  required
-                  value={directTargetWarehouseId}
-                  onChange={(e) => setDirectTargetWarehouseId(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 focus:outline-none focus:border-sky-500"
-                >
-                  <option value="" disabled>
-                    בחר אתר יעד...
-                  </option>
-                  {warehouses
-                    .filter((w) => w.id !== 'all' && w.id !== selectedWarehouseId)
-                    .map((w) => (
-                      <option key={w.id} value={w.id}>
-                        {w.name} {w.code ? `(${w.code})` : ''}
-                      </option>
-                    ))}
-                </select>
-              </div>
-
-              {/* 3. Transporter / Driver Notes */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-700">
-                  3. פרטי המוביל / נהג שינוע או תעודת משלוח (הערות שינוע)
-                </label>
-                <input
-                  type="text"
-                  value={transporterNotes}
-                  onChange={(e) => setTransporterNotes(e.target.value)}
-                  placeholder="למשל: נהג אחמד (טנדר 44-555-66), נשלח בדחיפות לעבודות לילה..."
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-medium text-slate-900 focus:outline-none focus:border-sky-500"
-                />
-              </div>
-
-              {/* Route Summary */}
-              {selectedDirectAsset && directTargetWarehouseId && (
-                <div className="p-3 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-between text-xs">
-                  <div>
-                    <span className="text-[10px] text-slate-500 block">ממחסן מקור</span>
-                    <strong className="text-slate-900">
-                      {data.warehouse?.name || 'מחסן מקור'}
-                    </strong>
-                  </div>
-                  <Truck className="w-4 h-4 text-sky-600" />
-                  <div className="text-left">
-                    <span className="text-[10px] text-slate-500 block">ליעד</span>
-                    <strong className="text-sky-900">
-                      {warehouses.find((w) => w.id === directTargetWarehouseId)?.name || 'אתר יעד'}
-                    </strong>
-                  </div>
-                </div>
-              )}
-
-              {/* Submit Buttons */}
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsDirectTransferModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
-                >
-                  ביטול
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmittingDirectTransfer || !selectedDirectAsset || !directTargetWarehouseId}
-                  className="px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white text-xs font-black flex items-center gap-2 shadow-md shadow-sky-600/20 cursor-pointer transition-all active:scale-95"
-                >
-                  {isSubmittingDirectTransfer ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>משלח כלי...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Truck className="w-4 h-4" />
-                      <span>אשר שילוח והעברה</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* SITE EQUIPMENT DISPATCH (TAG VERIFICATION & DIGITAL SIGNATURE) MODAL */}
-      {isDispatchModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white border-2 border-emerald-200 rounded-3xl max-w-lg w-full shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 max-h-[92vh] flex flex-col">
-            {/* Header */}
-            <div className="p-5 bg-gradient-to-r from-emerald-900 to-teal-950 text-white flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-emerald-600/50 flex items-center justify-center border border-emerald-400/30">
-                  <FileSignature className="w-5 h-5 text-emerald-200" />
-                </div>
-                <div>
-                  <h3 className="font-black text-sm text-white">הוצאת ציוד לאתר עבודה</h3>
-                  <p className="text-[11px] text-emerald-200">נוהל מסירה מבוקר: אישור תיוג וחתימה דיגיטלית</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsDispatchModalOpen(false)}
-                className="p-1 rounded-lg hover:bg-white/10 text-white cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleDispatchSubmit} className="p-5 overflow-y-auto space-y-4 flex-1">
-              {dispatchFeedback && (
-                <div
-                  className={`p-3 rounded-xl text-xs font-bold flex items-center gap-2 border ${
-                    dispatchFeedback.type === 'success'
-                      ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
-                      : 'bg-rose-50 text-rose-900 border-rose-300'
-                  }`}
-                >
-                  {dispatchFeedback.type === 'success' ? (
-                    <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                  ) : (
-                    <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                  )}
-                  <span>{dispatchFeedback.text}</span>
-                </div>
-              )}
-
-              {/* STEP 1: Tag & Asset Verification */}
-              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-black text-slate-900 flex items-center gap-1.5">
-                    <span className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[10px]">1</span>
-                    <span>אימות תג וזיהוי כלי עבודה</span>
-                  </span>
-                  {dispatchAsset && (
-                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-200">
-                      כלי אותר בהצלחה
-                    </span>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <div className="relative flex-1">
-                    <QrCode className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                    <input
-                      type="text"
-                      dir="ltr"
-                      value={dispatchTagInput}
-                      onChange={(e) => setDispatchTagInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          handleSearchAssetForDispatch();
-                        }
-                      }}
-                      placeholder="הזן תג / QR (למשל ZR-1099, ZR-282)"
-                      className="w-full bg-white border border-slate-300 rounded-xl pr-9 pl-3 py-2 text-xs font-mono font-bold text-slate-900 focus:border-emerald-600 focus:outline-none"
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleSearchAssetForDispatch()}
-                    disabled={isSearchingAsset || !dispatchTagInput.trim()}
-                    className="py-2 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shrink-0"
-                  >
-                    {isSearchingAsset ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Search className="w-3.5 h-3.5" />
-                    )}
-                    <span>בדוק כלי</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setIsDispatchOcrOpen(true)}
-                    className="py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer shrink-0 shadow-sm transition-all"
-                    title="סריקת כלי"
-                  >
-                    <Camera className="w-3.5 h-3.5" />
-                    <span>סרוק כלי</span>
-                  </button>
-                </div>
-
-                {/* Display Scanned Tool Card */}
-                {dispatchAsset && (
-                  <div className="p-3 bg-white rounded-xl border-2 border-emerald-300 shadow-xs space-y-2.5 animate-in fade-in">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <div className="flex items-center gap-2 mb-0.5">
-                          <span className="font-mono text-[11px] font-black text-emerald-950 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200" dir="ltr">
-                            {dispatchAsset.qrCode}
-                          </span>
-                          <span className="text-[10px] font-bold text-slate-500 uppercase">
-                            {dispatchAsset.brand}
-                          </span>
-                        </div>
-                        <h4 className="text-sm font-black text-slate-900">{dispatchAsset.toolName}</h4>
-                        {dispatchAsset.modelNumber && (
-                          <p className="text-xs text-slate-500 font-mono" dir="ltr">
-                            דגם: {dispatchAsset.modelNumber}
-                          </p>
-                        )}
-                      </div>
-                      <div className="text-left text-[11px] text-slate-500 font-bold">
-                        <div>מיקום נוכחי:</div>
-                        <span className="text-slate-900">{dispatchAsset.warehouseName}</span>
-                      </div>
-                    </div>
-
-                    {/* PHYSICAL TAG VERIFICATION CHECKBOX */}
-                    <label className="flex items-center gap-2.5 p-2.5 rounded-xl bg-amber-50/90 border-2 border-amber-300 text-amber-950 cursor-pointer hover:bg-amber-100/80 transition-colors">
-                      <input
-                        type="checkbox"
-                        checked={isTagVerified}
-                        onChange={(e) => setIsTagVerified(e.target.checked)}
-                        className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-slate-300 cursor-pointer"
-                      />
-                      <span className="text-xs font-black">
-                        ☑️ אישור תיוג: נבדק פיזית ותג ה-QR מודבק ותקין על גבי הכלי
-                      </span>
-                    </label>
-                  </div>
-                )}
-              </div>
-
-              {/* STEP 2: Target Site & Recipient Details */}
-              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
-                <span className="text-xs font-black text-slate-900 flex items-center gap-1.5">
-                  <span className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[10px]">2</span>
-                  <span>אתר יעד ופרטי מקבל הציוד</span>
-                </span>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    בחר אתר בנייה / מכולת יעד:
-                  </label>
-                  <select
-                    value={dispatchTargetWhId}
-                    onChange={(e) => setDispatchTargetWhId(e.target.value)}
-                    className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-xs text-slate-900 font-bold focus:border-emerald-600 focus:outline-none"
-                  >
-                    {warehouses.map((wh) => (
-                      <option key={wh.id} value={wh.id}>
-                        {wh.name} {wh.code ? `(${wh.code})` : ''}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      שם מקבל הציוד בשטח: *
-                    </label>
-                    <input
-                      type="text"
-                      value={dispatchWorkerName}
-                      onChange={(e) => setDispatchWorkerName(e.target.value)}
-                      placeholder="לדוגמה: אחמד חטיב (מנהל עבודה)"
-                      className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-xs text-slate-900 font-medium focus:border-emerald-600 focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      טלפון נייד:
-                    </label>
-                    <input
-                      type="tel"
-                      dir="ltr"
-                      value={dispatchWorkerPhone}
-                      onChange={(e) => setDispatchWorkerPhone(e.target.value)}
-                      placeholder="05X-XXXXXXX"
-                      className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-xs text-slate-900 font-medium focus:border-emerald-600 focus:outline-none text-right"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* STEP 3: Digital Signature */}
-              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
-                <span className="text-xs font-black text-slate-900 flex items-center gap-1.5">
-                  <span className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[10px]">3</span>
-                  <span>חתימה דיגיטלית של מקבל הציוד</span>
-                </span>
-
-                <SignaturePad
-                  onSignatureChange={(sig) => setDispatchSignature(sig)}
-                  height={150}
-                  label="חתימת המקבל לאישור אחריות וקבלת הציוד:"
-                />
-
-                <p className="text-[11px] text-slate-500 font-medium pt-1">
-                  בחתימתו, מאשר מקבל הציוד קבלת הכלי במצב תקין ונושא באחריות המבצעית לשמירתו והחזרתו.
-                </p>
-              </div>
-
-              {/* STEP 4: Finalize Action */}
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsDispatchModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
-                >
-                  ביטול
-                </button>
-                <button
-                  type="submit"
-                  disabled={
-                    isSubmittingDispatch ||
-                    !dispatchAsset ||
-                    !isTagVerified ||
-                    !dispatchWorkerName.trim() ||
-                    !dispatchSignature
-                  }
-                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-black flex items-center gap-1.5 shadow-md cursor-pointer transition-all active:scale-95"
-                >
-                  {isSubmittingDispatch ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>רושם מסירה...</span>
-                    </>
-                  ) : (
-                    <>
-                      <ShieldCheck className="w-4 h-4" />
-                      <span>אשר מסירה וחתום</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* SITE TOOL REQUEST MODAL (Site Storekeeper -> Operations Manager) */}
-      {isSiteRequestModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white border-2 border-blue-200 rounded-3xl max-w-lg w-full shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 max-h-[92vh] flex flex-col">
-            {/* Header */}
-            <div className="p-5 bg-gradient-to-r from-blue-900 to-indigo-950 text-white flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-blue-600/50 flex items-center justify-center border border-blue-400/30">
-                  <Send className="w-5 h-5 text-blue-200" />
-                </div>
-                <div>
-                  <h3 className="font-black text-sm text-white">בקשת ציוד לאתר / מכולה</h3>
-                  <p className="text-[11px] text-blue-200">הגשת דרישה מבצעית ישירה לאחראי תפעול ראשי</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsSiteRequestModalOpen(false)}
-                className="p-1 rounded-lg hover:bg-white/10 text-white cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSubmitSiteToolRequest} className="p-5 overflow-y-auto space-y-4 flex-1">
-              {siteRequestFeedback && (
-                <div
-                  className={`p-3 rounded-xl text-xs font-bold flex items-center gap-2 border ${
-                    siteRequestFeedback.type === 'success'
-                      ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
-                      : 'bg-rose-50 text-rose-900 border-rose-300'
-                  }`}
-                >
-                  {siteRequestFeedback.type === 'success' ? (
-                    <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                  ) : (
-                    <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                  )}
-                  <span>{siteRequestFeedback.text}</span>
-                </div>
-              )}
-
-              {/* Tool Description & Quick Chips */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-700">
-                  תיאור כלי העבודה או הציוד הנדרש <span className="text-rose-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={requestToolDesc}
-                  onChange={(e) => setRequestToolDesc(e.target.value)}
-                  placeholder="למשל: פטיש חציבה כבד SDS-Max, משחזת 9 אינץ'..."
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 focus:outline-none focus:border-blue-600"
-                />
-
-                {/* Quick Suggestion Chips */}
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  {[
-                    'פטיש חציבה SDS-Max',
-                    'משחזת זוית 9 אינץ\'',
-                    'רתכת CO2 ניידת',
-                    'גנרטור מושתק 5.5KVA',
-                    'מהדק אדמה (ג\'מפינג)',
-                    'שואב אבק תעשייתי',
-                  ].map((chip) => (
-                    <button
-                      key={chip}
-                      type="button"
-                      onClick={() => setRequestToolDesc(chip)}
-                      className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-100 hover:bg-blue-50 hover:text-blue-700 text-slate-600 border border-slate-200 transition-all cursor-pointer"
-                    >
-                      + {chip}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Quantity */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-700">
-                  כמות נדרשת
-                </label>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setRequestQuantity((q) => Math.max(1, q - 1))}
-                    className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-black flex items-center justify-center cursor-pointer"
-                  >
-                    -
-                  </button>
-                  <input
-                    type="number"
-                    min="1"
-                    value={requestQuantity}
-                    onChange={(e) => setRequestQuantity(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                    className="w-20 text-center bg-slate-50 border border-slate-300 rounded-xl py-1.5 text-sm font-black text-slate-900 focus:outline-none focus:border-blue-600"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setRequestQuantity((q) => q + 1)}
-                    className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-black flex items-center justify-center cursor-pointer"
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
-
-              {/* Urgency Selector */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-700">
-                  רמת דחיפות
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setRequestUrgency('NORMAL')}
-                    className={`p-2.5 rounded-xl border text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
-                      requestUrgency === 'NORMAL'
-                        ? 'bg-blue-50 border-blue-400 text-blue-950 font-black ring-2 ring-blue-300'
-                        : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
-                    }`}
-                  >
-                    <span>🟢 רגיל</span>
-                    <span className="text-[10px] text-slate-500 font-normal">אספקה שוטפת</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setRequestUrgency('URGENT')}
-                    className={`p-2.5 rounded-xl border text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
-                      requestUrgency === 'URGENT'
-                        ? 'bg-amber-50 border-amber-400 text-amber-950 font-black ring-2 ring-amber-300'
-                        : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
-                    }`}
-                  >
-                    <span>🟡 דחוף</span>
-                    <span className="text-[10px] text-slate-500 font-normal">למחר בבוקר</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setRequestUrgency('CRITICAL')}
-                    className={`p-2.5 rounded-xl border text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
-                      requestUrgency === 'CRITICAL'
-                        ? 'bg-rose-50 border-rose-400 text-rose-950 font-black ring-2 ring-rose-300'
-                        : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
-                    }`}
-                  >
-                    <span>🔴 קריטי</span>
-                    <span className="text-[10px] text-slate-500 font-normal">עצירת עבודה</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Operational Reason */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-700">
-                  נימוק / סיבה מבצעית (אופציונלי)
-                </label>
-                <textarea
-                  rows={2}
-                  value={requestReason}
-                  onChange={(e) => setRequestReason(e.target.value)}
-                  placeholder="למשל: נדרש ליציקת בטון דחופה מחר, הכלי הקיים הושבת..."
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-medium text-slate-900 focus:outline-none focus:border-blue-600"
-                />
-              </div>
-
-              {/* Submit Buttons */}
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsSiteRequestModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
-                >
-                  ביטול
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmittingSiteRequest || !requestToolDesc.trim()}
-                  className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-black flex items-center gap-1.5 shadow-md cursor-pointer transition-all active:scale-95"
-                >
-                  {isSubmittingSiteRequest ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>שולח בקשה...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Send className="w-3.5 h-3.5" />
-                      <span>שלח בקשת ציוד לאישור</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL 1: RETURN FROM MAINTENANCE (קליטה מתיקון והחזרה למלאי) */}
-      {repairModalAsset && (
-        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-3xl max-w-lg w-full border-2 border-emerald-400 shadow-2xl p-6 space-y-5 animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-200">
-                  <RotateCcw className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-black text-slate-900">
-                    קליטת כלי מתיקון והחזרה למלאי
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    עדכון מצב טכני והחזרת הכלי למעגל ההשאלות הפעיל
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setRepairModalAsset(null)}
-                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-xl hover:bg-slate-100 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {repairFeedback && (
-              <div
-                className={`p-3 rounded-xl border text-xs font-bold flex items-center gap-2 ${
-                  repairFeedback.type === 'success'
-                    ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
-                    : 'bg-rose-50 border-rose-300 text-rose-950'
-                }`}
-              >
-                {repairFeedback.type === 'success' ? (
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                ) : (
-                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                )}
-                <span>{repairFeedback.text}</span>
-              </div>
-            )}
-
-            {/* Asset details card */}
-            <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-1">
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-xs font-black text-slate-800 bg-white px-2 py-0.5 rounded border border-slate-300" dir="ltr">
-                  {repairModalAsset.qrCode}
-                </span>
-                <span className="text-xs font-black text-slate-900">
-                  {repairModalAsset.toolName}
-                </span>
-              </div>
-              <div className="text-xs text-slate-500">
-                {repairModalAsset.brand} {repairModalAsset.modelNumber ? `• דגם: ${repairModalAsset.modelNumber}` : ''}
-              </div>
-              <div className="text-[11px] text-amber-800 bg-amber-50/80 p-2 rounded-lg border border-amber-200 mt-2">
-                <strong>תקלה שדווחה:</strong> {repairModalAsset.faultDescription}
-              </div>
-            </div>
-
-            <form onSubmit={handleReturnFromMaintenanceSubmit} className="space-y-4">
-              {/* Condition rating: excellent / good */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-700">
-                  דירוג מצב הכלי לאחר התיקון <span className="text-rose-500">*</span>
-                </label>
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setRepairCondition('good')}
-                    className={`p-3 rounded-2xl border text-right transition-all cursor-pointer ${
-                      repairCondition === 'good'
-                        ? 'bg-emerald-50/80 border-emerald-500 ring-2 ring-emerald-300 text-emerald-950 font-black'
-                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100 font-bold'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span>תקין ומוכן לעבודה</span>
-                      <Check className={`w-4 h-4 ${repairCondition === 'good' ? 'text-emerald-600' : 'text-transparent'}`} />
-                    </div>
-                    <span className="text-[10px] text-slate-500 block mt-1 font-normal">
-                      הכלי תוקן ונבדק, מתאים לשימוש מלא בשטח
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setRepairCondition('excellent')}
-                    className={`p-3 rounded-2xl border text-right transition-all cursor-pointer ${
-                      repairCondition === 'excellent'
-                        ? 'bg-emerald-50/80 border-emerald-500 ring-2 ring-emerald-300 text-emerald-950 font-black'
-                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100 font-bold'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="flex items-center gap-1">
-                        <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                        <span>מצב מעולה / כחדש</span>
-                      </span>
-                      <Check className={`w-4 h-4 ${repairCondition === 'excellent' ? 'text-emerald-600' : 'text-transparent'}`} />
-                    </div>
-                    <span className="text-[10px] text-slate-500 block mt-1 font-normal">
-                      הוחלפו מכלולים ראשיים או כלי מחודש במצב מושלם
-                    </span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Receiving warehouse selector */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-700">
-                  מחסן מקבל לקליטת המלאי <span className="text-rose-500">*</span>
-                </label>
-                <select
-                  value={repairReceivingWhId}
-                  onChange={(e) => setRepairReceivingWhId(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
-                >
-                  <option value="" disabled>בחר מחסן לקליטה...</option>
-                  {warehouses.filter((w) => w.id !== 'all').map((wh) => (
-                    <option key={wh.id} value={wh.id}>
-                      {wh.name} {wh.code ? `(${wh.code})` : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Repair notes */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-700">
-                  הערות תיקון ובדיקה טכנית (אופציונלי)
-                </label>
-                <textarea
-                  rows={2}
-                  value={repairNotes}
-                  onChange={(e) => setRepairNotes(e.target.value)}
-                  placeholder="למשל: נבדק תחת עומס עבודה, הוחלף כבל חשמל ומגן להב..."
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-medium text-slate-900 focus:outline-none focus:border-emerald-600"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setRepairModalAsset(null)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
-                >
-                  ביטול
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmittingRepair || !repairReceivingWhId}
-                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-black flex items-center gap-1.5 shadow-md cursor-pointer transition-all active:scale-95"
-                >
-                  {isSubmittingRepair ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>קולט כלי למלאי...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Check className="w-3.5 h-3.5" />
-                      <span>אשר קליטה והחזרה למלאי</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL 2: SCRAP & RETIRE (גריטת כלי והשבתה לצמיתות) */}
-      {retireModalAsset && (
-        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-3xl max-w-lg w-full border-2 border-rose-400 shadow-2xl p-6 space-y-5 animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center border border-rose-200">
-                  <Trash2 className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-black text-slate-900">
-                    גריטת כלי והשבתה לצמיתות
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    הוצאה סופית של הכלי מצי הכלים הפעיל של הארגון
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setRetireModalAsset(null)}
-                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-xl hover:bg-slate-100 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {retireFeedback && (
-              <div
-                className={`p-3 rounded-xl border text-xs font-bold flex items-center gap-2 ${
-                  retireFeedback.type === 'success'
-                    ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
-                    : 'bg-rose-50 border-rose-300 text-rose-950'
-                }`}
-              >
-                {retireFeedback.type === 'success' ? (
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                ) : (
-                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                )}
-                <span>{retireFeedback.text}</span>
-              </div>
-            )}
-
-            {/* Warning callout */}
-            <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-xs space-y-1.5">
-              <div className="font-black text-rose-950 flex items-center gap-1.5">
-                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                <span>שים לב: השבתה בלתי הפיכה</span>
-              </div>
-              <p className="text-rose-900 text-[11px] leading-relaxed">
-                גריטת הכלי תסיר אותו ממצבת הכלים הזמינים להשאלה, תעדכן את יומן המשמורת (Custody Ledger) בפעולת <code>DECOMMISSION</code> ותשמור את היסטוריית הכלי למטרות ביקורת.
-              </p>
-            </div>
-
-            {/* Asset details card */}
-            <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-1">
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-xs font-black text-slate-800 bg-white px-2 py-0.5 rounded border border-slate-300" dir="ltr">
-                  {retireModalAsset.qrCode}
-                </span>
-                <span className="text-xs font-black text-slate-900">
-                  {retireModalAsset.toolName}
-                </span>
-              </div>
-              <div className="text-xs text-slate-500">
-                {retireModalAsset.brand} {retireModalAsset.modelNumber ? `• דגם: ${retireModalAsset.modelNumber}` : ''}
-              </div>
-            </div>
-
-            <form onSubmit={handleScrapAndRetireSubmit} className="space-y-4">
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-700">
-                  סיבת גריטה והשבתה מנומקת <span className="text-rose-500">*</span>
-                </label>
-                <textarea
-                  required
-                  rows={3}
-                  value={retireReason}
-                  onChange={(e) => setRetireReason(e.target.value)}
-                  placeholder="פרט את סיבת הגריטה (למשל: מנוע שרוף ושלדה סדוקה, עלות תיקון עולה על 85% מעלות כלי חדש)..."
-                  className="w-full bg-slate-50 border border-rose-200 rounded-xl px-3 py-2 text-xs font-medium text-slate-900 focus:outline-none focus:border-rose-600"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setRetireModalAsset(null)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
-                >
-                  ביטול
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmittingRetire || !retireReason.trim()}
-                  className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white text-xs font-black flex items-center gap-1.5 shadow-md cursor-pointer transition-all active:scale-95"
-                >
-                  {isSubmittingRetire ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>משבית כלי...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>אשר גריטה והשבתה לצמיתות</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* EQUIPMENT RETURN & CHECK-IN MODAL (Camera Scanner + Manual Omnisearch) */}
+      {/* EQUIPMENT RETURN & CHECK-IN MODAL */}
       <ManualCheckinModal
         isOpen={isCheckinModalOpen}
         onClose={() => {
@@ -5606,94 +1054,128 @@ export default function WarehouseDashboardView({
         }}
         warehouseId={selectedWarehouseId}
         preSelectedAssetId={checkinPreselectedAssetId}
-        onSuccess={(returned) => {
-          if (returned) {
-            const assetId = returned.id;
-            const isMaintenance = 'status' in returned ? returned.status === 'maintenance' : false;
-            setData((prev) => ({
-              ...prev,
-              availableCount: (prev.availableCount || 0) + (isMaintenance ? 0 : 1),
-              checkedOutCount: Math.max(0, (prev.checkedOutCount || 1) - 1),
-              activeLoans: (prev.activeLoans || []).filter((l) => l.assetId !== assetId),
-              returnsDueToday: (prev.returnsDueToday || []).filter((r) => r.assetId !== assetId),
-              overdueAssets: (prev.overdueAssets || []).filter((o) => o.assetId !== assetId),
-            }));
+        onSuccess={handleManualCheckinSuccess}
+      />
 
-            if (!isMaintenance) {
-              const toolName = 'toolName' in returned ? returned.toolName : ('name' in returned ? (returned as unknown as { name: string }).name : 'כלי');
-              const optTransferItem: AvailableTransferAssetItem = {
-                id: returned.id,
-                name: toolName,
-                brand: returned.brand || '',
-                modelNumber: returned.modelNumber || null,
-                qrCode: returned.qrCode || '',
-                tagNumber: null,
-                serialNumber: 'serialNumber' in returned ? (returned.serialNumber || null) : null,
-                currentWarehouseId: selectedWarehouseId !== 'all' ? selectedWarehouseId : ('currentWarehouseId' in returned ? (returned.currentWarehouseId || '') : ''),
-                currentWarehouseName: 'warehouseName' in returned ? (returned.warehouseName || 'מחסן') : 'מחסן',
-              };
-              setAvailableAssets((prev) => prev.some((a) => a.id === assetId) ? prev : [optTransferItem, ...prev]);
-              setAvailableAssetsForInbox((prev) => prev.some((a) => a.id === assetId) ? prev : [optTransferItem, ...prev]);
-              setLocalAvailableAssets((prev) => prev.some((a) => a.id === assetId) ? prev : [optTransferItem, ...prev]);
-            }
-          }
+      {/* QUICK CHECKOUT TO WORKER MODAL */}
+      <QuickCheckoutModal
+        isOpen={isCheckoutModalOpen}
+        onClose={() => setIsCheckoutModalOpen(false)}
+        selectedWarehouseId={selectedWarehouseId}
+        organizationId={currentOrganization?.id || user?.organizationId}
+        onSuccess={handleQuickCheckoutSuccess}
+      />
+
+      {/* CHIEF OPERATIONS: INTER-DEPOT ASSET TRANSFER MODAL */}
+      <InterDepotTransferModal
+        isOpen={isTransferModalOpen}
+        onClose={() => setIsTransferModalOpen(false)}
+        warehouses={warehouses}
+        selectedWarehouseId={selectedWarehouseId}
+        onSuccess={async () => {
           router.refresh();
-          void handleWarehouseChange(selectedWarehouseId, true);
+          await handleWarehouseChange(selectedWarehouseId);
         }}
       />
 
-      {/* OCR SCANNER 1: DIRECT OUTBOUND EQUIPMENT TRANSFER */}
-      <OcrScannerModal
-        isOpen={isDirectTransferOcrOpen}
-        onClose={() => setIsDirectTransferOcrOpen(false)}
-        onAssetDetected={(asset) => {
-          const found = localAvailableAssets.find((a) => a.id === asset.id || a.qrCode === asset.qrCode);
-          if (found) {
-            setSelectedDirectAsset(found);
-          } else {
-            setSelectedDirectAsset({
-              id: asset.id,
-              name: asset.toolName,
-              brand: asset.brand,
-              modelNumber: asset.modelNumber,
-              qrCode: asset.qrCode,
-              tagNumber: asset.qrCode,
-              serialNumber: null,
-              currentWarehouseId: asset.currentWarehouseId || '',
-              currentWarehouseName: asset.warehouseName || '',
-            });
+      {/* CHIEF OPERATIONS: STOCK RECONCILIATION MODAL */}
+      <StockReconciliationModal
+        isOpen={isReconcileModalOpen}
+        onClose={() => setIsReconcileModalOpen(false)}
+        warehouse={data.warehouse}
+        availableCount={data.availableCount}
+        checkedOutCount={data.checkedOutCount}
+        quarantinedCount={data.quarantinedCount}
+        verifiedAssetIds={(data.overdueAssets || []).map((a) => a.assetId)}
+        onSuccess={async () => {
+          router.refresh();
+        }}
+      />
+
+      {/* STOREKEEPER: INTER-SITE EQUIPMENT TRANSFER REQUEST MODAL */}
+      <InterSiteTransferRequestModal
+        isOpen={isTransferRequestModalOpen}
+        onClose={() => setIsTransferRequestModalOpen(false)}
+        warehouses={warehouses}
+        currentWarehouseId={selectedWarehouseId}
+        onSuccess={async () => {
+          router.refresh();
+          await loadPendingTransfers();
+        }}
+      />
+
+      {/* STOREKEEPER: DIRECT OUTBOUND EQUIPMENT TRANSFER MODAL */}
+      <DirectTransferModal
+        isOpen={isDirectTransferModalOpen}
+        onClose={() => setIsDirectTransferModalOpen(false)}
+        selectedWarehouseId={selectedWarehouseId}
+        sourceWarehouseName={data.warehouse?.name}
+        warehouses={warehouses}
+        onSuccess={async (_assetId) => {
+          setData((prev) => ({
+            ...prev,
+            availableCount: Math.max(0, (prev.availableCount || 1) - 1),
+          }));
+          router.refresh();
+          await handleWarehouseChange(selectedWarehouseId);
+          if (isChiefOperations || isGeneralManager) {
+            await loadInTransitFleet();
           }
-          setIsDirectTransferOcrOpen(false);
+          await loadIncomingTransfers(selectedWarehouseId);
         }}
-        warehouseId={selectedWarehouseId !== 'all' ? selectedWarehouseId : undefined}
-        title="סריקת כלי (QR / OCR)"
       />
 
-      {/* OCR SCANNER 2: SITE DISPATCH VERIFICATION */}
-      <OcrScannerModal
-        isOpen={isDispatchOcrOpen}
-        onClose={() => setIsDispatchOcrOpen(false)}
-        onAssetDetected={(asset) => {
-          setDispatchAsset(asset);
-          setDispatchTagInput(asset.qrCode);
-          setIsTagVerified(true);
-          setIsDispatchOcrOpen(false);
+      {/* CHIEF OPERATIONS: SITE DISPATCH WITH TAG VERIFICATION & SIGNATURE */}
+      <ResolveToolRequestModal
+        isOpen={isDispatchModalOpen}
+        onClose={() => setIsDispatchModalOpen(false)}
+        selectedWarehouseId={selectedWarehouseId}
+        warehouses={warehouses}
+        organizationId={currentOrganization?.id || user?.organizationId}
+        onSuccess={async (_dispatchedAssetId) => {
+          router.refresh();
+          await handleWarehouseChange(selectedWarehouseId, true);
         }}
-        warehouseId={selectedWarehouseId !== 'all' ? selectedWarehouseId : undefined}
-        title="סריקת כלי (QR / OCR)"
       />
 
-      {/* OCR SCANNER 3: PROMINENT FIELD SCANNER & PASSPORT LOCK */}
-      <OcrScannerModal
-        isOpen={isQuickOcrOpen}
-        onClose={() => setIsQuickOcrOpen(false)}
-        onAssetDetected={(asset) => {
-          setIsQuickOcrOpen(false);
-          setPassportAsset(asset);
-          setIsPassportOpen(true);
+      {/* SITE STOREKEEPER: SITE TOOL REQUISITION REQUEST MODAL */}
+      <SiteToolRequestModal
+        isOpen={isSiteRequestModalOpen}
+        onClose={() => setIsSiteRequestModalOpen(false)}
+        requestingWarehouseId={selectedWarehouseId !== 'all' ? selectedWarehouseId : assignedWarehouseId}
+        onSuccess={async () => {
+          router.refresh();
+          await loadSiteStorekeeperData(selectedWarehouseId);
+          if (isChiefOperations || isGeneralManager) {
+            await loadChiefInbox();
+          }
         }}
-        warehouseId={selectedWarehouseId !== 'all' ? selectedWarehouseId : undefined}
-        title="סריקת כלי (QR / OCR)"
+      />
+
+      {/* CENTRAL MAINTENANCE: RETURN FROM REPAIR MODAL */}
+      <RepairReturnModal
+        asset={repairModalAsset}
+        isOpen={!!repairModalAsset}
+        onClose={() => setRepairModalAsset(null)}
+        warehouses={warehouses}
+        defaultWarehouseId={selectedWarehouseId !== 'all' ? selectedWarehouseId : undefined}
+        onSuccess={async () => {
+          router.refresh();
+          await loadMaintenanceAssets();
+          await handleWarehouseChange(selectedWarehouseId);
+        }}
+      />
+
+      {/* CENTRAL MAINTENANCE: SCRAP & RETIRE ASSET MODAL */}
+      <ScrapRetireModal
+        asset={retireModalAsset}
+        isOpen={!!retireModalAsset}
+        onClose={() => setRetireModalAsset(null)}
+        onSuccess={async () => {
+          router.refresh();
+          await loadMaintenanceAssets();
+          await handleWarehouseChange(selectedWarehouseId);
+        }}
       />
     </AppLayout>
   );
