@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import type { CatalogDataPayload } from '@/app/actions/assets';
+import { getCatalogData, type CatalogDataPayload } from '@/app/actions/assets';
 import { useAuth } from '@/context/AuthContext';
 import AppLayout from '@/components/layout/AppLayout';
 import AssetActionModal from '@/components/modules/AssetActionModal';
@@ -76,16 +76,52 @@ type StatusFilter = 'all' | 'available' | 'checked_out';
 
 export default function CatalogView({ initialData }: CatalogViewProps) {
   const router = useRouter();
-  const { role } = useAuth();
+  const { role, currentOrganization, user } = useAuth();
   const [assets, setAssets] = useState(initialData.assets);
+  const [warehouses, setWarehouses] = useState(initialData.warehouses);
+  const [categories, setCategories] = useState(initialData.categories);
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>(
     initialData.selectedWarehouseId || 'all'
   );
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
+  const recoveredOrgRef = useRef<string | null>(null);
 
   useEffect(() => {
     setAssets(initialData.assets);
-  }, [initialData.assets]);
+    setWarehouses(initialData.warehouses);
+    setCategories(initialData.categories);
+  }, [initialData.assets, initialData.warehouses, initialData.categories]);
+
+  // Recover catalog data when SSR ran before login (e.g. chief_operations logging in via AuthGate / PinPad)
+  useEffect(() => {
+    const activeOrgId = currentOrganization?.id || user?.organizationId;
+    if (
+      activeOrgId &&
+      activeOrgId !== 'platform-master-superadmin' &&
+      user?.id !== 'usr-worker' &&
+      assets.length === 0 &&
+      warehouses.length === 0 &&
+      recoveredOrgRef.current !== activeOrgId
+    ) {
+      recoveredOrgRef.current = activeOrgId;
+      void getCatalogData(selectedWarehouseId, activeOrgId)
+        .then((fresh) => {
+          if (fresh && (fresh.assets.length > 0 || fresh.warehouses.length > 0)) {
+            setAssets(fresh.assets);
+            setWarehouses(fresh.warehouses);
+            setCategories(fresh.categories);
+          }
+        })
+        .catch((err) => console.warn('[CatalogView] Recovery fetch failed:', err));
+    }
+  }, [
+    currentOrganization?.id,
+    user?.id,
+    user?.organizationId,
+    assets.length,
+    warehouses.length,
+    selectedWarehouseId,
+  ]);
 
   // Rapid debounced search input (100ms debounce)
   const [rawSearchQuery, setRawSearchQuery] = useState<string>('');
@@ -159,7 +195,7 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
 
   // 3. Compute dynamic category tool counts matching active warehouse & status filter
   const categoriesWithCount = useMemo(() => {
-    return initialData.categories.map((cat) => ({
+    return categories.map((cat) => ({
       ...cat,
       toolCount: statusFilteredAssets.filter(
         (a) =>
@@ -170,7 +206,7 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
           a.category_id === cat.id
       ).length,
     }));
-  }, [initialData.categories, statusFilteredAssets]);
+  }, [categories, statusFilteredAssets]);
 
   // Active category object if in drilldown view
   const activeCategory = useMemo(() => {
@@ -315,7 +351,7 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
               className="w-full min-h-[48px] bg-white text-blue-950 font-bold text-sm pr-10 pl-9 py-2.5 rounded-xl border-2 border-blue-200 focus:border-blue-600 focus:outline-none appearance-none cursor-pointer transition-colors shadow-sm"
             >
               <option value="all">כל המחסנים והאתרים הפעילים</option>
-              {initialData.warehouses.map((wh) => (
+              {warehouses.map((wh) => (
                 <option key={wh.id} value={wh.id}>
                   {wh.code ? `[${wh.code}] ` : ''}
                   {wh.name}
@@ -454,7 +490,7 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
                     className="w-full min-h-[46px] bg-slate-50 text-blue-950 font-bold text-xs pr-10 pl-8 py-2.5 rounded-xl border border-slate-200 focus:border-blue-600 focus:outline-none appearance-none"
                   >
                     <option value="all">כל המחסנים והאתרים הפעילים</option>
-                    {initialData.warehouses.map((wh) => (
+                    {warehouses.map((wh) => (
                       <option key={wh.id} value={wh.id}>
                         {wh.code ? `[${wh.code}] ` : ''}
                         {wh.name}
@@ -928,7 +964,7 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
       <AssetActionModal
         isOpen={isModalOpen}
         asset={selectedAsset}
-        warehouses={initialData.warehouses}
+        warehouses={warehouses}
         onClose={() => {
           setIsModalOpen(false);
           setSelectedAsset(null);

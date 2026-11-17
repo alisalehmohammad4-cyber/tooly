@@ -475,6 +475,8 @@ function AuthGateLoginForm({ requiredRole }: AuthGateLoginFormProps) {
 
         if (stillUnauthorized) {
           setLoginError('החשבון אומת בהצלחה, אך אינו בעל הרשאות גישה לעמוד זה.');
+        } else {
+          router.refresh();
         }
       }
     } catch (err: unknown) {

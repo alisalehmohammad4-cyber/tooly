@@ -4,6 +4,7 @@ import React, {
   createContext,
   useContext,
   useState,
+  useEffect,
   useCallback,
   useMemo,
   useRef,
@@ -515,6 +516,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [pinDialogMessage, setPinDialogMessage] = useState<string | undefined>();
   const pinSuccessCallbackRef = useRef<((authenticatedUser: AppUser) => void) | null>(null);
 
+  // Keep browser session cookies synchronized with active non-worker user
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!user || user.id === 'usr-worker') return;
+    const cookiesList = document.cookie.split(';').map((c) => c.trim());
+    const hasActiveUserCookie = cookiesList.some((c) => c.startsWith(`${STORAGE_KEY}=`));
+    const hasOrgCookie = cookiesList.some((c) => c.startsWith('tooly_org_id='));
+    const orgId = user.organizationId || user.organization_id;
+    const isSuper = isPlatformSuperAdmin(user);
+
+    if (!hasActiveUserCookie || (!isSuper && orgId && !hasOrgCookie)) {
+      persistUserToStorage(user);
+      void setActiveUserSessionAction(user).catch(() => {});
+    }
+  }, [user]);
+
   const openPinModal = useCallback(
     (
       onSuccess?: ((authenticatedUser: AppUser) => void) | unknown,
@@ -673,7 +690,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const result = await authenticateUserAction(username, pin);
         if (result.success && result.user) {
           persistUserToStorage(result.user);
-          void setActiveUserSessionAction(result.user).catch(() => {});
+          await setActiveUserSessionAction(result.user).catch(() => {});
           notifyAuthSubscribers();
           setIsPinModalOpen(false);
 

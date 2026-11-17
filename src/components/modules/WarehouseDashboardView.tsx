@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Building2,
@@ -302,6 +302,34 @@ export default function WarehouseDashboardView({
       return () => clearTimeout(timer);
     }
   }, [isStorekeeper, assignedWarehouseId, selectedWarehouseId, handleWarehouseChange]);
+
+  // Recover dashboard data when SSR ran before login (e.g. chief_operations logging in via AuthGate / PinPad)
+  const recoveredOrgRef = useRef<string | null>(null);
+  useEffect(() => {
+    const activeOrgId = currentOrganization?.id || user?.organizationId;
+    if (
+      activeOrgId &&
+      activeOrgId !== 'platform-master-superadmin' &&
+      user?.id !== 'usr-worker' &&
+      data.warehouses.length === 0 &&
+      !isLoadingWarehouse &&
+      recoveredOrgRef.current !== activeOrgId
+    ) {
+      recoveredOrgRef.current = activeOrgId;
+      const targetWh = isStorekeeper && assignedWarehouseId ? assignedWarehouseId : (selectedWarehouseId || 'all');
+      void handleWarehouseChange(targetWh, true);
+    }
+  }, [
+    currentOrganization?.id,
+    user?.id,
+    user?.organizationId,
+    data.warehouses.length,
+    isLoadingWarehouse,
+    isStorekeeper,
+    assignedWarehouseId,
+    selectedWarehouseId,
+    handleWarehouseChange,
+  ]);
 
   // Open Tool Passport Modal
   const handleOpenPassport = useCallback(

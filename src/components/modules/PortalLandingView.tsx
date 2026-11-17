@@ -90,8 +90,10 @@ export default function PortalLandingView({
           result.user.role === 'supervisor'
         ) {
           router.push('/dashboard/warehouse');
+          router.refresh();
         } else {
           router.push('/dashboard/manager');
+          router.refresh();
         }
       } else {
         setLoginError(result.error || 'פרטי התחברות שגויים');

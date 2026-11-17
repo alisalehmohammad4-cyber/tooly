@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { KeyRound, X, Delete, ShieldAlert, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 
@@ -11,13 +12,14 @@ export default function PinPadModal() {
 }
 
 function PinPadDialog() {
-  const { closePinModal, loginWithPin, switchToWorker, role, assignedWarehouseName, pinDialogMessage } = useAuth();
+  const router = useRouter();
+  const { closePinModal, login, loginWithPin, switchToWorker, role, assignedWarehouseName, pinDialogMessage } = useAuth();
   const [pin, setPin] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSuccess, setIsSuccess] = useState<boolean>(false);
 
   const handleDigit = useCallback(
-    (digit: string) => {
+    async (digit: string) => {
       if (pin.length >= 4) return;
       const nextPin = pin + digit;
       setPin(nextPin);
@@ -25,9 +27,13 @@ function PinPadDialog() {
 
       // Auto verify when 4 digits are reached
       if (nextPin.length === 4) {
-        const result = loginWithPin(nextPin);
+        let result: { success: boolean; error?: string } = await login(nextPin);
+        if (!result.success) {
+          result = loginWithPin(nextPin);
+        }
         if (result.success) {
           setIsSuccess(true);
+          router.refresh();
           setTimeout(() => {
             setIsSuccess(false);
             setPin('');
@@ -40,7 +46,7 @@ function PinPadDialog() {
         }
       }
     },
-    [pin, loginWithPin]
+    [pin, login, loginWithPin, router]
   );
 
   const handleDelete = useCallback(() => {

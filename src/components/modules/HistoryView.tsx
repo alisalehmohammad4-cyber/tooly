@@ -328,11 +328,12 @@ function renderActionBadge(action: AuditActionType) {
 }
 
 export default function HistoryView({ initialData }: HistoryViewProps) {
-  const { currentOrganization } = useAuth();
+  const { currentOrganization, user } = useAuth();
   const [historyData, setHistoryData] = useState<AuditHistoryPayload>(initialData);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [newMovementIds, setNewMovementIds] = useState<Set<string>>(new Set());
   const isRefreshingRef = React.useRef<boolean>(false);
+  const recoveredOrgRef = React.useRef<string | null>(null);
 
   // Sync state when initialData prop changes
   useEffect(() => {
@@ -348,7 +349,7 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
     }
 
     try {
-      const orgId = currentOrganization?.id || initialData.records[0]?.organizationId;
+      const orgId = currentOrganization?.id || user?.organizationId || initialData.records[0]?.organizationId;
       const latestPayload = await getAuditHistory(undefined, orgId);
 
       if (latestPayload && Array.isArray(latestPayload.records)) {
@@ -395,7 +396,30 @@ export default function HistoryView({ initialData }: HistoryViewProps) {
       isRefreshingRef.current = false;
       setIsRefreshing(false);
     }
-  }, [currentOrganization, initialData.records]);
+  }, [currentOrganization, user?.organizationId, initialData.records]);
+
+  // Immediate recovery when SSR ran before login (e.g. chief_operations logging in via AuthGate / PinPad)
+  useEffect(() => {
+    const activeOrgId = currentOrganization?.id || user?.organizationId;
+    if (
+      activeOrgId &&
+      activeOrgId !== 'platform-master-superadmin' &&
+      user?.id !== 'usr-worker' &&
+      historyData.records.length === 0 &&
+      historyData.warehouses.length === 0 &&
+      recoveredOrgRef.current !== activeOrgId
+    ) {
+      recoveredOrgRef.current = activeOrgId;
+      void refreshHistoryData();
+    }
+  }, [
+    currentOrganization?.id,
+    user?.id,
+    user?.organizationId,
+    historyData.records.length,
+    historyData.warehouses.length,
+    refreshHistoryData,
+  ]);
 
   // Setup Supabase Realtime subscription on custody_ledger table + 15s fallback auto-polling
   useEffect(() => {
