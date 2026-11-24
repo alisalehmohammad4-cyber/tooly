@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   X,
   QrCode,
@@ -185,7 +186,8 @@ function ToolPassportModalContent({
   onClose,
   onAssetUpdated,
 }: ToolPassportModalProps) {
-  const { role, user, openPinModal, currentOrganization, isAdmin } = useAuth();
+  const router = useRouter();
+  const { role, user, openPinModal, currentOrganization, isAdmin, isSupervisorOrAdmin } = useAuth();
   const { isWriting: isNfcWriting, writeNfcTag } = useWebNfc();
   const [nfcWriteStatus, setNfcWriteStatus] = useState<string | null>(null);
 
@@ -313,7 +315,7 @@ function ToolPassportModalContent({
     }
   };
 
-  const isSupervisorOrAdmin = role === 'supervisor' || role === 'admin';
+  // isSupervisorOrAdmin is resolved from AuthContext (true for any non-worker role)
 
   // Warranty status calculation
   let warrantyBadge = { label: 'ללא מידע', color: 'bg-slate-100 text-slate-700 border-slate-200' };
@@ -618,15 +620,35 @@ function ToolPassportModalContent({
                 variant="dropdown"
                 onStatusChanged={(newSt) => {
                   if (currentAsset) {
+                    const clearWorker =
+                      newSt === 'available' || newSt === 'maintenance' || newSt === 'retired';
+                    const nextCondition =
+                      newSt === 'retired'
+                        ? 'retired'
+                        : newSt === 'maintenance'
+                        ? 'needs_repair'
+                        : newSt === 'available' &&
+                          (currentAsset.condition === 'needs_repair' || currentAsset.condition === 'retired')
+                        ? 'good'
+                        : currentAsset.condition;
                     const updated: ScannedAssetDetails = {
                       ...currentAsset,
                       id: currentAsset.id || assetId,
                       status: newSt,
+                      condition: nextCondition,
+                      ...(clearWorker
+                        ? {
+                            currentAssignedWorker: null,
+                            current_assigned_worker: null,
+                            expectedReturnDate: null,
+                          }
+                        : {}),
                     };
                     setUpdatedAsset(updated);
                     if (onAssetUpdated) onAssetUpdated(updated);
                   }
                   void refreshTimeline();
+                  router.refresh();
                 }}
               />
             ) : (

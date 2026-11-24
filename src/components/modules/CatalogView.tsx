@@ -761,8 +761,32 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
                               currentStatus={asset.status}
                               variant="dropdown"
                               onStatusChanged={(newSt) => {
+                                const clearWorker =
+                                  newSt === 'available' || newSt === 'maintenance' || newSt === 'retired';
                                 setAssets((prev) =>
-                                  prev.map((a) => (a.id === asset.id ? { ...a, status: newSt } : a))
+                                  prev.map((a) =>
+                                    a.id === asset.id
+                                      ? {
+                                          ...a,
+                                          status: newSt,
+                                          condition:
+                                            newSt === 'retired'
+                                              ? 'retired'
+                                              : newSt === 'maintenance'
+                                              ? 'needs_repair'
+                                              : newSt === 'available' &&
+                                                (a.condition === 'needs_repair' || a.condition === 'retired')
+                                              ? 'good'
+                                              : a.condition,
+                                          ...(clearWorker
+                                            ? {
+                                                currentAssignedWorker: null,
+                                                current_assigned_worker: null,
+                                              }
+                                            : {}),
+                                        }
+                                      : a
+                                  )
                                 );
                                 router.refresh();
                               }}
@@ -979,6 +1003,7 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
                   ? {
                       ...a,
                       status: updatedAsset.status,
+                      condition: updatedAsset.condition,
                       currentWarehouseId: updatedAsset.currentWarehouseId,
                       current_warehouse_id: updatedAsset.currentWarehouseId,
                       warehouseId: updatedAsset.currentWarehouseId,
@@ -1015,6 +1040,7 @@ export default function CatalogView({ initialData }: CatalogViewProps) {
                   ? {
                       ...a,
                       status: updated.status,
+                      condition: updated.condition,
                       currentWarehouseId: updated.currentWarehouseId,
                       current_warehouse_id: updated.currentWarehouseId,
                       warehouseId: updated.currentWarehouseId,

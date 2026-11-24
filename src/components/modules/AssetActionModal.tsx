@@ -491,6 +491,9 @@ export default function AssetActionModal({
         ...asset,
         status: 'maintenance',
         condition: 'needs_repair',
+        currentAssignedWorker: null,
+        current_assigned_worker: null,
+        expectedReturnDate: null,
       };
       await cacheAsset(updatedAsset);
       onActionComplete(res.message || 'הכלי הועבר בהצלחה לתחזוקה/תיקון', updatedAsset);
@@ -736,10 +739,30 @@ export default function AssetActionModal({
                     currentStatus={asset.status}
                     variant="dropdown"
                     onStatusChanged={(newSt) => {
+                      const clearWorker =
+                        newSt === 'available' || newSt === 'maintenance' || newSt === 'retired';
+                      const nextCondition =
+                        newSt === 'retired'
+                          ? 'retired'
+                          : newSt === 'maintenance'
+                          ? 'needs_repair'
+                          : newSt === 'available' &&
+                            (asset.condition === 'needs_repair' || asset.condition === 'retired')
+                          ? 'good'
+                          : asset.condition;
                       const updated: ScannedAssetDetails = {
                         ...asset,
                         status: newSt as ScannedAssetDetails['status'],
+                        condition: nextCondition,
+                        ...(clearWorker
+                          ? {
+                              currentAssignedWorker: null,
+                              current_assigned_worker: null,
+                              expectedReturnDate: null,
+                            }
+                          : {}),
                       };
+                      void cacheAsset(updated).catch(() => {});
                       onActionComplete(`סטטוס הכלי עודכן בהצלחה ל-${newSt}`, updated);
                       router.refresh();
                     }}

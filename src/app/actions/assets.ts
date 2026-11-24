@@ -7,6 +7,7 @@ import type { AssetReservation, AssetStatus } from '@/types/domain';
 import { appendAuditHistoryEntry } from '@/app/actions/history';
 import { getServerSessionOrgId, getServerSessionUser } from '@/lib/auth/session';
 import { clearDashboardCaches } from '@/app/actions/dashboard';
+import { normalizeAssetStatus } from '@/lib/assets/status';
 import {
   getMockWarehouses,
   getMockCategories,
@@ -783,6 +784,8 @@ export async function updateAssetStatusAction(
     return { success: false, error: `סטטוס לא חוקי: ${newStatus}` };
   }
 
+  const canonicalStatus = normalizeAssetStatus(newStatus);
+
   const orgId = await resolveActiveOrganizationId();
   if (!orgId || orgId === 'platform-master-superadmin') {
     return { success: false, error: 'לא נמצא מזהה ארגון מורשה' };
@@ -792,51 +795,76 @@ export async function updateAssetStatusAction(
   const now = new Date().toISOString();
 
   const updateData: Record<string, unknown> = {
-    status: newStatus,
+    status: canonicalStatus,
     updated_at: now,
   };
 
-  if (newStatus === 'available' || newStatus === 'in_stock') {
+  if (
+    canonicalStatus === 'available' ||
+    canonicalStatus === 'maintenance' ||
+    canonicalStatus === 'retired'
+  ) {
     updateData.current_assigned_worker = null;
+    updateData.expected_return_date = null;
   }
-  if (newStatus === 'retired') {
+  if (canonicalStatus === 'retired') {
     updateData.condition = 'retired';
-  } else if (newStatus === 'maintenance') {
+  } else if (canonicalStatus === 'maintenance') {
     updateData.condition = 'needs_repair';
   }
 
-  if (isSupabaseConfigured() && orgId) {
+  if (isSupabaseConfigured()) {
     try {
-      const updateQuery = supabaseAdmin
+      // Read current version & condition strictly within organization scope
+      const { data: existingRow, error: fetchErr } = await supabaseAdmin
         .from('assets')
-        .update({
-          ...updateData,
-          organization_id: orgId,
-        })
-        .eq('id', assetId);
+        .select('id, status, condition, version, current_warehouse_id')
+        .eq('id', assetId)
+        .eq('organization_id', orgId)
+        .maybeSingle();
 
-      if (orgId) {
-        updateQuery.eq('organization_id', orgId);
+      if (fetchErr) {
+        console.error('[updateAssetStatusAction] Fetch asset DB Error:', fetchErr);
+        return { success: false, error: `שגיאה באיתור כלי: ${fetchErr.message}` };
       }
 
-      const { data: updatedRows, error: updateErr } = await updateQuery.select();
+      if (!existingRow) {
+        console.error('[updateAssetStatusAction] Asset not found or tenant mismatch:', assetId, orgId);
+        return { success: false, error: 'העדכון נכשל: הכלי לא נמצא או שנחסם עקב הרשאות (0 שורות עודכנו).' };
+      }
+
+      if (
+        canonicalStatus === 'available' &&
+        (existingRow.condition === 'needs_repair' || existingRow.condition === 'retired' || !existingRow.condition)
+      ) {
+        updateData.condition = 'good';
+      }
+
+      updateData.version = ((existingRow.version as number) || 1) + 1;
+
+      const { data: updatedRows, error: updateErr } = await supabaseAdmin
+        .from('assets')
+        .update(updateData)
+        .eq('id', assetId)
+        .eq('organization_id', orgId)
+        .select();
 
       if (updateErr) {
-        console.error('Update Asset Status DB Error:', updateErr);
+        console.error('[updateAssetStatusAction] Update Asset Status DB Error:', updateErr);
         return { success: false, error: `שגיאה בעדכון סטטוס כלי: ${updateErr.message}` };
       }
 
       if (!updatedRows || updatedRows.length === 0) {
-        console.error("Zero rows updated for asset:", assetId);
-        return { success: false, error: "העדכון נכשל: הכלי לא נמצא או שנחסם עקב הרשאות (0 שורות עודכנו)." };
+        console.error('[updateAssetStatusAction] Zero rows updated for asset:', assetId);
+        return { success: false, error: 'העדכון נכשל: הכלי לא נמצא או שנחסם עקב הרשאות (0 שורות עודכנו).' };
       }
 
       const actionType =
-        newStatus === 'retired'
+        canonicalStatus === 'retired'
           ? 'RETIRE'
-          : newStatus === 'maintenance'
+          : canonicalStatus === 'maintenance'
           ? 'MAINTENANCE'
-          : newStatus === 'available' || newStatus === 'in_stock'
+          : canonicalStatus === 'available'
           ? 'CHECKIN'
           : 'STATUS_CHANGE';
 
@@ -860,40 +888,50 @@ export async function updateAssetStatusAction(
         from_warehouse_id: targetWarehouseId,
         performed_by: performedBy,
         condition_at_return: (updatedRows[0] as { condition?: string | null } | undefined)?.condition || null,
-        notes: reason || `שינוי סטטוס כלי ישיר ל-${newStatus}`,
+        notes: reason || `שינוי סטטוס כלי ישיר ל-${canonicalStatus}`,
         created_at: now,
       });
 
       if (ledgerErr) {
-        console.error('LEDGER INSERT FAILED:', ledgerErr);
+        console.error('[updateAssetStatusAction] LEDGER INSERT FAILED:', ledgerErr);
         return { success: false, error: 'שגיאה ברישום ביומן התנועות: ' + ledgerErr.message };
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Database error';
+      console.error('[updateAssetStatusAction] Unexpected exception:', err);
       return { success: false, error: msg };
     }
+  } else {
+    // Offline / unconfigured mock store only
+    mutateMockAsset(
+      assetId,
+      {
+        status: canonicalStatus as AssetStatus,
+        ...(canonicalStatus === 'available' || canonicalStatus === 'maintenance' || canonicalStatus === 'retired'
+          ? { currentAssignedWorker: null, expectedReturnDate: null }
+          : {}),
+        ...(canonicalStatus === 'retired' ? { condition: 'retired' } : {}),
+        ...(canonicalStatus === 'maintenance' ? { condition: 'needs_repair' } : {}),
+      },
+      {
+        action:
+          canonicalStatus === 'retired'
+            ? 'RETIRE'
+            : canonicalStatus === 'maintenance'
+            ? 'MAINTENANCE_FLAG'
+            : 'CHECKIN',
+        performedBy,
+        notes: reason || `שינוי סטטוס כלי ישיר ל-${canonicalStatus}`,
+      }
+    );
   }
 
-  // Synchronize mock store
-  mutateMockAsset(
-    assetId,
-    {
-      status: newStatus as AssetStatus,
-      ...(newStatus === 'available' ? { currentAssignedWorker: null } : {}),
-      ...(newStatus === 'retired' ? { condition: 'retired' } : {}),
-      ...(newStatus === 'maintenance' ? { condition: 'needs_repair' } : {}),
-    },
-    {
-      action: newStatus === 'retired' ? 'RETIRE' : newStatus === 'maintenance' ? 'MAINTENANCE_FLAG' : 'CHECKIN',
-      performedBy,
-      notes: reason || `שינוי סטטוס כלי ישיר ל-${newStatus}`,
-    }
-  );
-
   try {
+    await invalidateCatalogCache();
     await clearDashboardCaches();
     revalidatePath('/catalog');
     revalidatePath('/dashboard/warehouse');
+    revalidatePath('/dashboard/chief');
     revalidatePath('/dashboard/manager');
     revalidatePath('/history');
   } catch (e) {
@@ -901,20 +939,20 @@ export async function updateAssetStatusAction(
   }
 
   const statusLabel =
-    newStatus === 'available'
+    canonicalStatus === 'available'
       ? 'זמין במלאי'
-      : newStatus === 'checked_out'
+      : canonicalStatus === 'checked_out'
       ? 'בשימוש עובד'
-      : newStatus === 'maintenance'
+      : canonicalStatus === 'maintenance'
       ? 'בתיקון / אחזקה'
-      : newStatus === 'retired'
+      : canonicalStatus === 'retired'
       ? 'מושבת / גריטה'
-      : newStatus;
+      : canonicalStatus;
 
   return {
     success: true,
     message: `סטטוס הכלי עודכן בהצלחה ל-${statusLabel}`,
-    newStatus,
+    newStatus: canonicalStatus,
   };
 }
 

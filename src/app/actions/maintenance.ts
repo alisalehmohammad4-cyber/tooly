@@ -147,7 +147,16 @@ export async function getInTransitFleetAction(
 
       const { data: assetRows, error: assetErr } = await assetQuery.order('updated_at', { ascending: false });
 
-      if (!assetErr && assetRows && assetRows.length > 0) {
+      if (assetErr) {
+        console.error('[getInTransitFleetAction] Supabase query error:', assetErr);
+        return [];
+      }
+
+      if (!assetRows || assetRows.length === 0) {
+        return [];
+      }
+
+      if (assetRows.length > 0) {
         const typedAssetRows = assetRows as Array<Record<string, unknown> & {
           id: string;
           qr_code?: string;
@@ -266,7 +275,8 @@ export async function getInTransitFleetAction(
         });
       }
     } catch (err) {
-      console.warn('[getInTransitFleetAction] Supabase query error:', err);
+      console.error('[getInTransitFleetAction] Supabase query exception:', err);
+      return [];
     }
   }
 
@@ -418,7 +428,16 @@ export async function getMaintenanceAssetsAction(
 
       const { data: assetRows, error: assetErr } = await assetQuery.order('updated_at', { ascending: false });
 
-      if (!assetErr && assetRows && assetRows.length > 0) {
+      if (assetErr) {
+        console.error('[getMaintenanceAssetsAction] Supabase query error:', assetErr);
+        return [];
+      }
+
+      if (!assetRows || assetRows.length === 0) {
+        return [];
+      }
+
+      if (assetRows.length > 0) {
         const typedAssetRows = assetRows as Array<Record<string, unknown> & {
           id: string;
           qr_code?: string;
@@ -495,7 +514,8 @@ export async function getMaintenanceAssetsAction(
         });
       }
     } catch (err) {
-      console.warn('[getMaintenanceAssetsAction] Supabase query error:', err);
+      console.error('[getMaintenanceAssetsAction] Supabase query exception:', err);
+      return [];
     }
   }
 

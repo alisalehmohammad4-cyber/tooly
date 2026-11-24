@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Loader2, CheckCircle2, UserCheck, AlertTriangle, Trash2, ChevronDown } from 'lucide-react';
 import { updateAssetStatusAction } from '@/app/actions/assets';
 import { useRouter } from 'next/navigation';
@@ -81,10 +81,15 @@ export default function StatusSwitcher({
   const [isUpdating, setIsUpdating] = useState<boolean>(false);
   const [isOpen, setIsOpen] = useState<boolean>(false);
 
-  const activeOption = STATUS_OPTIONS.find((opt) => opt.value === normalizeAssetStatus(status)) || STATUS_OPTIONS[0];
+  useEffect(() => {
+    setStatus(currentStatus);
+  }, [currentStatus]);
+
+  const normalizedStatus = normalizeAssetStatus(status);
+  const activeOption = STATUS_OPTIONS.find((opt) => opt.value === normalizedStatus) || STATUS_OPTIONS[0];
 
   const handleSelectStatus = async (newStatus: AssetStatus) => {
-    if (newStatus === status || isUpdating || disabled) return;
+    if (normalizeAssetStatus(newStatus) === normalizedStatus || isUpdating || disabled) return;
 
     if (newStatus === 'retired') {
       const confirmRetire = window.confirm(
@@ -103,9 +108,10 @@ export default function StatusSwitcher({
         return;
       }
 
-      setStatus(newStatus);
+      const resolvedStatus = normalizeAssetStatus(res.newStatus || newStatus);
+      setStatus(resolvedStatus);
       if (onStatusChanged) {
-        onStatusChanged(newStatus);
+        onStatusChanged(resolvedStatus);
       }
       router.refresh();
     } catch (err: unknown) {
@@ -121,7 +127,7 @@ export default function StatusSwitcher({
     return (
       <div className={`flex flex-wrap items-center gap-1.5 ${className}`}>
         {STATUS_OPTIONS.map((opt) => {
-          const isSelected = opt.value === status;
+          const isSelected = opt.value === normalizedStatus;
           const Icon = opt.icon;
           return (
             <button
@@ -178,7 +184,7 @@ export default function StatusSwitcher({
               שינוי סטטוס כלי ישיר:
             </div>
             {STATUS_OPTIONS.map((opt) => {
-              const isSelected = opt.value === status;
+              const isSelected = opt.value === normalizedStatus;
               const Icon = opt.icon;
               return (
                 <button

@@ -22,6 +22,7 @@ import ManualCheckinModal from '@/components/modules/ManualCheckinModal';
 import ChiefNotesFeedView from '@/components/modules/ChiefNotesFeedView';
 import { useAuth } from '@/context/AuthContext';
 import { normalizeFieldTag } from '@/lib/ocr/tagParser';
+import { normalizeAssetStatus } from '@/lib/assets/status';
 import {
   getAssetDetailsByQr,
   type ScannedAssetDetails,
@@ -1070,6 +1071,28 @@ export default function WarehouseDashboardView({
         }}
         onAssetUpdated={(updated) => {
           setPassportAsset(updated);
+          if (updated) {
+            const newSt = normalizeAssetStatus(updated.status);
+            setData((prev) => ({
+              ...prev,
+              activeLoans:
+                newSt === 'checked_out'
+                  ? prev.activeLoans
+                  : (prev.activeLoans || []).filter((l) => l.assetId !== updated.id),
+              returnsDueToday:
+                newSt === 'checked_out'
+                  ? prev.returnsDueToday
+                  : (prev.returnsDueToday || []).filter((r) => r.assetId !== updated.id),
+              overdueAssets:
+                newSt === 'checked_out'
+                  ? prev.overdueAssets
+                  : (prev.overdueAssets || []).filter((o) => o.assetId !== updated.id),
+            }));
+          }
+          router.refresh();
+          void handleWarehouseChange(selectedWarehouseId, true);
+          void loadMaintenanceAssets();
+          void loadInTransitFleet();
         }}
       />
 

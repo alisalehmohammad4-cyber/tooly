@@ -173,6 +173,12 @@ export async function clearDashboardCaches(): Promise<void> {
   } catch {
     // Ignore potential circular reference in build scripts
   }
+  try {
+    const { invalidateCatalogCache } = await import('@/app/actions/assets');
+    await invalidateCatalogCache();
+  } catch {
+    // Ignore potential circular reference in build scripts
+  }
 }
 
 import { getServerSessionOrgId } from '@/lib/auth/session';
