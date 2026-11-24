@@ -26,7 +26,7 @@ import {
 
 export const DEFAULT_ORGANIZATION: Organization = {
   id: '00000000-0000-0000-0000-000000000001',
-  name: 'סאמי זעתות',
+  name: 'Sami Zatout Group',
   slug: 'zatout',
   serialPrefix: 'ZR-',
   defaultCurrency: 'ILS',

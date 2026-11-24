@@ -775,7 +775,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       : user.organizationId && user.organizationId !== 'platform-master-superadmin'
         ? getMockOrganizationById(user.organizationId) || {
             id: user.organizationId,
-            name: user.fullName?.includes('זעתות') ? 'סאמי זעתות' : 'חברה',
+            name: user.fullName?.includes('זעתות') ? 'Sami Zatout Group' : 'חברה',
             slug: user.organizationId,
             serialPrefix: 'TOOL-',
             defaultCurrency: 'ILS',
