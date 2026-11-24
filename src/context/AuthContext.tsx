@@ -17,7 +17,7 @@ import {
   setActiveUserSessionAction,
   clearActiveUserSessionAction,
 } from '@/app/actions/users';
-import { DEFAULT_ORGANIZATION, getMockOrganizationById } from '@/lib/mockStore';
+import { DEFAULT_ORGANIZATION, getFallbackOrganizationById } from '@/lib/auth/orgDefaults';
 import { isPlatformSuperAdmin } from '@/lib/auth/superadmin';
 
 export const DEFAULT_WORKER_USER: AppUser = {
@@ -601,7 +601,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           };
         }
 
-        const org = getMockOrganizationById(matchedUser.organizationId || '');
+        const org = getFallbackOrganizationById(matchedUser.organizationId || '');
         if (org?.status === 'pending_approval') {
           return {
             success: false,
@@ -773,7 +773,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           status: 'active',
         }
       : user.organizationId && user.organizationId !== 'platform-master-superadmin'
-        ? getMockOrganizationById(user.organizationId) || {
+        ? getFallbackOrganizationById(user.organizationId) || {
             id: user.organizationId,
             name: user.fullName?.includes('זעתות') ? 'Sami Zatout Group' : 'חברה',
             slug: user.organizationId,
